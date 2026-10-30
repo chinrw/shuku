@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { search, type ArchiveItem } from '#lib/api.ts';
+	import { search, suggestTags, type ArchiveItem, type TagCount } from '#lib/api.ts';
 	import Icon from '#lib/Icon.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { tagRows } from '#lib/tags.ts';
+	import { addTerm, completeTerm, lastTerm } from '#lib/query.ts';
+	import { namespaceClass, tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
 
 	let { data } = $props();
@@ -37,7 +38,78 @@
 
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
-		navigate(query.trim(), data.sort);
+		closeSuggestions();
+		// 补全会在末尾留一个逗号，提交时去掉，地址栏和状态行里不显示。
+		navigate(query.trim().replace(/,$/, '').trimEnd(), data.sort);
+	}
+
+	// 搜索框补全：停止输入一小会儿后按最后一个词条查标签，新请求发出时取消旧请求。
+	const SUGGEST_DELAY = 120;
+	let suggestions = $state<TagCount[]>([]);
+	let active = $state(-1);
+	let suggestTimer: ReturnType<typeof setTimeout> | undefined;
+	let suggestAbort: AbortController | undefined;
+
+	function closeSuggestions() {
+		clearTimeout(suggestTimer);
+		suggestAbort?.abort();
+		suggestions = [];
+		active = -1;
+	}
+
+	function onInput() {
+		closeSuggestions();
+		const term = lastTerm(query);
+		if (term.done || term.text === '') return;
+		const abort = new AbortController();
+		suggestAbort = abort;
+		suggestTimer = setTimeout(async () => {
+			try {
+				suggestions = await suggestTags(term.text, abort.signal);
+			} catch (error) {
+				// 补全失败不影响搜索本身，被新输入取消的请求也走这里。
+				if (!abort.signal.aborted) console.warn('标签补全失败', error);
+			}
+		}, SUGGEST_DELAY);
+	}
+
+	function pick(tag: string) {
+		query = completeTerm(query, tag);
+		closeSuggestions();
+	}
+
+	function onKeydown(event: KeyboardEvent) {
+		if (suggestions.length === 0) return;
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			event.preventDefault();
+			// -1 表示没有选中，上下键在“没有选中”和各个候选之间循环。
+			const slots = suggestions.length + 1;
+			const step = event.key === 'ArrowDown' ? 1 : -1;
+			active = ((active + 1 + step + slots) % slots) - 1;
+		} else if (event.key === 'Enter' && active >= 0) {
+			event.preventDefault();
+			pick(suggestions[active].tag);
+		} else if (event.key === 'Escape') {
+			closeSuggestions();
+		}
+	}
+
+	// 和整个结果都带的标签（比如搜索条件本身）点了也不会缩小范围，不列出来。
+	let narrowing = $derived(
+		(data.facets ?? []).filter((facet) => facet.count < (data.result?.total ?? 0))
+	);
+
+	function facetHref(tag: string) {
+		const params = new URLSearchParams({ q: addTerm(data.q, tag) });
+		if (data.sort !== 'title') params.set('sort', data.sort);
+		return `/?${params}`;
+	}
+
+	function splitTag(tag: string) {
+		const colon = tag.indexOf(':');
+		return colon < 0
+			? { namespace: '', value: tag }
+			: { namespace: tag.slice(0, colon), value: tag.slice(colon + 1) };
 	}
 
 	function toggleView() {
@@ -119,12 +191,45 @@
 		<input
 			type="search"
 			bind:value={query}
+			oninput={onInput}
+			onkeydown={onKeydown}
+			onblur={closeSuggestions}
 			placeholder="标题或标签，如 artist:名字，-排除"
 			enterkeyhint="search"
 			autocapitalize="off"
 			autocomplete="off"
 			spellcheck="false"
+			role="combobox"
+			aria-autocomplete="list"
+			aria-controls="tag-suggestions"
+			aria-expanded={suggestions.length > 0}
+			aria-activedescendant={active >= 0 ? `suggestion-${active}` : undefined}
 		/>
+		{#if suggestions.length > 0}
+			<ul id="tag-suggestions" class="suggestions" role="listbox">
+				{#each suggestions as suggestion, index (suggestion.tag)}
+					{@const tag = splitTag(suggestion.tag)}
+					<!-- 用 pointerdown 而不是 click：输入框失焦会先关掉列表。 -->
+					<li
+						id="suggestion-{index}"
+						role="option"
+						aria-selected={index === active}
+						class:active={index === active}
+						onpointerdown={(event) => {
+							event.preventDefault();
+							pick(suggestion.tag);
+						}}
+					>
+						<span>
+							{#if tag.namespace}<span class="ns {namespaceClass(tag.namespace)}"
+									>{tag.namespace}:</span
+								>{/if}{tag.value}
+						</span>
+						<span class="count">{suggestion.count}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</form>
 	<div class="controls">
 		<select
@@ -152,6 +257,17 @@
 		共 {data.result.total} 本{#if data.q}，搜索“{data.q}”{/if}
 		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
 	</p>
+	{#if narrowing.length > 0}
+		<nav class="facets" aria-label="结果里常见的标签">
+			{#each narrowing as facet (facet.tag)}
+				{@const tag = splitTag(facet.tag)}
+				<a href={facetHref(facet.tag)} title={facet.tag}>
+					<span class={namespaceClass(tag.namespace)}>{tag.value}</span>
+					<span class="count">{facet.count}</span>
+				</a>
+			{/each}
+		</nav>
+	{/if}
 {/if}
 
 {#if prefs.view === 'grid'}
@@ -267,6 +383,7 @@
 	}
 
 	form {
+		position: relative;
 		flex: 1;
 		display: flex;
 		align-items: center;
@@ -310,6 +427,82 @@
 			order: 3;
 			flex-basis: 100%;
 			max-width: none;
+		}
+	}
+
+	.suggestions {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		right: 0;
+		z-index: 3;
+		margin: 0;
+		padding: 0.25rem 0;
+		list-style: none;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--raised);
+		box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+		color: var(--fg);
+	}
+
+	.suggestions li {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.35rem 0.7rem;
+		cursor: pointer;
+		overflow-wrap: anywhere;
+	}
+
+	.suggestions li.active,
+	.suggestions li:hover {
+		background: var(--chip);
+	}
+
+	.suggestions .ns:not([class*='ns-']) {
+		color: var(--muted);
+	}
+
+	.count {
+		flex: none;
+		color: var(--faint);
+		font-size: 0.8rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* 一行横向滚动，不把书挤到下面去。 */
+	.facets {
+		display: flex;
+		gap: 0.35rem;
+		margin: 0.5rem 0 0;
+		padding: 0 1rem 0.2rem;
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+
+	.facets a {
+		flex: none;
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.35rem;
+		padding: 0.1rem 0.5rem;
+		border: 1px solid var(--chip-border);
+		border-radius: 5px;
+		background: var(--chip);
+		font-size: 0.8rem;
+		text-decoration: none;
+	}
+
+	.facets a:hover {
+		color: var(--link);
+	}
+
+	@media (min-width: 1024px) {
+		.facets {
+			max-width: 1600px;
+			margin: 0.5rem auto 0;
+			padding: 0 1.25rem 0.2rem;
 		}
 	}
 

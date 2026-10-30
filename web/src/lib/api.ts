@@ -43,6 +43,12 @@ export interface PageInfo {
 
 export type Sort = 'title' | 'date';
 
+/** `tag` 是小写的完整标签名，例如 `artist:某某`。 */
+export interface TagCount {
+	tag: string;
+	count: number;
+}
+
 export class ApiError extends Error {
 	constructor(
 		readonly status: number,
@@ -72,6 +78,16 @@ export function search(
 	if (params.after !== undefined) query.set('after', String(params.after));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	return request(fetch, `/api/search?${query}`);
+}
+
+export async function facets(fetch: Fetch, q: string): Promise<TagCount[]> {
+	const query = new URLSearchParams({ q });
+	return (await request<{ tags: TagCount[] }>(fetch, `/api/facets?${query}`)).tags;
+}
+
+export async function suggestTags(prefix: string, signal: AbortSignal): Promise<TagCount[]> {
+	const query = new URLSearchParams({ prefix });
+	return (await request<{ tags: TagCount[] }>(fetch, `/api/tags?${query}`, { signal })).tags;
 }
 
 export function archive(fetch: Fetch, id: number): Promise<ArchiveDetail> {
