@@ -234,3 +234,45 @@ fn numeric_field_names_do_not_block_ordinary_tag_terms() {
         );
     }
 }
+
+#[test]
+fn backslash_makes_the_next_character_literal() {
+    let tag = |text: &str| Term::Tag(text.into());
+    let prefix = |text: &str| Term::TagPrefix(text.into());
+    let cases = [
+        (r#""artist:foo\_bar""#, vec![tag("artist:foo_bar")], vec![]),
+        (r#""artist:foo\?bar""#, vec![tag("artist:foo?bar")], vec![]),
+        (r#""artist:foo\*bar""#, vec![tag("artist:foo*bar")], vec![]),
+        (r#""artist:foo\%bar""#, vec![tag("artist:foo%bar")], vec![]),
+        (r#""artist:foo\*""#, vec![tag("artist:foo*")], vec![]),
+        (r"artist:foo\*", vec![prefix("artist:foo*")], vec![]),
+        (r"artist:foo\$", vec![prefix("artist:foo$")], vec![]),
+        (r#"-"artist:foo\_bar""#, vec![], vec![tag("artist:foo_bar")]),
+        (r"a\,b", vec![either("a,b")], vec![]),
+        (
+            r#""title:say \"hi\"""#,
+            vec![tag(r#"title:say "hi""#)],
+            vec![],
+        ),
+        (r"a\\b", vec![either(r"a\b")], vec![]),
+        (r"trail\", vec![either(r"trail\")], vec![]),
+        (r"\-rain", vec![either("-rain")], vec![]),
+        (r#"\"artist:a\""#, vec![prefix(r#""artist:a""#)], vec![]),
+        (
+            r#""artist:foo\_bar", -"group:x\,y""#,
+            vec![tag("artist:foo_bar")],
+            vec![tag("group:x,y")],
+        ),
+    ];
+    for (input, include, exclude) in cases {
+        let expected = ParsedQuery {
+            query: Query {
+                include,
+                exclude,
+                ..Query::default()
+            },
+            degraded: false,
+        };
+        assert_eq!(parse_query(input), Ok(expected), "{input:?}");
+    }
+}

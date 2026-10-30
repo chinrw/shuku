@@ -10,8 +10,13 @@ describe('tagTerm', () => {
 		expect(tagTerm('', '独立')).toBe('"独立"');
 	});
 
-	it('falls back to the $ marker when the value contains a quote', () => {
-		expect(tagTerm('title', 'say "hi"')).toBe('title:say "hi"$');
+	it('escapes quotes inside the quoted term', () => {
+		expect(tagTerm('title', 'say "hi"')).toBe('"title:say \\"hi\\""');
+	});
+
+	it('escapes wildcard characters and backslashes so the tag matches literally', () => {
+		expect(tagTerm('artist', 'foo_bar')).toBe('"artist:foo\\_bar"');
+		expect(tagTerm('', 'a*b%c?d\\e')).toBe('"a\\*b\\%c\\?d\\\\e"');
 	});
 });
 
@@ -34,6 +39,21 @@ describe('lastTerm', () => {
 		expect(lastTerm('artist:b$').done).toBe(true);
 		expect(lastTerm('"').done).toBe(false);
 	});
+
+	it('treats escaped quotes, commas and markers as plain characters', () => {
+		expect(lastTerm('"artist:a\\", b')).toEqual({
+			head: '',
+			text: 'artist:a", b',
+			excluded: false,
+			done: false
+		});
+		expect(lastTerm('a\\,b')).toEqual({ head: '', text: 'a,b', excluded: false, done: false });
+		expect(lastTerm('"artist:foo\\_"').done).toBe(true);
+		expect(lastTerm('"artist:foo\\_').text).toBe('artist:foo_');
+		expect(lastTerm('artist:b\\$').done).toBe(false);
+		expect(lastTerm('"artist:b\\"').done).toBe(false);
+		expect(lastTerm('"artist:b\\\\"').done).toBe(true);
+	});
 });
 
 describe('completeTerm', () => {
@@ -45,6 +65,12 @@ describe('completeTerm', () => {
 
 	it('completes the first term', () => {
 		expect(completeTerm('alp', 'artist:alpha')).toBe('"artist:alpha", ');
+	});
+
+	it('escapes the picked tag so the completed term is done and round-trips', () => {
+		const completed = completeTerm('foo', 'artist:foo_bar');
+		expect(completed).toBe('"artist:foo\\_bar", ');
+		expect(lastTerm(completed.trimEnd().replace(/,$/, '')).done).toBe(true);
 	});
 });
 

@@ -282,3 +282,44 @@ async fn facets_and_tag_suggestions_count_archives_per_tag() {
         assert!(serde_json::from_slice::<Value>(&bytes).unwrap()["error"].is_string());
     }
 }
+
+#[tokio::test]
+async fn escaped_wildcards_match_tags_literally_in_search() {
+    let fixture = Fixture::new();
+    for name in ["a.cbz", "b.cbz"] {
+        fixture.archive(name, 10, 20);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let mut store = Store::open(fixture.database()).unwrap();
+    for (path, value) in [("a.cbz", "foo_bar"), ("b.cbz", "fooxbar")] {
+        let id = store.find_by_path(path).unwrap().unwrap();
+        store
+            .replace_tags(
+                id,
+                &[Tag {
+                    namespace: "artist".into(),
+                    value: value.into(),
+                }],
+            )
+            .unwrap();
+    }
+    let underscore = store.find_by_path("a.cbz").unwrap().unwrap();
+    app.scan().await.unwrap();
+    let router = app.router();
+
+    // 网页端点击标签时发出 `"artist:foo\_bar"`，反斜杠和引号都经过 URL 编码。
+    let included = json(&router, "/api/search?q=%22artist%3Afoo%5C_bar%22").await;
+    assert_eq!(included["total"], 1);
+    assert_eq!(included["degraded"], false);
+    assert_eq!(included["items"][0]["id"], underscore);
+
+    let excluded = json(&router, "/api/search?q=-%22artist%3Afoo%5C_bar%22").await;
+    assert_eq!(excluded["total"], 1);
+    assert_ne!(excluded["items"][0]["id"], underscore);
+
+    // 不转义时 `_` 仍是通配符，两本都会匹配并标记降级。
+    let degraded = json(&router, "/api/search?q=%22artist%3Afoo_bar%22").await;
+    assert_eq!(degraded["total"], 2);
+    assert_eq!(degraded["degraded"], true);
+}
