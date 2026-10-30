@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
 	import { tagTerm } from '#lib/query.ts';
+	import { httpUrl } from '#lib/url.ts';
 
 	let { data } = $props();
 	let book = $derived(data.archive);
 	let resumePage = $derived(book.progress?.page ?? 0);
+	let sourceLink = $derived(book.source_url === null ? null : httpUrl(book.source_url));
 
 	// 从书库点进来时用浏览器返回，书库的快照和滚动位置才会恢复。
 	let fromLibrary = false;
@@ -64,8 +66,10 @@
 		{#if book.summary}
 			<p class="summary">{book.summary}</p>
 		{/if}
-		{#if book.source_url}
-			<p class="meta"><a href={book.source_url} target="_blank" rel="noreferrer">来源</a></p>
+		{#if sourceLink}
+			<p class="meta"><a href={sourceLink} target="_blank" rel="noreferrer">来源</a></p>
+		{:else if book.source_url}
+			<p class="meta">来源：{book.source_url}</p>
 		{/if}
 	</section>
 </main>
