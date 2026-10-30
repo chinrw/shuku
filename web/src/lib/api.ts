@@ -12,6 +12,7 @@ export interface ArchiveItem {
 	is_new: boolean;
 	progress: Progress | null;
 	cover_url: string;
+	tags: TagGroup[];
 }
 
 export interface SearchResult {
@@ -31,7 +32,6 @@ export interface ArchiveDetail extends ArchiveItem {
 	date_added: number;
 	source_url: string | null;
 	file_size: number;
-	tags: TagGroup[];
 }
 
 export interface PageInfo {

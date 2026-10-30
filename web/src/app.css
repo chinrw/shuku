@@ -1,25 +1,41 @@
+/* 深色配色取自 LRR 的 modern 主题，命名空间颜色与 LRR 一致。 */
 :root {
-	--bg: #fafafa;
-	--fg: #1c1c1e;
-	--muted: #6e6e73;
-	--card: #ffffff;
-	--border: #e0e0e3;
-	--accent: #c2410c;
-	--danger: #b91c1c;
-	font-family: system-ui, -apple-system, 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
+	--bg: #34353b;
+	--surface: #43464e;
+	--chip: #4f535b;
+	--fg: #dddddd;
+	--muted: #a6a9ae;
+	--faint: #7c8087;
+	--border: #50545c;
+	--link: #3b97ea;
+	--accent: #3b97ea;
+	--new: #e8833a;
+	--danger: #f87171;
+	--artist: #22a7f0;
+	--group: #36d7b7;
+	--parody: #d2527f;
+	color-scheme: dark;
+	font-family: system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif;
 	color: var(--fg);
 	background: var(--bg);
+	-webkit-text-size-adjust: 100%;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
 	:root {
-		--bg: #111113;
-		--fg: #ececee;
-		--muted: #9a9aa0;
-		--card: #1c1c1f;
-		--border: #2c2c30;
-		--accent: #fb923c;
-		--danger: #f87171;
+		--bg: #f2f2f4;
+		--surface: #ffffff;
+		--chip: #e7e8ec;
+		--fg: #1f2023;
+		--muted: #5d6066;
+		--faint: #9a9da3;
+		--border: #d9dade;
+		--link: #1a73c8;
+		--accent: #1a73c8;
+		--artist: #0b7fc2;
+		--group: #12917a;
+		--parody: #b23a68;
+		color-scheme: light;
 	}
 }
 
@@ -42,6 +58,36 @@ select {
 	color: inherit;
 }
 
+.ns-artist {
+	color: var(--artist) !important;
+}
+
+.ns-group {
+	color: var(--group) !important;
+}
+
+.ns-parody {
+	color: var(--parody) !important;
+}
+
 .error {
 	color: var(--danger);
+}
+
+.icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 2.25rem;
+	height: 2.25rem;
+	padding: 0 0.5rem;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--surface);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.icon-button:hover {
+	color: var(--link);
 }

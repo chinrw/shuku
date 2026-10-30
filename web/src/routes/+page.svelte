@@ -1,9 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { search, type ArchiveItem } from '#lib/api.ts';
+	import Icon from '#lib/Icon.svelte';
+	import { settings } from '#lib/settings.svelte.ts';
+	import TagLine from '#lib/TagLine.svelte';
+	import TagTable from '#lib/TagTable.svelte';
 	import type { Snapshot } from './$types';
 
 	let { data } = $props();
+	const prefs = settings();
 
 	// 翻到后面的页时在这里追加；搜索条件变化后 data 更新，两者随之重置。
 	let items = $derived<ArchiveItem[]>(data.result?.items ?? []);
@@ -21,19 +26,21 @@
 		}
 	};
 
-	function submit(event: SubmitEvent) {
-		event.preventDefault();
+	function navigate(q: string, sort: string) {
 		const params = new URLSearchParams();
-		if (query.trim()) params.set('q', query.trim());
-		if (data.sort !== 'title') params.set('sort', data.sort);
-		goto(`/?${params}`);
+		if (q) params.set('q', q);
+		if (sort !== 'title') params.set('sort', sort);
+		goto(params.size ? `/?${params}` : '/');
 	}
 
-	function changeSort(sort: string) {
-		const params = new URLSearchParams();
-		if (data.q) params.set('q', data.q);
-		if (sort !== 'title') params.set('sort', sort);
-		goto(`/?${params}`);
+	function submit(event: SubmitEvent) {
+		event.preventDefault();
+		navigate(query.trim(), data.sort);
+	}
+
+	function toggleView() {
+		prefs.view = prefs.view === 'grid' ? 'list' : 'grid';
+		prefs.save();
 	}
 
 	async function loadMore() {
@@ -63,148 +70,213 @@
 		observer.observe(node);
 		return () => observer.disconnect();
 	}
+
+	function progressText(item: ArchiveItem) {
+		return item.progress ? `读到 ${item.progress.page + 1}` : item.is_new ? '新' : '';
+	}
 </script>
 
 <header>
-	<form onsubmit={submit}>
+	<a class="brand" href="/" onclick={() => (query = '')}>书库</a>
+	<form onsubmit={submit} role="search">
+		<Icon name="search" size={16} />
 		<input
 			type="search"
 			bind:value={query}
-			placeholder="搜索：标题，artist:名字，-排除，&quot;精确&quot;"
+			placeholder="标题或标签，如 artist:名字，-排除"
 			enterkeyhint="search"
+			autocapitalize="off"
+			autocomplete="off"
+			spellcheck="false"
 		/>
-		<select value={data.sort} onchange={(event) => changeSort(event.currentTarget.value)}>
+	</form>
+	<div class="controls">
+		<select
+			value={data.sort}
+			onchange={(event) => navigate(data.q, event.currentTarget.value)}
+			aria-label="排序"
+		>
 			<option value="title">标题</option>
 			<option value="date">最新加入</option>
 		</select>
-	</form>
-	{#if data.queryError}
-		<p class="error">{data.queryError}</p>
-	{:else if data.result}
-		<p class="summary">
-			共 {data.result.total} 本
-			{#if data.result.degraded}
-				<span>· 部分通配符还不支持，结果可能偏多</span>
-			{/if}
-		</p>
-	{/if}
+		<button
+			class="icon-button"
+			onclick={toggleView}
+			aria-label={prefs.view === 'grid' ? '列表视图' : '封面视图'}
+		>
+			<Icon name={prefs.view === 'grid' ? 'list' : 'grid'} size={18} />
+		</button>
+	</div>
 </header>
 
-<main>
-	{#each items as item (item.id)}
-		<a class="card" href="/a/{item.id}">
-			<div class="cover">
-				<img src={item.cover_url} alt="" loading="lazy" />
-				{#if item.is_new}<span class="badge">新</span>{/if}
-				{#if item.progress && item.page_count > 0}
-					<div class="progress" style:width="{((item.progress.page + 1) / item.page_count) * 100}%"></div>
-				{/if}
-			</div>
-			<div class="title">{item.title}</div>
-		</a>
-	{/each}
-</main>
+{#if data.queryError}
+	<p class="status error">{data.queryError}</p>
+{:else if data.result}
+	<p class="status">
+		共 {data.result.total} 本{#if data.q}，搜索“{data.q}”{/if}
+		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
+	</p>
+{/if}
+
+{#if prefs.view === 'grid'}
+	<main class="grid">
+		{#each items as item (item.id)}
+			<a class="card" href="/a/{item.id}">
+				<div class="title" title={item.title}>{item.title}</div>
+				<div class="cover">
+					<img src={item.cover_url} alt="" loading="lazy" />
+					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
+					<span class="badge pages">{item.page_count}P</span>
+					{#if item.progress && item.page_count > 0}
+						<div
+							class="progress"
+							style:width="{((item.progress.page + 1) / item.page_count) * 100}%"
+						></div>
+					{/if}
+				</div>
+				<TagLine groups={item.tags} />
+			</a>
+		{/each}
+	</main>
+{:else}
+	<main class="list">
+		{#each items as item (item.id)}
+			<article class="row">
+				<a class="thumb" href="/a/{item.id}">
+					<img src={item.cover_url} alt="" loading="lazy" />
+				</a>
+				<div class="body">
+					<a class="title" href="/a/{item.id}">{item.title}</a>
+					<div class="meta">
+						{item.page_count} 页
+						{#if progressText(item)}· <span class:fresh={item.is_new && !item.progress}>{progressText(item)}</span>{/if}
+					</div>
+					<TagTable groups={item.tags} compact />
+				</div>
+			</article>
+		{/each}
+	</main>
+{/if}
 
 {#if loadError}
-	<p class="error footer">
+	<p class="footer error">
 		加载失败：{loadError}
-		<button onclick={loadMore}>重试</button>
+		<button class="icon-button" onclick={loadMore}>重试</button>
 	</p>
 {:else if next !== null}
 	<div class="footer" {@attach sentinel}>{loading ? '加载中…' : ''}</div>
+{:else if items.length > 0}
+	<div class="footer">没有更多了</div>
 {/if}
 
 <style>
 	header {
 		position: sticky;
 		top: 0;
-		z-index: 1;
-		padding: 0.75rem 1rem 0.25rem;
-		padding-top: max(0.75rem, env(safe-area-inset-top));
-		background: var(--bg);
+		z-index: 2;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		padding: 0.6rem 1rem;
+		padding-top: max(0.6rem, env(safe-area-inset-top));
+		background: color-mix(in srgb, var(--bg) 92%, transparent);
+		backdrop-filter: blur(8px);
+		-webkit-backdrop-filter: blur(8px);
 		border-bottom: 1px solid var(--border);
 	}
 
+	.brand {
+		font-weight: 700;
+		font-size: 1.1rem;
+		text-decoration: none;
+	}
+
 	form {
+		flex: 1;
 		display: flex;
-		gap: 0.5rem;
+		align-items: center;
+		gap: 0.4rem;
+		min-width: 0;
+		max-width: 44rem;
+		height: 2.25rem;
+		padding: 0 0.7rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface);
+		color: var(--muted);
 	}
 
 	input {
 		flex: 1;
 		min-width: 0;
-		padding: 0.5rem 0.75rem;
-		border: 1px solid var(--border);
-		border-radius: 0.5rem;
-		background: var(--card);
+		border: none;
+		outline: none;
+		background: transparent;
+		color: var(--fg);
+	}
+
+	.controls {
+		display: flex;
+		gap: 0.5rem;
+		margin-left: auto;
 	}
 
 	select {
+		height: 2.25rem;
+		padding: 0 0.5rem;
 		border: 1px solid var(--border);
-		border-radius: 0.5rem;
-		background: var(--card);
+		border-radius: 6px;
+		background: var(--surface);
 	}
 
-	.summary,
-	header .error {
-		margin: 0.4rem 0;
+	/* 手机上搜索框单独占一行，品牌和按钮在上面一行。 */
+	@media (max-width: 599px) {
+		form {
+			order: 3;
+			flex-basis: 100%;
+			max-width: none;
+		}
+	}
+
+	.status {
+		margin: 0.6rem 1rem 0;
 		font-size: 0.85rem;
 		color: var(--muted);
 	}
 
-	header .error {
-		color: var(--danger);
+	.grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+		gap: 0.6rem;
+		padding: 0.75rem;
 	}
 
-	main {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-		gap: 1rem 0.75rem;
-		padding: 1rem;
+	@media (min-width: 1024px) {
+		.grid {
+			grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+			gap: 0.8rem;
+			padding: 1rem;
+		}
 	}
 
 	.card {
-		text-decoration: none;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
 		min-width: 0;
+		padding: 0.45rem 0.45rem 0.55rem;
+		border-radius: 9px;
+		background: var(--surface);
+		text-decoration: none;
 	}
 
-	.cover {
-		position: relative;
-		aspect-ratio: 5 / 7;
-		overflow: hidden;
-		border-radius: 0.4rem;
-		background: var(--card);
-	}
-
-	.cover img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-	}
-
-	.badge {
-		position: absolute;
-		top: 0.3rem;
-		left: 0.3rem;
-		padding: 0 0.35rem;
-		border-radius: 0.25rem;
-		background: var(--accent);
-		color: white;
-		font-size: 0.75rem;
-	}
-
-	.progress {
-		position: absolute;
-		left: 0;
-		bottom: 0;
-		height: 3px;
-		background: var(--accent);
-	}
-
-	.title {
-		margin-top: 0.35rem;
+	.card .title {
+		min-height: 2.5em;
 		font-size: 0.85rem;
-		line-height: 1.3;
+		font-weight: 600;
+		line-height: 1.25;
+		text-align: center;
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		line-clamp: 2;
@@ -212,10 +284,116 @@
 		overflow: hidden;
 	}
 
+	.cover {
+		position: relative;
+		aspect-ratio: 5 / 7;
+		overflow: hidden;
+		border-radius: 6px;
+		background: var(--chip);
+	}
+
+	.cover img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: center top;
+	}
+
+	.badge {
+		position: absolute;
+		padding: 0.05rem 0.35rem;
+		border-radius: 4px;
+		font-size: 0.72rem;
+		line-height: 1.4;
+	}
+
+	.badge.new {
+		top: 0.3rem;
+		left: 0.3rem;
+		background: var(--new);
+		color: white;
+	}
+
+	.badge.pages {
+		right: 0.3rem;
+		bottom: 0.45rem;
+		background: rgb(0 0 0 / 0.6);
+		color: #eee;
+	}
+
+	.progress {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		height: 4px;
+		background: var(--accent);
+	}
+
+	.list {
+		display: grid;
+		gap: 0.5rem;
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 0.75rem;
+	}
+
+	@media (min-width: 1280px) {
+		.list {
+			grid-template-columns: 1fr 1fr;
+			max-width: none;
+		}
+	}
+
+	.row {
+		display: flex;
+		gap: 0.75rem;
+		min-width: 0;
+		padding: 0.5rem;
+		border-radius: 9px;
+		background: var(--surface);
+	}
+
+	.thumb {
+		flex: none;
+		width: 84px;
+	}
+
+	.thumb img {
+		width: 100%;
+		aspect-ratio: 5 / 7;
+		object-fit: cover;
+		object-position: center top;
+		border-radius: 5px;
+		background: var(--chip);
+	}
+
+	.body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		min-width: 0;
+	}
+
+	.body .title {
+		font-weight: 600;
+		line-height: 1.3;
+		text-decoration: none;
+	}
+
+	.meta {
+		font-size: 0.8rem;
+		color: var(--muted);
+	}
+
+	.fresh {
+		color: var(--new);
+	}
+
 	.footer {
 		min-height: 3rem;
 		padding: 1rem;
 		text-align: center;
 		color: var(--muted);
+		font-size: 0.85rem;
 	}
 </style>

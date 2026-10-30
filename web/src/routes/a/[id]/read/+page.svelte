@@ -1,26 +1,48 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { replaceState } from '$app/navigation';
+	import { afterNavigate, replaceState } from '$app/navigation';
+	import Icon from '#lib/Icon.svelte';
 	import { fittedWidth, pageUrl, widthTier } from '#lib/image.ts';
 	import { ProgressReporter } from '#lib/progress.ts';
-	import { readerSettings } from '#lib/settings.svelte.ts';
+	import { settings } from '#lib/settings.svelte.ts';
+	import { buildSpreads } from '#lib/spreads.ts';
+	import TagTable from '#lib/TagTable.svelte';
 
 	// 滚动模式下页面不会比这个宽，宽屏上两侧留空。
 	const SCROLL_MAX_WIDTH = 960;
 
 	let { data } = $props();
-	const settings = readerSettings();
+	const prefs = settings();
 	const book = untrack(() => data.archive);
 	const pages = untrack(() => data.pages);
 
 	let current = $state(untrack(() => data.start));
 	let toolbar = $state(false);
+	let panel = $state(false);
 	let progressError = $state<string | null>(null);
 	// 关闭了 SSR，这里一定在浏览器里运行。先取一次真实值，免得第一次渲染按宽度 0 请求图片。
 	let innerWidth = $state(window.innerWidth);
 	let innerHeight = $state(window.innerHeight);
 	let devicePixelRatio = $state(window.devicePixelRatio);
 	let scroller = $state<HTMLElement>();
+
+	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。
+	let spreads = $derived(
+		prefs.spread && innerWidth > innerHeight ? buildSpreads(pages) : pages.map((_, index) => [index])
+	);
+	let spreadIndex = $derived(Math.max(spreads.findIndex((spread) => spread.includes(current)), 0));
+	let visible = $derived(spreads[spreadIndex] ?? []);
+
+	let fromDetail = false;
+	afterNavigate(({ from }) => {
+		fromDetail = from?.route.id === '/a/[id]';
+	});
+
+	function back(event: MouseEvent) {
+		if (!fromDetail) return;
+		event.preventDefault();
+		history.back();
+	}
 
 	const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 	const reporter = new ProgressReporter(book.id, (error) => {
@@ -39,19 +61,27 @@
 		if (page >= 0 && page < pages.length && page !== current) record(page);
 	}
 
+	function step(delta: number) {
+		const target = spreads[spreadIndex + delta];
+		if (target) go(target[0]);
+	}
+
 	function src(index: number, cssWidth: number) {
 		return pageUrl(pages[index], widthTier(cssWidth, devicePixelRatio));
 	}
 
-	function pagedSrc(index: number) {
-		return src(index, fittedWidth(pages[index], { width: innerWidth, height: innerHeight }));
+	// 双页时每页只占半个屏幕宽。
+	function pagedSrc(index: number, count: number) {
+		const viewport = { width: innerWidth / count, height: innerHeight };
+		return src(index, fittedWidth(pages[index], viewport));
 	}
 
-	// 预取前后几页，翻页时直接从 HTTP 缓存取图。
+	// 预取前后的几屏，翻页时直接从 HTTP 缓存取图。
 	$effect(() => {
-		if (settings.mode !== 'paged') return;
-		for (const index of [current + 1, current + 2, current - 1]) {
-			if (index >= 0 && index < pages.length) new Image().src = pagedSrc(index);
+		if (prefs.mode !== 'paged') return;
+		for (const offset of [1, 2, -1]) {
+			const spread = spreads[spreadIndex + offset];
+			for (const index of spread ?? []) new Image().src = pagedSrc(index, spread.length);
 		}
 	});
 
@@ -74,26 +104,30 @@
 			toolbar = !toolbar;
 			return;
 		}
-		const forward = x >= 2 / 3 === (settings.direction === 'ltr');
-		go(current + (forward ? 1 : -1));
+		const forward = x >= 2 / 3 === (prefs.direction === 'ltr');
+		step(forward ? 1 : -1);
 	}
 
 	function key(event: KeyboardEvent) {
-		if (settings.mode !== 'paged') return;
-		const rtl = settings.direction === 'rtl';
+		if (event.key === 'Escape' && panel) {
+			panel = false;
+			return;
+		}
+		if (prefs.mode !== 'paged' || panel) return;
+		const rtl = prefs.direction === 'rtl';
 		switch (event.key) {
 			case 'ArrowLeft':
-				go(current + (rtl ? 1 : -1));
+				step(rtl ? 1 : -1);
 				break;
 			case 'ArrowRight':
-				go(current + (rtl ? -1 : 1));
+				step(rtl ? -1 : 1);
 				break;
 			case ' ':
 			case 'PageDown':
-				go(current + 1);
+				step(1);
 				break;
 			case 'PageUp':
-				go(current - 1);
+				step(-1);
 				break;
 			default:
 				return;
@@ -119,18 +153,13 @@
 	}
 
 	function jump(page: number) {
-		if (settings.mode === 'scroll') scroller?.children[page]?.scrollIntoView();
-		else go(page);
+		if (prefs.mode === 'scroll') scroller?.children[page]?.scrollIntoView();
+		else go(spreads.find((spread) => spread.includes(page))?.[0] ?? page);
 	}
 
-	function setMode(mode: typeof settings.mode) {
-		settings.mode = mode;
-		settings.save();
-	}
-
-	function toggleDirection() {
-		settings.direction = settings.direction === 'rtl' ? 'ltr' : 'rtl';
-		settings.save();
+	function update(change: () => void) {
+		change();
+		prefs.save();
 	}
 </script>
 
@@ -143,16 +172,19 @@
 <div class="reader">
 	{#if pages.length === 0}
 		<p class="empty">这本书没有可显示的页面。</p>
-	{:else if settings.mode === 'paged'}
+	{:else if prefs.mode === 'paged'}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div class="paged" onclick={tap}>
-			<img
-				class="page"
-				src={pagedSrc(current)}
-				width={pages[current].width}
-				height={pages[current].height}
-				alt="第 {current + 1} 页"
-			/>
+		<div class="paged" class:rtl={prefs.direction === 'rtl'} onclick={tap}>
+			{#each visible as index (index)}
+				<img
+					class="page"
+					class:half={visible.length === 2}
+					src={pagedSrc(index, visible.length)}
+					width={pages[index].width}
+					height={pages[index].height}
+					alt="第 {index + 1} 页"
+				/>
+			{/each}
 		</div>
 	{:else}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -172,9 +204,14 @@
 
 	{#if toolbar}
 		<header class="bar">
-			<a href="/a/{book.id}">‹</a>
+			<a class="bar-button" href="/a/{book.id}" onclick={back} aria-label="返回"><Icon name="back" /></a>
 			<span class="title">{book.title}</span>
-			<span>{current + 1} / {pages.length}</span>
+			<span class="counter">
+				{visible.length === 2 ? `${visible[0] + 1}-${visible[1] + 1}` : current + 1} / {pages.length}
+			</span>
+			<button class="bar-button" onclick={() => (panel = true)} aria-label="标签和简介">
+				<Icon name="info" />
+			</button>
 		</header>
 		<footer class="bar">
 			<input
@@ -182,18 +219,47 @@
 				min="0"
 				max={Math.max(pages.length - 1, 0)}
 				value={current}
-				dir={settings.mode === 'paged' && settings.direction === 'rtl' ? 'rtl' : 'ltr'}
+				dir={prefs.mode === 'paged' && prefs.direction === 'rtl' ? 'rtl' : 'ltr'}
 				onchange={(event) => jump(Number(event.currentTarget.value))}
+				aria-label="跳到页"
 			/>
-			<button onclick={() => setMode(settings.mode === 'paged' ? 'scroll' : 'paged')}>
-				{settings.mode === 'paged' ? '改为滚动' : '改为翻页'}
-			</button>
-			{#if settings.mode === 'paged'}
-				<button onclick={toggleDirection}>
-					{settings.direction === 'rtl' ? '从右往左' : '从左往右'}
-				</button>
-			{/if}
+			<div class="options">
+				<button
+					class:on={prefs.mode === 'scroll'}
+					onclick={() => update(() => (prefs.mode = prefs.mode === 'paged' ? 'scroll' : 'paged'))}
+					>滚动</button
+				>
+				{#if prefs.mode === 'paged'}
+					<button
+						onclick={() =>
+							update(() => (prefs.direction = prefs.direction === 'rtl' ? 'ltr' : 'rtl'))}
+						>{prefs.direction === 'rtl' ? '右→左' : '左→右'}</button
+					>
+					<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = !prefs.spread))}
+						>双页</button
+					>
+				{/if}
+			</div>
 		</footer>
+	{/if}
+
+	{#if panel}
+		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+		<div class="scrim" onclick={() => (panel = false)}></div>
+		<aside class="panel" aria-label="标签和简介">
+			<div class="panel-head">
+				<h2>{book.title}</h2>
+				<button class="bar-button" onclick={() => (panel = false)} aria-label="关闭">
+					<Icon name="close" />
+				</button>
+			</div>
+			{#if book.tags.length > 0}
+				<TagTable groups={book.tags} />
+			{:else}
+				<p class="muted">没有标签</p>
+			{/if}
+			{#if book.summary}<p class="summary">{book.summary}</p>{/if}
+		</aside>
 	{/if}
 
 	{#if progressError}
@@ -214,16 +280,26 @@
 	.paged {
 		position: absolute;
 		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* 从右往左读时，第一页放在右边。 */
+	.paged.rtl {
+		flex-direction: row-reverse;
 	}
 
 	.page {
-		position: absolute;
-		inset: 0;
-		margin: auto;
 		max-width: 100%;
 		max-height: 100%;
 		width: auto;
 		height: auto;
+		object-fit: contain;
+	}
+
+	.page.half {
+		max-width: 50%;
 	}
 
 	.scroll {
@@ -246,52 +322,144 @@
 		right: 0;
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
-		padding: 0.6rem 1rem;
-		background: rgb(0 0 0 / 0.8);
+		gap: 0.6rem;
+		padding: 0.5rem 0.75rem;
+		background: rgb(30 31 35 / 0.92);
+		backdrop-filter: blur(8px);
+		-webkit-backdrop-filter: blur(8px);
 	}
 
 	header.bar {
 		top: 0;
-		padding-top: max(0.6rem, env(safe-area-inset-top));
+		padding-top: max(0.5rem, env(safe-area-inset-top));
 	}
 
 	footer.bar {
 		bottom: 0;
+		flex-wrap: wrap;
 		padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
 	}
 
-	.bar a {
-		font-size: 1.4rem;
-		text-decoration: none;
+	.bar-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		border: none;
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
 	}
 
 	.title {
 		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 		white-space: nowrap;
 		text-overflow: ellipsis;
+		font-size: 0.9rem;
+	}
+
+	.counter {
+		font-size: 0.85rem;
+		font-variant-numeric: tabular-nums;
+		color: #bbb;
 	}
 
 	input[type='range'] {
-		flex: 1;
+		flex: 1 1 12rem;
+		accent-color: #3b97ea;
 	}
 
-	button {
-		padding: 0.35rem 0.75rem;
+	.options {
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.options button {
+		padding: 0.35rem 0.7rem;
 		border: 1px solid #555;
-		border-radius: 0.4rem;
+		border-radius: 6px;
 		background: transparent;
+		color: #ddd;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	.options button.on {
+		border-color: #3b97ea;
+		color: #3b97ea;
+	}
+
+	.scrim {
+		position: absolute;
+		inset: 0;
+		background: rgb(0 0 0 / 0.45);
+	}
+
+	/* 宽屏是右侧抽屉，手机上是底部弹出的面板。 */
+	.panel {
+		--fg: #dddddd;
+		--muted: #a6a9ae;
+		--chip: #4f535b;
+		--link: #3b97ea;
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: min(26rem, 100%);
+		overflow-y: auto;
+		padding: 1rem;
+		padding-top: max(1rem, env(safe-area-inset-top));
+		background: #34353b;
+		user-select: text;
+		-webkit-user-select: text;
+	}
+
+	@media (max-width: 599px) {
+		.panel {
+			top: auto;
+			width: 100%;
+			max-height: 75%;
+			border-radius: 12px 12px 0 0;
+			padding-bottom: max(1rem, env(safe-area-inset-bottom));
+		}
+	}
+
+	.panel-head {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.panel h2 {
+		flex: 1;
+		margin: 0.35rem 0 0;
+		font-size: 1rem;
+		line-height: 1.4;
+	}
+
+	.summary {
+		margin: 1rem 0 0;
+		line-height: 1.7;
+		white-space: pre-wrap;
+		color: #ccc;
+	}
+
+	.muted {
+		color: #a6a9ae;
 	}
 
 	.toast {
 		position: absolute;
 		left: 50%;
-		bottom: 4.5rem;
+		bottom: 5.5rem;
 		transform: translateX(-50%);
 		margin: 0;
 		padding: 0.4rem 0.8rem;
-		border-radius: 0.4rem;
+		border-radius: 6px;
 		background: #7f1d1d;
 		font-size: 0.85rem;
 	}
