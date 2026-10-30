@@ -18,8 +18,12 @@ nix develop -c cargo fmt --all
 
 ## 当前进度
 
-- `crates/shuku-index`：内存位图索引，已实现并有测试。
-- M1 后端的其余部分按 `docs/plan/m1-backend.md` 的任务顺序实现。
+- M1 后端的 T1 到 T5（`docs/plan/m1-backend.md`）都已实现并有测试：存储、zip 读取、查询解析、服务端 `shuku`、LRR 迁移工具 `shuku-migrate-lrr`。运行方式见 `docs/server.md`，接口见 `docs/api.md`。
+- 网页端（`web/`）有书库、搜索、详情和阅读器（翻页和滚动两种模式），已在本地生成的测试书库上跑通。
+- 还没做的：
+  - 用真实书库扫描，并在真实 LRR 的 Redis 上运行迁移。
+  - 文件被删除后，记录仍留在库里，仍会出现在搜索结果中，删除处理放到 M2。
+  - 完整 BLAKE3 指纹的后台计算，目前 `content_hash` 都为空。
 
 ## 前提
 
