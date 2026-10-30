@@ -54,11 +54,11 @@ async fn every_archive_image_format_has_original_and_jpeg_variants() {
         assert_eq!(status, StatusCode::OK, "{extension}");
         assert_eq!(headers["content-type"], mime);
         assert_eq!(original, bytes);
-        for (uri, dimensions) in [
-            (format!("{url}&w=16"), (16, 24)),
-            (item["cover_url"].as_str().unwrap().into(), (32, 48)),
-        ] {
-            let (status, headers, jpeg) = request(&router, "GET", &uri, None, &[]).await;
+        // 封面总是重新编码成 JPEG，每种格式都会经过解码和缩放。
+        {
+            let uri = item["cover_url"].as_str().unwrap();
+            let dimensions = (32, 48);
+            let (status, headers, jpeg) = request(&router, "GET", uri, None, &[]).await;
             assert_eq!(
                 status,
                 StatusCode::OK,
@@ -115,14 +115,14 @@ async fn reads_originals_resizes_without_enlarging_and_caches_with_conditional_r
         }
     }
     let original_etag = request(&router, "GET", url, None, &[]).await.1["etag"].clone();
-    let small_url = format!("{url}&w=400");
+    let small_url = format!("{url}&w=720");
     let (status, small_headers, small) = request(&router, "GET", &small_url, None, &[]).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(small_headers["content-type"], "image/jpeg");
     assert_ne!(small_headers["etag"], original_etag);
     assert_eq!(
         image::load_from_memory(&small).unwrap().dimensions(),
-        (400, 600)
+        (720, 1080)
     );
     assert_eq!(
         request(
@@ -136,7 +136,7 @@ async fn reads_originals_resizes_without_enlarging_and_caches_with_conditional_r
         .0,
         StatusCode::NOT_MODIFIED
     );
-    let (_, headers, bytes) = request(&router, "GET", &format!("{url}&w=1000"), None, &[]).await;
+    let (_, headers, bytes) = request(&router, "GET", &format!("{url}&w=1080"), None, &[]).await;
     assert_eq!(bytes, original);
     assert_eq!(headers["content-type"], "image/png");
     assert_eq!(headers["etag"], original_etag);
@@ -186,6 +186,7 @@ async fn reads_originals_resizes_without_enlarging_and_caches_with_conditional_r
     );
     for (uri, expected) in [
         (format!("{url}&w=0"), StatusCode::BAD_REQUEST),
+        (format!("{url}&w=400"), StatusCode::BAD_REQUEST),
         (format!("{url}&w=-1"), StatusCode::BAD_REQUEST),
         (
             format!("/api/archives/{id}/pages/0"),
@@ -243,4 +244,32 @@ async fn thumbnail_of_small_cover_is_jpeg_without_enlargement() {
         image::load_from_memory(&bytes).unwrap().dimensions(),
         (20, 30)
     );
+}
+
+#[tokio::test]
+async fn refuses_to_resize_pages_above_the_pixel_limit() {
+    let fixture = Fixture::new();
+    let original = fixture.archive("book.cbz", 800, 1200);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    // 尺寸来自扫描时读到的图片头部，这里直接改记录来模拟超大图片。
+    shuku_store::open_connection(fixture.database())
+        .unwrap()
+        .execute("UPDATE page SET width = 8000, height = 8001", [])
+        .unwrap();
+    let router = app.router();
+    let item = &json(&router, "/api/search").await["items"][0];
+    let listing = json(&router, &format!("/api/archives/{}/pages", item["id"])).await;
+    let url = listing["pages"][0]["url"].as_str().unwrap();
+
+    let (status, _, bytes) = request(&router, "GET", url, None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, original);
+    for uri in [
+        format!("{url}&w=720"),
+        item["cover_url"].as_str().unwrap().into(),
+    ] {
+        let (status, _, _) = request(&router, "GET", &uri, None, &[]).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
+    }
 }

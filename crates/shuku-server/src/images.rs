@@ -13,6 +13,13 @@ use serde::Deserialize;
 use shuku_store::CompressionMethod;
 use std::{fs, io::Write, path::Path};
 
+/// 每个宽度都会在数据目录里缓存一份 JPEG，任意宽度会让缓存无限增长。网页端也只用这几档。
+const WIDTHS: [u32; 4] = [720, 1080, 1440, 2160];
+
+/// 缩放要把整张图解码进内存，超过这个像素数的图片不缩放。
+/// 约 800×60000 的长条漫画仍在范围内。AVIF 解码器没有 image 那样的内存上限，靠这里限制。
+const MAX_PIXELS: u64 = 64_000_000;
+
 #[derive(Deserialize)]
 pub(crate) struct ImageParams {
     v: String,
@@ -27,8 +34,8 @@ pub(crate) async fn page(
 ) -> Result<Response> {
     let UrlPath((id, n)) = path.map_err(Error::bad_request)?;
     let Query(params) = params.map_err(Error::bad_request)?;
-    if params.w == Some(0) {
-        return Err(Error::bad_request("w 必须大于 0"));
+    if params.w.is_some_and(|width| !WIDTHS.contains(&width)) {
+        return Err(Error::bad_request("w 只能是 720、1080、1440 或 2160"));
     }
     app.blocking(move |app| respond(&app, id, n, params, headers, false))
         .await
@@ -81,6 +88,12 @@ fn respond(
     } else {
         params.w.filter(|width| *width < page.width)
     };
+    if width.is_some() && u64::from(page.width) * u64::from(page.height) > MAX_PIXELS {
+        return Err(Error::Http {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            message: "图片像素太多，不能缩放".into(),
+        });
+    }
     let variant = match width {
         Some(width) => format!("jpeg-{width}"),
         None => "original".into(),
