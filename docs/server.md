@@ -22,7 +22,7 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
   --content-dir /path/to/comics --data-dir /path/to/shuku-data
 ```
 
-默认监听 `0.0.0.0:3001`。启动先从 SQLite 构建索引，再开始监听并在后台扫描。日志中的 `count` 和 `elapsed_ms` 分别是索引本数和从 SQLite 读取、构建索引的总耗时。后台扫描结束后换入新索引，正在使用旧快照的请求可以继续完成。
+默认监听 `0.0.0.0:3002`，LRR 占用 3001。启动先从 SQLite 构建索引，再开始监听并在后台扫描。日志中的 `count` 和 `elapsed_ms` 分别是索引本数和从 SQLite 读取、构建索引的总耗时。后台扫描结束后换入新索引，正在使用旧快照的请求可以继续完成。
 
 四项配置都支持环境变量，命令行参数优先：
 
@@ -31,7 +31,7 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
 | `--content-dir` | `SHUKU_CONTENT_DIR` | 必填 |
 | `--data-dir` | `SHUKU_DATA_DIR` | 必填 |
 | `--web-dir` | `SHUKU_WEB_DIR` | `web/build` |
-| `--listen` | `SHUKU_LISTEN` | `0.0.0.0:3001` |
+| `--listen` | `SHUKU_LISTEN` | `0.0.0.0:3002` |
 
 相对路径以进程的工作目录为准。参数可以放在 `scan` 前后。按 Ctrl-C 停止 HTTP 服务。
 
@@ -48,3 +48,16 @@ M1 不监视文件变化。服务运行期间单独执行 `scan` 只会更新数
 JPEG、PNG、GIF、WebP、AVIF、JXL 和 BMP 都可以读取原图并生成 JPEG 变体。AVIF 和 JXL 使用额外的 Rust 解码器；Nix 环境中的 NASM 只用于编译 AVIF 解码器的 x86 汇编，不需要系统图像库。
 
 搜索的 `limit` 范围为 1 到 200，超出范围返回 400。未知 API 路径返回 JSON 404；只有 `/api` 以外的路径才使用网页端的 `index.html` 回退。
+
+## 从 LRR 导入元数据
+
+先用 `shuku scan` 让归档入库，再运行迁移工具。它按文件路径把 LRR 的记录对应到已入库的归档，导入标题、标签、简介、分类、Tankoubon 和阅读进度，可以反复运行，每次以 LRR 为准。
+
+```bash
+nix develop -c cargo run -p shuku-migrate-lrr -- \
+  --redis redis://127.0.0.1:6381/0 \
+  --lrr-content-dir /LRR/看到的/内容目录 \
+  --data-dir /path/to/shuku-data
+```
+
+media-lxc 上 LRR 的 Redis（valkey）监听 6381，不是默认的 6379。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。找不到对应文件的记录会列在输出里。

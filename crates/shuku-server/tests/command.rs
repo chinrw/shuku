@@ -72,7 +72,7 @@ fn scan_accepts_environment_and_cli_overrides_and_reports_failures() {
     let help = command().arg("--help").output().unwrap();
     assert!(help.status.success());
     let help = String::from_utf8(help.stdout).unwrap();
-    assert!(help.contains("0.0.0.0:3001"));
+    assert!(help.contains("0.0.0.0:3002"));
     assert!(help.contains("web/build"));
 }
 

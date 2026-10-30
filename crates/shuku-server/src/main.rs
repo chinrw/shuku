@@ -32,7 +32,7 @@ struct Cli {
         long,
         env = "SHUKU_LISTEN",
         global = true,
-        default_value = "0.0.0.0:3001",
+        default_value = "0.0.0.0:3002",
         help = "HTTP 监听地址"
     )]
     listen: SocketAddr,

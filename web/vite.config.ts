@@ -11,7 +11,7 @@ export default defineConfig({
 	],
 	server: {
 		// 开发时把 API 请求转给本机的 shuku 服务。
-		proxy: { '/api': 'http://localhost:3001' }
+		proxy: { '/api': 'http://localhost:3002' }
 	},
 	test: { include: ['src/**/*.test.ts'] }
 });
