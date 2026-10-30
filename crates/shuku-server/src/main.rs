@@ -76,17 +76,24 @@ async fn main() -> Result<()> {
     }
     let listener = tokio::net::TcpListener::bind(cli.listen).await?;
     tracing::info!(listen = %listener.local_addr()?, "HTTP 服务已启动");
-    let scanner = app.clone();
+    let background = app.clone();
     tokio::spawn(async move {
-        if let Err(error) = scanner.scan().await {
+        if let Err(error) = background.scan().await {
             tracing::error!(%error, "启动扫描失败");
+            return;
+        }
+        // 扫描先把新文件和变化的文件入库，再补算它们的完整指纹。
+        if let Err(error) = background.hash_contents().await {
+            tracing::error!(%error, "计算完整指纹失败");
         }
     });
+    let stopper = app.clone();
     axum::serve(listener, app.router())
-        .with_graceful_shutdown(async {
+        .with_graceful_shutdown(async move {
             if let Err(error) = tokio::signal::ctrl_c().await {
                 tracing::error!(%error, "等待退出信号失败");
             }
+            stopper.stop();
         })
         .await?;
     Ok(())

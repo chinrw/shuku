@@ -30,6 +30,45 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// 还没有完整指纹、ID 大于 `after` 的归档，按 ID 从小到大最多 `limit` 本。
+    /// 调用方用上一批最后一本的 ID 翻页，算不出指纹的归档不会被反复取到。
+    pub fn missing_content_hashes(&self, after: i64, limit: usize) -> Result<Vec<ScanEntry>> {
+        Ok(self
+            .connection
+            .prepare(
+                "SELECT id, path, file_size, mtime, quick_hash FROM archive
+                 WHERE content_hash IS NULL AND id > ?1 ORDER BY id LIMIT ?2",
+            )?
+            .query_map(params![after, limit as i64], |row| {
+                Ok(ScanEntry {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    file_size: row.get(2)?,
+                    mtime: row.get(3)?,
+                    quick_hash: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// 只在归档的文件身份仍与 `entry` 一致时写入完整指纹，返回是否写入。
+    /// 指纹在锁外计算，期间扫描可能已经换了文件，那时算出的指纹已经过时。
+    pub fn set_content_hash(&mut self, entry: &ScanEntry, hash: &str) -> Result<bool> {
+        Ok(self.connection.execute(
+            "UPDATE archive SET content_hash = ?1
+             WHERE id = ?2 AND path = ?3 AND file_size = ?4 AND mtime = ?5 AND quick_hash = ?6
+                AND content_hash IS NULL",
+            params![
+                hash,
+                entry.id,
+                entry.path,
+                entry.file_size,
+                entry.mtime,
+                entry.quick_hash
+            ],
+        )? > 0)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
             connection: open_connection(path)?,

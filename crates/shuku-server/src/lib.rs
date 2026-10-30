@@ -2,6 +2,7 @@
 
 mod api;
 mod decode;
+mod hash;
 mod images;
 mod scan;
 
@@ -11,10 +12,14 @@ use shuku_store::Store;
 use std::{
     net::SocketAddr,
     path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 
+pub use hash::HashReport;
 pub use scan::ScanReport;
 
 #[derive(Debug, Clone)]
@@ -81,6 +86,8 @@ struct Inner {
     store: Mutex<Store>,
     index: ArcSwap<Index>,
     scan_lock: Mutex<()>,
+    /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
+    stopping: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -109,9 +116,16 @@ impl App {
                 store: Mutex::new(store),
                 index: ArcSwap::from_pointee(index),
                 scan_lock: Mutex::new(()),
+                stopping: AtomicBool::new(false),
             })))
         })
         .await?
+    }
+
+    /// 让后台的长任务尽快停下。tokio 退出时会等 spawn_blocking 的任务结束，
+    /// 不停下的话，按 Ctrl-C 要等补算指纹跑完整个书库。
+    pub fn stop(&self) {
+        self.0.stopping.store(true, Ordering::Relaxed);
     }
 
     pub fn index(&self) -> Arc<Index> {

@@ -292,3 +292,63 @@ fn saves_reads_and_updates_archive_with_its_ordered_pages() {
     assert_eq!(store.archive(id).unwrap().unwrap().page_count, 0);
     assert!(store.pages(id).unwrap().is_empty());
 }
+
+#[test]
+fn content_hashes_are_listed_in_id_order_and_written_only_for_unchanged_files() {
+    let mut store = Store::open(":memory:").unwrap();
+    let mut hashed = metadata("hashed.cbz");
+    hashed.content_hash = Some("done".into());
+    store.save_archive(None, &hashed, &[]).unwrap();
+    let ids: Vec<i64> = ["a.cbz", "b.cbz", "c.cbz"]
+        .iter()
+        .map(|path| store.save_archive(None, &metadata(path), &[]).unwrap())
+        .collect();
+
+    let first = store.missing_content_hashes(0, 2).unwrap();
+    assert_eq!(
+        first.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        ids[..2]
+    );
+    let rest = store.missing_content_hashes(first[1].id, 2).unwrap();
+    assert_eq!(
+        rest.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        ids[2..]
+    );
+
+    // 计算期间 b.cbz 被扫描更新过，旧的文件身份不再匹配，不能写入。
+    let mut changed = metadata("b.cbz");
+    changed.mtime += 1;
+    store.save_archive(Some(ids[1]), &changed, &[]).unwrap();
+    assert!(store.set_content_hash(&first[0], "hash-a").unwrap());
+    assert!(!store.set_content_hash(&first[1], "hash-b").unwrap());
+    // 已经有指纹的归档不会被覆盖。
+    assert!(!store.set_content_hash(&first[0], "again").unwrap());
+
+    assert_eq!(
+        store
+            .archive(ids[0])
+            .unwrap()
+            .unwrap()
+            .metadata
+            .content_hash,
+        Some("hash-a".into())
+    );
+    assert_eq!(
+        store
+            .archive(ids[1])
+            .unwrap()
+            .unwrap()
+            .metadata
+            .content_hash,
+        None
+    );
+    assert_eq!(
+        store
+            .missing_content_hashes(0, 10)
+            .unwrap()
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        ids[1..]
+    );
+}
