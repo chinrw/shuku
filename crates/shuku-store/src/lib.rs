@@ -4,7 +4,8 @@ mod models;
 mod store;
 
 pub use models::{
-    Archive, ArchiveListItem, ArchiveMetadata, CompressionMethod, Page, Progress, ScanEntry, Tag,
+    Archive, ArchiveListItem, ArchiveMetadata, CompressionMethod, LrrArchive, LrrCategory,
+    LrrTankoubon, Page, Progress, ScanEntry, Tag,
 };
 pub use store::Store;
 
@@ -12,7 +13,10 @@ use std::path::Path;
 
 use rusqlite::{Connection, TransactionBehavior};
 
-const MIGRATIONS: &[&str] = &[include_str!("migrations/001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/001_initial.sql"),
+    include_str!("migrations/002_lrr_ids.sql"),
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -26,7 +30,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// 打开并迁移数据库。需要直接操作分类等表的调用者也使用此入口。
+/// 打开并迁移数据库。Store 还没有读取分类和 Tankoubon 的接口，测试用它直接查表。
 /// `:memory:` 可用于测试；SQLite 内存库的日志模式仍为 `memory`。
 pub fn open_connection(path: impl AsRef<Path>) -> Result<Connection> {
     let mut connection = Connection::open(path)?;

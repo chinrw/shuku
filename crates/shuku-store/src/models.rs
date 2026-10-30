@@ -28,6 +28,39 @@ pub struct ArchiveMetadata {
     pub lrr_id: Option<String>,
 }
 
+/// LRR 导入时覆盖的元数据。文件信息和页面清单由扫描维护，导入不改动它们。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LrrArchive {
+    pub lrr_id: String,
+    pub title: String,
+    pub summary: String,
+    /// 为 `None` 时保留扫描时记录的值。
+    pub date_added: Option<i64>,
+    pub source_url: Option<String>,
+    pub is_new: bool,
+    pub tags: Vec<Tag>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LrrCategory {
+    pub lrr_id: String,
+    pub name: String,
+    /// 非空表示动态分类，此时 `archives` 为空。
+    pub search: String,
+    pub pinned: bool,
+    pub archives: Vec<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LrrTankoubon {
+    pub lrr_id: String,
+    pub name: String,
+    pub summary: String,
+    pub tags: Vec<Tag>,
+    /// 按阅读顺序排列。
+    pub archives: Vec<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Archive {
     pub id: i64,

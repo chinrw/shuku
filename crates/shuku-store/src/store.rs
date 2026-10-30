@@ -5,8 +5,8 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, param
 use shuku_index::ArchiveRecord;
 
 use crate::{
-    Archive, ArchiveListItem, ArchiveMetadata, Error, Page, Progress, Result, ScanEntry, Tag,
-    open_connection,
+    Archive, ArchiveListItem, ArchiveMetadata, Error, LrrArchive, LrrCategory, LrrTankoubon, Page,
+    Progress, Result, ScanEntry, Tag, open_connection,
 };
 
 pub struct Store {
@@ -115,23 +115,101 @@ impl Store {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute("DELETE FROM archive_tag WHERE archive_id = ?1", [id])?;
+        set_archive_tags(&transaction, id, tags)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// 用 LRR 的元数据和标签覆盖一本已入库的归档。
+    pub fn import_lrr_archive(&mut self, id: i64, lrr: &LrrArchive) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let updated = transaction.execute(
+            "UPDATE archive SET title = ?1, summary = ?2, date_added = COALESCE(?3, date_added),
+                source_url = ?4, is_new = ?5, lrr_id = ?6
+             WHERE id = ?7",
+            params![
+                lrr.title,
+                lrr.summary,
+                lrr.date_added,
+                lrr.source_url,
+                lrr.is_new,
+                lrr.lrr_id,
+                id
+            ],
+        )?;
+        if updated == 0 {
+            return Err(Error::ArchiveNotFound(id));
+        }
+        set_archive_tags(&transaction, id, &lrr.tags)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// 按 LRR ID 新建或更新分类，归档成员整体替换。
+    pub fn import_lrr_category(&mut self, category: &LrrCategory) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id: i64 = transaction.query_row(
+            "INSERT INTO category (lrr_id, name, search, pinned) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(lrr_id) DO UPDATE SET name = excluded.name, search = excluded.search,
+                pinned = excluded.pinned
+             RETURNING id",
+            params![
+                category.lrr_id,
+                category.name,
+                category.search,
+                category.pinned
+            ],
+            |row| row.get(0),
+        )?;
+        transaction.execute("DELETE FROM category_archive WHERE category_id = ?1", [id])?;
         {
-            let mut insert_tag = transaction.prepare_cached(
-                "INSERT INTO tag (namespace, value, full) VALUES (?1, ?2, ?3) ON CONFLICT(full) DO NOTHING"
+            let mut insert = transaction.prepare_cached(
+                "INSERT INTO category_archive (category_id, archive_id) VALUES (?1, ?2)
+                 ON CONFLICT DO NOTHING",
             )?;
-            let mut associate = transaction.prepare_cached(
-                "INSERT INTO archive_tag (tag_id, archive_id) SELECT id, ?1 FROM tag WHERE full = ?2
-                 ON CONFLICT(tag_id, archive_id) DO NOTHING"
+            for archive in &category.archives {
+                insert.execute([id, *archive])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// 按 LRR ID 新建或更新 Tankoubon，标签和归档成员整体替换，position 从 1 开始。
+    pub fn import_lrr_tankoubon(&mut self, tankoubon: &LrrTankoubon) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let id: i64 = transaction.query_row(
+            "INSERT INTO tankoubon (lrr_id, name, summary) VALUES (?1, ?2, ?3)
+             ON CONFLICT(lrr_id) DO UPDATE SET name = excluded.name, summary = excluded.summary
+             RETURNING id",
+            params![tankoubon.lrr_id, tankoubon.name, tankoubon.summary],
+            |row| row.get(0),
+        )?;
+        transaction.execute("DELETE FROM tankoubon_tag WHERE tankoubon_id = ?1", [id])?;
+        transaction.execute(
+            "DELETE FROM tankoubon_archive WHERE tankoubon_id = ?1",
+            [id],
+        )?;
+        {
+            let mut tag = transaction.prepare_cached(
+                "INSERT INTO tankoubon_tag (tankoubon_id, tag_id) VALUES (?1, ?2)
+                 ON CONFLICT DO NOTHING",
             )?;
-            for tag in tags {
-                let full = if tag.namespace.is_empty() {
-                    tag.value.to_lowercase()
-                } else {
-                    format!("{}:{}", tag.namespace, tag.value).to_lowercase()
-                };
-                insert_tag.execute(params![tag.namespace, tag.value, full])?;
-                associate.execute(params![id, full])?;
+            for value in &tankoubon.tags {
+                tag.execute([id, ensure_tag(&transaction, value)?])?;
+            }
+            let mut archive = transaction.prepare_cached(
+                "INSERT INTO tankoubon_archive (tankoubon_id, archive_id, position)
+                 VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING",
+            )?;
+            for (index, member) in tankoubon.archives.iter().enumerate() {
+                archive.execute(params![id, member, index as i64 + 1])?;
             }
         }
         transaction.commit()?;
@@ -298,6 +376,34 @@ impl Store {
         }
         Ok(())
     }
+}
+
+fn set_archive_tags(connection: &Connection, id: i64, tags: &[Tag]) -> Result<()> {
+    connection.execute("DELETE FROM archive_tag WHERE archive_id = ?1", [id])?;
+    let mut associate = connection.prepare_cached(
+        "INSERT INTO archive_tag (tag_id, archive_id) VALUES (?1, ?2)
+         ON CONFLICT(tag_id, archive_id) DO NOTHING",
+    )?;
+    for tag in tags {
+        associate.execute([ensure_tag(connection, tag)?, id])?;
+    }
+    Ok(())
+}
+
+/// 返回标签 ID，没有时新建。冲突时的空更新只是为了让 RETURNING 在已有标签上也返回 ID。
+fn ensure_tag(connection: &Connection, tag: &Tag) -> Result<i64> {
+    let full = if tag.namespace.is_empty() {
+        tag.value.to_lowercase()
+    } else {
+        format!("{}:{}", tag.namespace, tag.value).to_lowercase()
+    };
+    Ok(connection
+        .prepare_cached(
+            "INSERT INTO tag (namespace, value, full) VALUES (?1, ?2, ?3)
+             ON CONFLICT(full) DO UPDATE SET full = excluded.full
+             RETURNING id",
+        )?
+        .query_row(params![tag.namespace, tag.value, full], |row| row.get(0))?)
 }
 
 fn read_progress(row: &rusqlite::Row<'_>) -> rusqlite::Result<Progress> {
