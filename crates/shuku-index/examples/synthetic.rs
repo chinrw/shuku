@@ -247,6 +247,18 @@ fn main() {
         ms(medians[medians.len() / 2]),
         ms(medians[medians.len() - 1]),
     );
+
+    // 补全要逐个比较全部标签名，耗时只和标签数有关，取能匹配上万个标签的前缀 a 和几乎不匹配的 zz，后者要比较全部标签名。
+    for prefix in ["a", "zz"] {
+        let (median, max) = time(|| {
+            black_box(index.suggest_tags(prefix, 10));
+        });
+        println!(
+            "标签补全 {prefix:?} 前 10 个：中位数 {} ms，最慢 {} ms",
+            ms(median),
+            ms(max),
+        );
+    }
 }
 
 /// 返回生成的归档，以及其中实际出现的不同标签数。

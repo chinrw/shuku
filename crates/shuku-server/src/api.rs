@@ -33,6 +33,8 @@ impl App {
     pub fn router(&self) -> Router {
         Router::new()
             .route("/api/search", get(search))
+            .route("/api/facets", get(facets))
+            .route("/api/tags", get(suggest_tags))
             .route("/api/archives/{id}", get(detail))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
@@ -124,6 +126,62 @@ async fn search(
         })).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": parsed.degraded, "items": items})))
     }).await
+}
+
+#[derive(Default, Deserialize)]
+struct FacetParams {
+    #[serde(default)]
+    q: String,
+    limit: Option<usize>,
+}
+
+async fn facets(
+    State(app): State<App>,
+    params: std::result::Result<Query<FacetParams>, QueryRejection>,
+) -> Result<Json<Value>> {
+    let Query(params) = params.map_err(Error::bad_request)?;
+    let limit = tag_limit(params.limit, 20)?;
+    app.blocking(move |app| {
+        let parsed = shuku_index::parse_query(&params.q).map_err(Error::bad_request)?;
+        Ok(Json(tag_counts(app.index().facets(&parsed.query, limit))))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SuggestParams {
+    prefix: String,
+    limit: Option<usize>,
+}
+
+async fn suggest_tags(
+    State(app): State<App>,
+    params: std::result::Result<Query<SuggestParams>, QueryRejection>,
+) -> Result<Json<Value>> {
+    let Query(params) = params.map_err(Error::bad_request)?;
+    let limit = tag_limit(params.limit, 10)?;
+    app.blocking(move |app| {
+        Ok(Json(tag_counts(
+            app.index().suggest_tags(&params.prefix, limit),
+        )))
+    })
+    .await
+}
+
+fn tag_limit(limit: Option<usize>, default: usize) -> Result<usize> {
+    let limit = limit.unwrap_or(default);
+    if !(1..=100).contains(&limit) {
+        return Err(Error::bad_request("limit 必须在 1 到 100 之间"));
+    }
+    Ok(limit)
+}
+
+fn tag_counts(tags: Vec<shuku_index::TagCount>) -> Value {
+    let tags: Vec<_> = tags
+        .into_iter()
+        .map(|tag| json!({"tag": tag.tag, "count": tag.count}))
+        .collect();
+    json!({"tags": tags})
 }
 
 async fn detail(

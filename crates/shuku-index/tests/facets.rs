@@ -169,3 +169,38 @@ fn facets_of_an_empty_result_or_a_zero_limit_are_empty() {
     assert!(index.facets(&disjoint, 10).is_empty());
     assert!(index.facets(&Query::default(), 0).is_empty());
 }
+
+#[test]
+fn suggestions_match_full_names_or_values_most_common_first() {
+    let index = Index::build(vec![
+        record(1, &["artist:alpha", "female:glasses", "Alps"]),
+        record(2, &["artist:alpha", "group:alpine"]),
+        record(3, &["artist:alpha", "group:alpine", "parody:beta"]),
+        record(4, &["artist:albert"]),
+    ])
+    .unwrap();
+
+    // 冒号后的值以 al 开头的标签和没有命名空间的 alps 都算，同数时按标签名排；
+    // 值里只是包含 pha 的 alpha 不算。
+    assert_eq!(
+        index.suggest_tags("AL", 10),
+        counts(&[
+            ("artist:alpha", 3),
+            ("group:alpine", 2),
+            ("alps", 1),
+            ("artist:albert", 1),
+        ])
+    );
+    assert_eq!(
+        index.suggest_tags("art", 10),
+        counts(&[("artist:alpha", 3), ("artist:albert", 1)])
+    );
+    assert_eq!(
+        index.suggest_tags("artist:alb", 10),
+        counts(&[("artist:albert", 1)])
+    );
+    assert_eq!(index.suggest_tags("al", 1), counts(&[("artist:alpha", 3)]));
+    assert!(index.suggest_tags("pha", 10).is_empty());
+    assert!(index.suggest_tags("  ", 10).is_empty());
+    assert!(index.suggest_tags("al", 0).is_empty());
+}

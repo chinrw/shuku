@@ -213,3 +213,72 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
         assert!(serde_json::from_slice::<Value>(&bytes).unwrap()["error"].is_string());
     }
 }
+
+#[tokio::test]
+async fn facets_and_tag_suggestions_count_archives_per_tag() {
+    let fixture = Fixture::new();
+    for name in ["a.cbz", "b.cbz", "c.cbz"] {
+        fixture.archive(name, 10, 20);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let mut store = Store::open(fixture.database()).unwrap();
+    let tag = |namespace: &str, value: &str| Tag {
+        namespace: namespace.into(),
+        value: value.into(),
+    };
+    for (path, tags) in [
+        (
+            "a.cbz",
+            vec![tag("artist", "Alpha"), tag("language", "chinese")],
+        ),
+        (
+            "b.cbz",
+            vec![tag("artist", "Alpha"), tag("language", "japanese")],
+        ),
+        (
+            "c.cbz",
+            vec![tag("artist", "albert"), tag("language", "chinese")],
+        ),
+    ] {
+        let id = store.find_by_path(path).unwrap().unwrap();
+        store.replace_tags(id, &tags).unwrap();
+    }
+    app.scan().await.unwrap();
+    let router = app.router();
+
+    assert_eq!(
+        json(&router, "/api/facets?q=language:chinese$").await,
+        value!({"tags": [
+            {"tag": "language:chinese", "count": 2},
+            {"tag": "artist:albert", "count": 1},
+            {"tag": "artist:alpha", "count": 1},
+        ]})
+    );
+    assert_eq!(
+        json(&router, "/api/facets?limit=1").await,
+        value!({"tags": [{"tag": "artist:alpha", "count": 2}]})
+    );
+    assert_eq!(
+        json(&router, "/api/tags?prefix=Al").await,
+        value!({"tags": [
+            {"tag": "artist:alpha", "count": 2},
+            {"tag": "artist:albert", "count": 1},
+        ]})
+    );
+    assert_eq!(
+        json(&router, "/api/tags?prefix=").await,
+        value!({"tags": []})
+    );
+    for uri in [
+        "/api/facets?limit=0",
+        "/api/facets?limit=101",
+        "/api/facets?q=pages:%3E20",
+        "/api/tags",
+        "/api/tags?prefix=a&limit=0",
+    ] {
+        let (status, _, bytes) = request(&router, "GET", uri, None, &[]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        assert!(serde_json::from_slice::<Value>(&bytes).unwrap()["error"].is_string());
+    }
+}
