@@ -1,0 +1,15 @@
+[package]
+name = "shuku-store"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "SQLite storage for Shuku"
+
+[dependencies]
+rusqlite = { version = "0.38", features = ["bundled", "fallible_uint"] }
+shuku-index = { path = "../shuku-index" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
