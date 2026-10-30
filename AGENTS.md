@@ -31,6 +31,7 @@ nix develop -c cargo fmt --all
 - LRR 的元数据（标签、标题、分类、Tankoubon、阅读进度）要迁移过来，迁移完成后下线 LRR。
 - 书库约 30 万本，每本约 10 个标签。归档格式绝大部分是 zip（含 cbz），固实的 7z 和 RAR 很少。
 - 部署在局域网内，用 HTTP 直连，不配置 HTTPS。
+- LRR 跑在 media-lxc 的 3001 端口，Redis（valkey）在 6381，Shuku 默认用 3002。配置见用户的 `~/shell-config/nixos/media-lxc/lanraragi.nix`。
 
 ## 架构
 
@@ -113,6 +114,7 @@ SQLite 的约定：
 ## 待定事项
 
 - 书库总大小，用来估算缩略图和缓存空间。
-- 首批内置插件清单。
+- 首批内置功能清单：用户在 LRR 里启用的插件（包括 ExHentai 登录）都改成 Shuku 的内置功能，不做插件机制。启用状态在 LRR 配置库（Redis 2 号库）的 `LRR_PLUGIN_<名字>` 哈希的 `enabled` 字段里；`customargs` 里有登录 cookie，不要原样打印或提交。
+- 标签翻译：用户有单独的翻译数据包，格式和接入方式待定。
 - LRR 下线的时间点。
 - 用真实书库的标签分布重跑搜索基准，并测量从 SQLite 冷启动构建索引的耗时。
