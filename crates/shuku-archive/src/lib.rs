@@ -3,7 +3,7 @@
 mod fingerprint;
 mod header;
 
-pub use fingerprint::{content_hash, quick_hash};
+pub use fingerprint::{content_hash, content_hash_file, quick_hash, quick_hash_file};
 
 use std::cmp::Ordering;
 use std::fs::File;

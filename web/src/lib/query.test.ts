@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addTerm, completeTerm, lastTerm, tagTerm } from './query';
+import { addTerm, completeTerm, lastTerm, stripTrailingSeparator, tagTerm } from './query';
 
 describe('tagTerm', () => {
 	it('quotes namespaced tags for an exact match', () => {
@@ -74,6 +74,26 @@ describe('completeTerm', () => {
 	});
 });
 
+describe('stripTrailingSeparator', () => {
+	it('removes a real trailing separator', () => {
+		expect(stripTrailingSeparator('a, b, ')).toBe('a, b');
+	});
+
+	it('keeps an escaped comma', () => {
+		expect(stripTrailingSeparator('artist:foo\\,')).toBe('artist:foo\\,');
+	});
+
+	it('keeps a comma inside quotes', () => {
+		expect(stripTrailingSeparator('"x, y",')).toBe('"x, y"');
+		expect(stripTrailingSeparator('"artist:a,')).toBe('"artist:a,');
+	});
+
+	it('returns an empty string for blank input', () => {
+		expect(stripTrailingSeparator('')).toBe('');
+		expect(stripTrailingSeparator('  ')).toBe('');
+	});
+});
+
 describe('addTerm', () => {
 	it('appends an exact tag term after a comma', () => {
 		expect(addTerm('foo, ', 'artist:alpha')).toBe('foo, "artist:alpha"');
@@ -81,5 +101,23 @@ describe('addTerm', () => {
 
 	it('starts a new query when the input is empty', () => {
 		expect(addTerm('  ', 'artist:alpha')).toBe('"artist:alpha"');
+	});
+
+	it('doubles a lone trailing backslash so it cannot escape the new separator', () => {
+		expect(addTerm('artist:foo\\', 'language:chinese')).toBe(
+			'artist:foo\\\\, "language:chinese"'
+		);
+	});
+
+	it('leaves an already escaped trailing backslash alone', () => {
+		expect(addTerm('artist:foo\\\\', 'language:chinese')).toBe(
+			'artist:foo\\\\, "language:chinese"'
+		);
+	});
+
+	it('keeps an escaped trailing comma as part of the term', () => {
+		expect(addTerm('artist:foo\\,', 'language:chinese')).toBe(
+			'artist:foo\\,, "language:chinese"'
+		);
 	});
 });

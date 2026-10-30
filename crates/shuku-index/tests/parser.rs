@@ -256,6 +256,8 @@ fn backslash_makes_the_next_character_literal() {
         ),
         (r"a\\b", vec![either(r"a\b")], vec![]),
         (r"trail\", vec![either(r"trail\")], vec![]),
+        (r"foo\ ,bar", vec![either("foo "), either("bar")], vec![]),
+        (r"foo\ ", vec![either("foo ")], vec![]),
         (r"\-rain", vec![either("-rain")], vec![]),
         (r#"\"artist:a\""#, vec![prefix(r#""artist:a""#)], vec![]),
         (

@@ -6,7 +6,7 @@
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { addTerm, completeTerm, lastTerm } from '#lib/query.ts';
+	import { addTerm, completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
 	import { namespaceClass, tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
 
@@ -39,8 +39,8 @@
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
 		closeSuggestions();
-		// 补全会在末尾留一个逗号，提交时去掉，地址栏和状态行里不显示。
-		navigate(query.trim().replace(/,$/, '').trimEnd(), data.sort);
+		// 补全会在末尾留一个逗号，提交时去掉，地址栏和状态行里不显示；转义的逗号属于词条，要保留。
+		navigate(stripTrailingSeparator(query), data.sort);
 	}
 
 	// 搜索框补全：停止输入一小会儿后按最后一个词条查标签，新请求发出时取消旧请求。

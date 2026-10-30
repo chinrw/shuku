@@ -66,7 +66,7 @@ pub fn parse_query(input: &str) -> Result<ParsedQuery, ParseError> {
         }
         false
     });
-    for raw in terms.map(str::trim).filter(|raw| !raw.is_empty()) {
+    for raw in terms {
         parse_term(raw, &mut parsed)?;
     }
     Ok(parsed)
@@ -119,9 +119,15 @@ fn is_numeric_condition(text: &str) -> bool {
         || value.starts_with("!=")
 }
 
+/// `raw` 是未经修剪的原文：先解码再去空白，转义的空白（`foo\ `）才能留在词条里。
+/// 错误里带的是修剪过的原文。
 fn parse_term(raw: &str, parsed: &mut ParsedQuery) -> Result<(), ParseError> {
     let pieces = decode(raw);
-    let mut pieces = pieces.as_slice();
+    let mut pieces = trim(pieces.as_slice());
+    if pieces.is_empty() {
+        return Ok(());
+    }
+    let raw = raw.trim();
     let excluded = match pieces.split_first() {
         Some((first, rest)) if first.is('-') => {
             pieces = trim(rest);

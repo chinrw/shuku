@@ -1,4 +1,31 @@
-use shuku_archive::{Error, content_hash, quick_hash};
+use shuku_archive::{Error, content_hash, content_hash_file, quick_hash, quick_hash_file};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+
+#[test]
+fn handle_variants_match_path_variants_regardless_of_handle_position() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("book");
+    let bytes: Vec<_> = (0..200_000).map(|i| (i % 253) as u8).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    let mut file = File::open(&path).unwrap();
+    assert_eq!(
+        quick_hash_file(&mut file).unwrap(),
+        quick_hash(&path).unwrap()
+    );
+    // 句柄已经读到中间，整文件指纹仍要从开头算起。
+    file.seek(SeekFrom::Start(1234)).unwrap();
+    file.read_exact(&mut [0; 16]).unwrap();
+    assert_eq!(
+        content_hash_file(&mut file).unwrap(),
+        content_hash(&path).unwrap()
+    );
+    // 整文件读完后句柄停在末尾，快速指纹也不受影响。
+    assert_eq!(
+        quick_hash_file(&mut file).unwrap(),
+        quick_hash(&path).unwrap()
+    );
+}
 
 #[test]
 fn full_fingerprint_hashes_all_bytes_and_preserves_io_errors() {

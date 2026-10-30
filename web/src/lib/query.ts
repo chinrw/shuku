@@ -54,8 +54,21 @@ export function completeTerm(input: string, tag: string): string {
 	return `${before}${excluded ? '-' : ''}${tagTerm('', tag)}, `;
 }
 
+/**
+ * 去掉语句末尾的分隔逗号。只有不在引号里、没有被转义的逗号才是分隔符，
+ * `\,` 是词条的一部分，不能当成分隔符删掉。
+ */
+export function stripTrailingSeparator(input: string): string {
+	const trimmed = input.trim();
+	const { head } = lastTerm(trimmed);
+	return head.length === trimmed.length ? head.slice(0, -1).trimEnd() : trimmed;
+}
+
 /** 在搜索语句末尾加上一个精确匹配的标签条件。 */
 export function addTerm(input: string, tag: string): string {
-	const rest = input.trim().replace(/,$/, '').trimEnd();
-	return rest ? `${rest}, ${tagTerm('', tag)}` : tagTerm('', tag);
+	const rest = stripTrailingSeparator(input);
+	if (!rest) return tagTerm('', tag);
+	// 末尾孤立的反斜杠是普通字符，补一个写成 `\\`，免得它把新加的分隔逗号转义掉。
+	const literal = endsUnescaped(rest, '\\') ? `${rest}\\` : rest;
+	return `${literal}, ${tagTerm('', tag)}`;
 }

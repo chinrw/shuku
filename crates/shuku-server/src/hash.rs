@@ -1,6 +1,6 @@
 use crate::{App, Result, scan::unix_seconds};
 use shuku_store::ScanEntry;
-use std::{fs, io::ErrorKind, path::Path, sync::atomic::Ordering};
+use std::{fs::File, io::ErrorKind, path::Path, sync::atomic::Ordering};
 
 /// 每次从数据库取这么多本，取的时候不持有锁太久，也不把 30 万条一次读进内存。
 const BATCH: usize = 256;
@@ -51,22 +51,25 @@ impl App {
 }
 
 /// 文件仍是扫描时记录的大小、修改时间和快速指纹，并且读的过程中没有变化时，返回整文件指纹。
+/// 元数据核对和两种指纹都在同一个打开的句柄上做：按路径分几次打开的话，
+/// 路径中途被原子替换成大小和修改时间都相同的另一个文件时，会把它的指纹存到这条记录上。
 fn hash_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
-    let before = match fs::metadata(path) {
-        Ok(metadata) => metadata,
+    let mut file = match File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
+    let before = file.metadata()?;
     if before.len() != entry.file_size || unix_seconds(before.modified()?)? != entry.mtime {
         return Ok(None);
     }
     // 修改时间只记到秒，扫描后同一秒内被等长重写的文件靠大小和修改时间认不出来，
     // 再核对快速指纹，免得把新内容的指纹写到描述旧内容的记录上。
-    if shuku_archive::quick_hash(path)? != entry.quick_hash {
+    if shuku_archive::quick_hash_file(&mut file)? != entry.quick_hash {
         return Ok(None);
     }
-    let hash = shuku_archive::content_hash(path)?;
-    let after = fs::metadata(path)?;
+    let hash = shuku_archive::content_hash_file(&mut file)?;
+    let after = file.metadata()?;
     if after.len() != before.len() || after.modified()? != before.modified()? {
         return Ok(None);
     }
