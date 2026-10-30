@@ -141,6 +141,8 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
     assert_eq!(first["items"][0]["progress"], Value::Null);
     assert_eq!(first["items"][0]["page_count"], 2);
     assert_eq!(first["items"][0]["is_new"], true);
+    assert_eq!(first["items"][0]["date_added"], 1);
+    assert_eq!(first["items"][0]["source_url"], "https://example.org/book");
     assert_eq!(
         first["items"][0]["tags"],
         value!([

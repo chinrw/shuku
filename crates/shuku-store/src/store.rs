@@ -298,7 +298,7 @@ impl Store {
         let transaction = self.connection.unchecked_transaction()?;
         let mut statement = transaction.prepare(&format!(
             "SELECT a.id, a.title, a.page_count, a.quick_hash, a.content_hash, a.is_new,
-                p.page, p.client_time, p.updated_at
+                a.date_added, a.source_url, p.page, p.client_time, p.updated_at
              FROM archive a LEFT JOIN progress p ON p.archive_id = a.id
              WHERE a.id IN ({placeholders})"
         ))?;
@@ -311,6 +311,8 @@ impl Store {
                     quick_hash: row.get("quick_hash")?,
                     content_hash: row.get("content_hash")?,
                     is_new: row.get("is_new")?,
+                    date_added: row.get("date_added")?,
+                    source_url: row.get("source_url")?,
                     tags: Vec::new(),
                     progress: if row.get::<_, Option<u32>>("page")?.is_some() {
                         Some(read_progress(row)?)

@@ -63,6 +63,8 @@ fn reads_list_metadata_in_requested_order() {
     );
     assert!(list[1].content_hash.is_none());
     assert!(list[0].tags.is_empty());
+    assert_eq!(list[1].date_added, 1_700_000_000);
+    assert_eq!(list[1].source_url, None);
     // 与详情一致，按小写完整名排序。
     assert_eq!(
         list[1].tags,

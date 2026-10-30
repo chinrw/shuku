@@ -80,6 +80,9 @@ pub struct ArchiveListItem {
     pub quick_hash: String,
     pub content_hash: Option<String>,
     pub is_new: bool,
+    /// Unix 秒。
+    pub date_added: i64,
+    pub source_url: Option<String>,
     /// 按小写完整名排序，与 [`Archive::tags`] 一致。
     pub tags: Vec<Tag>,
 }

@@ -120,6 +120,7 @@ async fn search(
             "id": item.id, "title": item.title, "page_count": item.page_count,
             "is_new": item.is_new, "progress": progress(item.progress.as_ref()),
             "cover_url": cover_url(item.id, &item.quick_hash), "tags": tag_groups(item.tags),
+            "date_added": item.date_added, "source_url": item.source_url,
         })).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": parsed.degraded, "items": items})))
     }).await
