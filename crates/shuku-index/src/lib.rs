@@ -11,7 +11,8 @@ mod parser;
 pub use parser::{ParseError, ParsedQuery, parse_query};
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
 use memchr::memmem;
 use roaring::RoaringBitmap;
@@ -27,6 +28,11 @@ pub const DEFAULT_LIMIT: usize = 50;
 /// archives match; below that it is cheaper to sort the matches by rank.
 /// Measured on 300k archives, both paths stay under 3 ms at this split.
 const DENSE_DIVISOR: u64 = 64;
+
+/// 结果不到全部归档的 1/16 时，统计标签改为逐本累加每本的标签，否则按标签
+/// 从大到小求交集。在 30 万本上取前 10 个标签时，结果占 5% 时逐本累加更快，
+/// 占 11% 时求交集更快。
+const FACET_DIVISOR: u64 = 16;
 
 /// One archive as the index needs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,12 +103,22 @@ pub struct SearchResult {
     pub next_after: Option<ArchiveId>,
 }
 
+/// 一个标签，以及搜索结果里有多少本归档带这个标签。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagCount {
+    /// 小写的完整标签名，例如 `artist:alpha`。
+    pub tag: String,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BuildError {
     #[error("archive id {0} appears more than once")]
     DuplicateId(ArchiveId),
     #[error("the index holds at most u32::MAX archives")]
     TooManyArchives,
+    #[error("the index holds at most u32::MAX distinct tags")]
+    TooManyTags,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -138,6 +154,11 @@ pub struct Index {
     tag_names: Vec<String>,
     /// Bitmap for the tag at the same position in `tag_names`.
     tag_docs: Vec<RoaringBitmap>,
+    /// 标签位置按归档数从多到少排列，统计标签时可以提前停止。
+    tags_by_size: Vec<u32>,
+    /// 第 n 本归档的标签位置是 `doc_tags[doc_tag_start[n]..doc_tag_start[n + 1]]`。
+    doc_tag_start: Vec<usize>,
+    doc_tags: Vec<u32>,
     /// Lowercased titles, each followed by `\n`, scanned with memmem.
     titles: Vec<u8>,
     /// Byte offset where each title starts in `titles`.
@@ -174,10 +195,14 @@ impl Index {
 
         let mut tags: Vec<(String, Vec<u32>)> = tag_lists.into_iter().collect();
         tags.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let (tag_names, tag_docs) = tags
+        let (tag_names, tag_docs): (Vec<String>, Vec<RoaringBitmap>) = tags
             .into_iter()
             .map(|(name, docs)| (name, docs.into_iter().collect::<RoaringBitmap>()))
             .unzip();
+        let tag_count = u32::try_from(tag_docs.len()).map_err(|_| BuildError::TooManyTags)?;
+        let mut tags_by_size: Vec<u32> = (0..tag_count).collect();
+        tags_by_size.sort_by_key(|&tag| Reverse(tag_docs[tag as usize].len()));
+        let (doc_tag_start, doc_tags) = doc_tag_table(ids.len(), &tag_docs);
 
         let count = ids.len() as u32;
         let mut by_title: Vec<u32> = (0..count).collect();
@@ -196,6 +221,9 @@ impl Index {
             doc_of,
             tag_names,
             tag_docs,
+            tags_by_size,
+            doc_tag_start,
+            doc_tags,
             titles,
             title_start,
             by_title: SortOrder::new(by_title),
@@ -231,6 +259,69 @@ impl Index {
             total: matches.len(),
             next_after,
         })
+    }
+
+    /// 返回 `query` 的结果里出现最多的 `limit` 个标签，按归档数从多到少、
+    /// 同数时按标签名排列，不含数量为零的标签。忽略 `sort`、`after` 和
+    /// `limit`；包含条件里的标签照常统计。
+    pub fn facets(&self, query: &Query, limit: usize) -> Vec<TagCount> {
+        let matches = self.evaluate(query);
+        if limit == 0 || matches.is_empty() {
+            return Vec::new();
+        }
+        // 返回的标签不会比索引里的标签多，限制后也不会按调用方的 limit 预分配过多内存。
+        let limit = limit.min(self.tag_names.len());
+        let top = if matches.len() * FACET_DIVISOR < self.ids.len() as u64 {
+            self.top_tags_per_doc(&matches, limit)
+        } else {
+            self.top_tags_by_size(&matches, limit)
+        };
+        top.into_sorted()
+            .into_iter()
+            .map(|(count, tag)| TagCount {
+                tag: self.tag_names[tag as usize].clone(),
+                count,
+            })
+            .collect()
+    }
+
+    /// 逐本累加结果里每本归档的标签。除了清零一张按标签数分配的计数表，
+    /// 耗时与结果大小成正比。
+    fn top_tags_per_doc(&self, matches: &RoaringBitmap, limit: usize) -> TopTags {
+        let mut counts = vec![0u32; self.tag_names.len()];
+        let mut seen = Vec::new();
+        for doc in matches {
+            let doc = doc as usize;
+            for &tag in &self.doc_tags[self.doc_tag_start[doc]..self.doc_tag_start[doc + 1]] {
+                if counts[tag as usize] == 0 {
+                    seen.push(tag);
+                }
+                counts[tag as usize] += 1;
+            }
+        }
+        let mut top = TopTags::new(limit);
+        for tag in seen {
+            top.offer(u64::from(counts[tag as usize]), tag);
+        }
+        top
+    }
+
+    /// 按标签从大到小求交集。结果很大时，最大的几个标签就能填满前 `limit` 名。
+    fn top_tags_by_size(&self, matches: &RoaringBitmap, limit: usize) -> TopTags {
+        let mut top = TopTags::new(limit);
+        for &tag in &self.tags_by_size {
+            let docs = &self.tag_docs[tag as usize];
+            // 交集不会超过标签本身的归档数，标签又按归档数从多到少遍历，
+            // 所以一旦比最弱候选还少，后面的标签都进不了前 `limit` 名。
+            if top.weakest().is_some_and(|weakest| docs.len() < weakest) {
+                break;
+            }
+            let count = docs.intersection_len(matches);
+            if count > 0 {
+                top.offer(count, tag);
+            }
+        }
+        top
     }
 
     fn evaluate(&self, query: &Query) -> RoaringBitmap {
@@ -331,6 +422,72 @@ impl Index {
         }
         docs.sort_unstable_by_key(rank);
         docs
+    }
+}
+
+/// 由每个标签的归档位图反推每本归档的标签位置，按归档连续存放。
+fn doc_tag_table(doc_count: usize, tag_docs: &[RoaringBitmap]) -> (Vec<usize>, Vec<u32>) {
+    let mut start = vec![0; doc_count + 1];
+    for docs in tag_docs {
+        for doc in docs {
+            start[doc as usize + 1] += 1;
+        }
+    }
+    for doc in 0..doc_count {
+        start[doc + 1] += start[doc];
+    }
+    let mut tags = vec![0; start[doc_count]];
+    let mut next = start.clone();
+    for (tag, docs) in (0u32..).zip(tag_docs) {
+        for doc in docs {
+            tags[next[doc as usize]] = tag;
+            next[doc as usize] += 1;
+        }
+    }
+    (start, tags)
+}
+
+/// 保留归档数最多的 `limit` 个标签；同数时位置小、也就是名字靠前的优先。
+struct TopTags {
+    limit: usize,
+    /// 小顶堆，堆顶是目前留下的最弱候选，所以第二个键用 Reverse(位置)。
+    heap: BinaryHeap<Reverse<(u64, Reverse<u32>)>>,
+}
+
+impl TopTags {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            heap: BinaryHeap::with_capacity(limit),
+        }
+    }
+
+    /// 已经留满 `limit` 个时，返回最弱候选的归档数。
+    fn weakest(&self) -> Option<u64> {
+        if self.heap.len() < self.limit {
+            return None;
+        }
+        self.heap.peek().map(|Reverse((count, _))| *count)
+    }
+
+    fn offer(&mut self, count: u64, tag: u32) {
+        let candidate = Reverse((count, Reverse(tag)));
+        if self.heap.len() < self.limit {
+            self.heap.push(candidate);
+        } else if let Some(mut weakest) = self.heap.peek_mut()
+            && candidate < *weakest
+        {
+            *weakest = candidate;
+        }
+    }
+
+    /// 返回 `(归档数, 标签位置)`，最强的在前。
+    fn into_sorted(self) -> Vec<(u64, u32)> {
+        self.heap
+            .into_sorted_vec()
+            .into_iter()
+            .map(|Reverse((count, Reverse(tag)))| (count, tag))
+            .collect()
     }
 }
 
