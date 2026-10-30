@@ -12,6 +12,9 @@ export interface ArchiveItem {
 	is_new: boolean;
 	progress: Progress | null;
 	cover_url: string;
+	/** Unix 秒。 */
+	date_added: number;
+	source_url: string | null;
 	tags: TagGroup[];
 }
 
@@ -29,8 +32,6 @@ export interface TagGroup {
 
 export interface ArchiveDetail extends ArchiveItem {
 	summary: string;
-	date_added: number;
-	source_url: string | null;
 	file_size: number;
 }
 

@@ -1,8 +1,13 @@
-/* 深色配色取自 LRR 的 modern 主题，命名空间颜色与 LRR 一致。 */
+/*
+ * 深色取自 LRR 的 ExHentai 主题（ex.css），浅色取自 E-Hentai 主题（g.css），跟随系统切换。
+ * 作者、社团、原作三类命名空间的颜色与 LRR 一致，浅色下调深以便在米色背景上看清。
+ */
 :root {
 	--bg: #34353b;
 	--surface: #43464e;
+	--raised: #4b4f57;
 	--chip: #4f535b;
+	--chip-border: #6d7179;
 	--fg: #dddddd;
 	--muted: #a6a9ae;
 	--faint: #7c8087;
@@ -23,18 +28,22 @@
 
 @media (prefers-color-scheme: light) {
 	:root {
-		--bg: #f2f2f4;
-		--surface: #ffffff;
-		--chip: #e7e8ec;
-		--fg: #1f2023;
-		--muted: #5d6066;
-		--faint: #9a9da3;
-		--border: #d9dade;
-		--link: #1a73c8;
-		--accent: #1a73c8;
-		--artist: #0b7fc2;
-		--group: #12917a;
-		--parody: #b23a68;
+		--bg: #e3e0d1;
+		--surface: #edebdf;
+		--raised: #f2efdf;
+		--chip: #f2efdf;
+		--chip-border: #806769;
+		--fg: #5c0d11;
+		--muted: #806769;
+		--faint: #a8999a;
+		--border: #cfcab6;
+		--link: #9b4e03;
+		--accent: #9b4e03;
+		--new: #c4561b;
+		--danger: #b91c1c;
+		--artist: #0f6ba8;
+		--group: #0e7f69;
+		--parody: #a8325e;
 		color-scheme: light;
 	}
 }

@@ -7,6 +7,7 @@
 	import { settings } from '#lib/settings.svelte.ts';
 	import { buildSpreads } from '#lib/spreads.ts';
 	import TagTable from '#lib/TagTable.svelte';
+	import { tagRows } from '#lib/tags.ts';
 
 	// 滚动模式下页面不会比这个宽，宽屏上两侧留空。
 	const SCROLL_MAX_WIDTH = 960;
@@ -202,18 +203,10 @@
 		</div>
 	{/if}
 
+	<!-- 平时不显示任何控件；点屏幕中间出现一条底栏，设置和标签都收在菜单里。 -->
 	{#if toolbar}
-		<header class="bar">
-			<a class="bar-button" href="/a/{book.id}" onclick={back} aria-label="返回"><Icon name="back" /></a>
-			<span class="title">{book.title}</span>
-			<span class="counter">
-				{visible.length === 2 ? `${visible[0] + 1}-${visible[1] + 1}` : current + 1} / {pages.length}
-			</span>
-			<button class="bar-button" onclick={() => (panel = true)} aria-label="标签和简介">
-				<Icon name="info" />
-			</button>
-		</header>
 		<footer class="bar">
+			<a class="bar-button" href="/a/{book.id}" onclick={back} aria-label="返回"><Icon name="back" /></a>
 			<input
 				type="range"
 				min="0"
@@ -223,41 +216,57 @@
 				onchange={(event) => jump(Number(event.currentTarget.value))}
 				aria-label="跳到页"
 			/>
-			<div class="options">
-				<button
-					class:on={prefs.mode === 'scroll'}
-					onclick={() => update(() => (prefs.mode = prefs.mode === 'paged' ? 'scroll' : 'paged'))}
-					>滚动</button
-				>
-				{#if prefs.mode === 'paged'}
-					<button
-						onclick={() =>
-							update(() => (prefs.direction = prefs.direction === 'rtl' ? 'ltr' : 'rtl'))}
-						>{prefs.direction === 'rtl' ? '右→左' : '左→右'}</button
-					>
-					<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = !prefs.spread))}
-						>双页</button
-					>
-				{/if}
-			</div>
+			<span class="counter">
+				{visible.length === 2 ? `${visible[0] + 1}-${visible[1] + 1}` : current + 1} / {pages.length}
+			</span>
+			<button class="bar-button" onclick={() => (panel = true)} aria-label="菜单">
+				<Icon name="more" />
+			</button>
 		</footer>
 	{/if}
 
 	{#if panel}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 		<div class="scrim" onclick={() => (panel = false)}></div>
-		<aside class="panel" aria-label="标签和简介">
+		<aside class="panel" aria-label="设置和标签">
 			<div class="panel-head">
 				<h2>{book.title}</h2>
 				<button class="bar-button" onclick={() => (panel = false)} aria-label="关闭">
 					<Icon name="close" />
 				</button>
 			</div>
-			{#if book.tags.length > 0}
-				<TagTable groups={book.tags} />
-			{:else}
-				<p class="muted">没有标签</p>
-			{/if}
+			<div class="settings">
+				<span>阅读方式</span>
+				<div class="segmented">
+					<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
+						>翻页</button
+					>
+					<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
+						>滚动</button
+					>
+				</div>
+				{#if prefs.mode === 'paged'}
+					<span>方向</span>
+					<div class="segmented">
+						<button
+							class:on={prefs.direction === 'rtl'}
+							onclick={() => update(() => (prefs.direction = 'rtl'))}>右→左</button
+						>
+						<button
+							class:on={prefs.direction === 'ltr'}
+							onclick={() => update(() => (prefs.direction = 'ltr'))}>左→右</button
+						>
+					</div>
+					<span>横屏双页</span>
+					<div class="segmented">
+						<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
+						<button class:on={!prefs.spread} onclick={() => update(() => (prefs.spread = false))}
+							>关</button
+						>
+					</div>
+				{/if}
+			</div>
+			<TagTable rows={tagRows(book)} />
 			{#if book.summary}<p class="summary">{book.summary}</p>{/if}
 		</aside>
 	{/if}
@@ -320,28 +329,20 @@
 		position: absolute;
 		left: 0;
 		right: 0;
+		bottom: 0;
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
-		padding: 0.5rem 0.75rem;
-		background: rgb(30 31 35 / 0.92);
+		gap: 0.5rem;
+		padding: 0.4rem 0.6rem;
+		padding-bottom: max(0.4rem, env(safe-area-inset-bottom));
+		background: rgb(20 20 22 / 0.88);
 		backdrop-filter: blur(8px);
 		-webkit-backdrop-filter: blur(8px);
 	}
 
-	header.bar {
-		top: 0;
-		padding-top: max(0.5rem, env(safe-area-inset-top));
-	}
-
-	footer.bar {
-		bottom: 0;
-		flex-wrap: wrap;
-		padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
-	}
-
 	.bar-button {
 		display: inline-flex;
+		flex: none;
 		align-items: center;
 		justify-content: center;
 		width: 2.25rem;
@@ -352,44 +353,49 @@
 		cursor: pointer;
 	}
 
-	.title {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-		font-size: 0.9rem;
-	}
-
 	.counter {
+		flex: none;
 		font-size: 0.85rem;
 		font-variant-numeric: tabular-nums;
 		color: #bbb;
 	}
 
 	input[type='range'] {
-		flex: 1 1 12rem;
-		accent-color: #3b97ea;
+		flex: 1;
+		min-width: 0;
+		accent-color: #8a8d93;
 	}
 
-	.options {
+	.settings {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		align-items: center;
+		gap: 0.6rem 1rem;
+		margin-bottom: 1.25rem;
+		font-size: 0.9rem;
+		color: #a6a9ae;
+	}
+
+	.segmented {
 		display: flex;
-		gap: 0.4rem;
+		width: fit-content;
+		border: 1px solid #50545c;
+		border-radius: 6px;
+		overflow: hidden;
 	}
 
-	.options button {
-		padding: 0.35rem 0.7rem;
-		border: 1px solid #555;
-		border-radius: 6px;
+	.segmented button {
+		padding: 0.3rem 0.9rem;
+		border: none;
 		background: transparent;
-		color: #ddd;
+		color: #ccc;
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
 
-	.options button.on {
-		border-color: #3b97ea;
-		color: #3b97ea;
+	.segmented button.on {
+		background: #4f535b;
+		color: #fff;
 	}
 
 	.scrim {
@@ -403,6 +409,7 @@
 		--fg: #dddddd;
 		--muted: #a6a9ae;
 		--chip: #4f535b;
+		--chip-border: #6d7179;
 		--link: #3b97ea;
 		position: absolute;
 		top: 0;
@@ -446,10 +453,6 @@
 		line-height: 1.7;
 		white-space: pre-wrap;
 		color: #ccc;
-	}
-
-	.muted {
-		color: #a6a9ae;
 	}
 
 	.toast {

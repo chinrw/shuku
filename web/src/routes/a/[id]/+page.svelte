@@ -6,13 +6,14 @@
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
 	import Icon from '#lib/Icon.svelte';
+	import { relatedQueries } from '#lib/related.ts';
+	import RelatedRow from '#lib/RelatedRow.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { httpUrl } from '#lib/url.ts';
+	import { tagRows } from '#lib/tags.ts';
 
 	let { data } = $props();
 	let book = $derived(data.archive);
 	let resumePage = $derived(book.progress?.page ?? 0);
-	let sourceLink = $derived(book.source_url === null ? null : httpUrl(book.source_url));
 
 	afterNavigate(({ from, type }) => {
 		if (from?.route.id === '/') libraryBehind = true;
@@ -49,8 +50,7 @@
 	<section class="head">
 		<h1>{book.title}</h1>
 		<p class="meta">
-			{book.page_count} 页 · {formatSize(book.file_size)}<br />
-			加入于 {new Date(book.date_added * 1000).toLocaleDateString()}
+			{book.page_count} 页 · {formatSize(book.file_size)}
 			{#if book.progress}<br />读到第 {resumePage + 1} 页{/if}
 		</p>
 		<div class="actions">
@@ -64,23 +64,18 @@
 	</section>
 
 	<section class="tags">
-		{#if book.tags.length > 0}
-			<TagTable groups={book.tags} />
-		{:else}
-			<p class="meta">没有标签</p>
-		{/if}
+		<TagTable rows={tagRows(book)} />
 	</section>
 
-	{#if book.summary || book.source_url}
-		<section class="summary">
-			{#if book.summary}<p>{book.summary}</p>{/if}
-			{#if sourceLink}
-				<p class="meta"><a href={sourceLink} target="_blank" rel="noreferrer">来源</a></p>
-			{:else if book.source_url}
-				<p class="meta">来源：{book.source_url}</p>
-			{/if}
-		</section>
+	{#if book.summary}
+		<section class="summary"><p>{book.summary}</p></section>
 	{/if}
+
+	<div class="related">
+		{#each relatedQueries(book.tags) as query (book.id + query.term)}
+			<RelatedRow label={query.label} term={query.term} exclude={book.id} />
+		{/each}
+	</div>
 </main>
 
 <style>
@@ -96,7 +91,8 @@
 		grid-template-areas:
 			'cover head'
 			'tags tags'
-			'summary summary';
+			'summary summary'
+			'related related';
 		gap: 1rem;
 		max-width: 64rem;
 		margin: 0 auto;
@@ -106,11 +102,12 @@
 	@media (min-width: 720px) {
 		main {
 			grid-template-columns: 280px minmax(0, 1fr);
-			grid-template-rows: auto auto 1fr;
+			grid-template-rows: auto auto 1fr auto;
 			grid-template-areas:
 				'cover head'
 				'cover tags'
-				'cover summary';
+				'cover summary'
+				'related related';
 			column-gap: 1.75rem;
 		}
 	}
@@ -182,6 +179,14 @@
 		grid-area: summary;
 		line-height: 1.7;
 		overflow-wrap: anywhere;
+	}
+
+	.related {
+		grid-area: related;
+		display: grid;
+		gap: 1.25rem;
+		min-width: 0;
+		margin-top: 0.5rem;
 	}
 
 	.summary p {

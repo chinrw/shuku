@@ -4,7 +4,9 @@
 	import Icon from '#lib/Icon.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
+	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
+	import { tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
 
 	let { data } = $props();
@@ -71,6 +73,40 @@
 		return () => observer.disconnect();
 	}
 
+	// 标签弹窗：鼠标悬停时打开，移开后稍等再关，让鼠标能移进弹窗里点标签；触屏点一下打开。
+	const HOVER_DELAY = 150;
+	let tagView = $state<{ item: ArchiveItem; anchor: DOMRect; sheet: boolean } | null>(null);
+	let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function openTags(item: ArchiveItem, target: HTMLElement) {
+		clearTimeout(hoverTimer);
+		tagView = { item, anchor: target.getBoundingClientRect(), sheet: window.innerWidth < 600 };
+	}
+
+	function closeTags() {
+		clearTimeout(hoverTimer);
+		tagView = null;
+	}
+
+	function hoverIn(event: PointerEvent, item?: ArchiveItem) {
+		if (event.pointerType !== 'mouse') return;
+		clearTimeout(hoverTimer);
+		const target = event.currentTarget as HTMLElement;
+		if (item) hoverTimer = setTimeout(() => openTags(item, target), HOVER_DELAY);
+	}
+
+	function hoverOut(event: PointerEvent) {
+		if (event.pointerType !== 'mouse') return;
+		clearTimeout(hoverTimer);
+		hoverTimer = setTimeout(() => (tagView = null), HOVER_DELAY);
+	}
+
+	function tapTags(event: MouseEvent, item: ArchiveItem) {
+		const target = event.currentTarget as HTMLElement;
+		if (tagView?.item.id === item.id && !tagView.sheet) closeTags();
+		else openTags(item, target);
+	}
+
 	function progressText(item: ArchiveItem) {
 		return item.progress ? `读到 ${item.progress.page + 1}` : item.is_new ? '新' : '';
 	}
@@ -121,9 +157,9 @@
 {#if prefs.view === 'grid'}
 	<main class="grid">
 		{#each items as item (item.id)}
-			<a class="card" href="/a/{item.id}">
-				<div class="title" title={item.title}>{item.title}</div>
-				<div class="cover">
+			<div class="card">
+				<a class="title" href="/a/{item.id}" title={item.title}>{item.title}</a>
+				<a class="cover" href="/a/{item.id}">
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
 					<span class="badge pages">{item.page_count}P</span>
@@ -133,9 +169,20 @@
 							style:width="{((item.progress.page + 1) / item.page_count) * 100}%"
 						></div>
 					{/if}
-				</div>
-				<TagLine groups={item.tags} />
-			</a>
+				</a>
+				{#if item.tags.length > 0}
+					<button
+						class="tags"
+						aria-label="查看全部标签"
+						aria-expanded={tagView?.item.id === item.id}
+						onclick={(event) => tapTags(event, item)}
+						onpointerenter={(event) => hoverIn(event, item)}
+						onpointerleave={hoverOut}
+					>
+						<TagLine groups={item.tags} />
+					</button>
+				{/if}
+			</div>
 		{/each}
 	</main>
 {:else}
@@ -151,12 +198,39 @@
 						{item.page_count} 页
 						{#if progressText(item)}· <span class:fresh={item.is_new && !item.progress}>{progressText(item)}</span>{/if}
 					</div>
-					<TagTable groups={item.tags} compact />
+					<!-- 列表里每本都显示加入日期和来源太占地方，这两行只放在弹窗和详情页里。 -->
+					<TagTable
+						rows={tagRows(item).filter(
+							(row) => row.namespace !== 'date_added' && row.namespace !== 'source'
+						)}
+						compact
+					/>
 				</div>
 			</article>
 		{/each}
 	</main>
 {/if}
+
+{#if tagView}
+	<TagPopover
+		item={tagView.item}
+		anchor={tagView.anchor}
+		sheet={tagView.sheet}
+		onclose={closeTags}
+		onpointerenter={(event) => hoverIn(event)}
+		onpointerleave={hoverOut}
+	/>
+{/if}
+
+<svelte:window
+	onkeydown={(event) => event.key === 'Escape' && closeTags()}
+	onscroll={() => tagView && !tagView.sheet && closeTags()}
+	onpointerdown={(event) => {
+		// 点在浮层和标签行以外的地方时关闭；底部面板由遮罩处理。
+		const target = event.target as Element;
+		if (tagView && !tagView.sheet && !target.closest('.popover, .tags')) closeTags();
+	}}
+/>
 
 {#if loadError}
 	<p class="footer error">
@@ -252,11 +326,14 @@
 		padding: 0.75rem;
 	}
 
+	/* 宽屏上限 1600px，常见的 1440 到 1920 宽屏都是一排五本。 */
 	@media (min-width: 1024px) {
 		.grid {
-			grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-			gap: 0.8rem;
-			padding: 1rem;
+			grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+			gap: 1rem;
+			max-width: 1600px;
+			margin: 0 auto;
+			padding: 1.25rem;
 		}
 	}
 
@@ -272,6 +349,7 @@
 	}
 
 	.card .title {
+		text-decoration: none;
 		min-height: 2.5em;
 		font-size: 0.85rem;
 		font-weight: 600;
@@ -285,6 +363,7 @@
 	}
 
 	.cover {
+		display: block;
 		position: relative;
 		aspect-ratio: 5 / 7;
 		overflow: hidden;
@@ -292,7 +371,21 @@
 		background: var(--chip);
 	}
 
+	.tags {
+		-webkit-tap-highlight-color: transparent;
+		padding: 0;
+		border: none;
+		background: none;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.tags:hover :global(.tagline) {
+		color: var(--fg);
+	}
+
 	.cover img {
+		display: block;
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
