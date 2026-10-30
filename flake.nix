@@ -21,6 +21,8 @@
             clippy
             rustfmt
             rust-analyzer
+            # AVIF 解码器的 x86 SIMD 汇编需要 NASM，不链接系统图像库。
+            nasm
             sqlite
             nodejs
             pnpm

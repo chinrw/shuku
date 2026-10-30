@@ -1,5 +1,15 @@
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 
+/// 扫描只需文件身份，不加载标签、进度和页面清单。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanEntry {
+    pub id: i64,
+    pub path: String,
+    pub file_size: u64,
+    pub mtime: i64,
+    pub quick_hash: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveMetadata {
     /// 相对内容目录的路径。

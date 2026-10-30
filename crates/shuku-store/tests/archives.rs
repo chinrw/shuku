@@ -11,6 +11,24 @@ fn tag(namespace: &str, value: &str) -> Tag {
 }
 
 #[test]
+fn lists_file_identity_for_scanning_without_loading_pages_or_tags() {
+    let mut store = Store::open(":memory:").unwrap();
+    assert!(store.scan_entries().unwrap().is_empty());
+    let first = store
+        .save_archive(None, &metadata("one.cbz"), &pages())
+        .unwrap();
+    let second = store.save_archive(None, &metadata("two.cbz"), &[]).unwrap();
+    let entries = store.scan_entries().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].id, first);
+    assert_eq!(entries[0].path, "one.cbz");
+    assert_eq!(entries[0].file_size, 1000);
+    assert_eq!(entries[0].mtime, 1_700_000_001);
+    assert_eq!(entries[0].quick_hash, "quick");
+    assert_eq!(entries[1].id, second);
+}
+
+#[test]
 fn reads_list_metadata_in_requested_order() {
     let mut store = Store::open(":memory:").unwrap();
     let first = store

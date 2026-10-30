@@ -4,7 +4,7 @@ mod models;
 mod store;
 
 pub use models::{
-    Archive, ArchiveListItem, ArchiveMetadata, CompressionMethod, Page, Progress, Tag,
+    Archive, ArchiveListItem, ArchiveMetadata, CompressionMethod, Page, Progress, ScanEntry, Tag,
 };
 pub use store::Store;
 

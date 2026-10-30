@@ -5,7 +5,8 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, param
 use shuku_index::ArchiveRecord;
 
 use crate::{
-    Archive, ArchiveListItem, ArchiveMetadata, Error, Page, Progress, Result, Tag, open_connection,
+    Archive, ArchiveListItem, ArchiveMetadata, Error, Page, Progress, Result, ScanEntry, Tag,
+    open_connection,
 };
 
 pub struct Store {
@@ -13,6 +14,22 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn scan_entries(&self) -> Result<Vec<ScanEntry>> {
+        Ok(self
+            .connection
+            .prepare("SELECT id, path, file_size, mtime, quick_hash FROM archive ORDER BY id")?
+            .query_map([], |row| {
+                Ok(ScanEntry {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    file_size: row.get(2)?,
+                    mtime: row.get(3)?,
+                    quick_hash: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
             connection: open_connection(path)?,
