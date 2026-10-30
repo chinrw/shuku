@@ -49,6 +49,33 @@ async fn hashes_unchanged_files_and_skips_changed_or_missing_ones() {
 }
 
 #[tokio::test]
+async fn skips_files_rewritten_with_same_size_and_mtime() {
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 10, 20);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let path = fixture.config.content_dir.join("book.cbz");
+    // 等长重写并把修改时间改回去，大小和秒级修改时间都和扫描时一样，只有内容不同。
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let mut bytes = fs::read(&path).unwrap();
+    for byte in bytes.iter_mut().take(8) {
+        *byte = !*byte;
+    }
+    fs::write(&path, &bytes).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+
+    let report = app.hash_contents().await.unwrap();
+
+    assert_eq!((report.hashed, report.skipped, report.failed), (0, 1, 0));
+    assert_eq!(content_hash(&fixture, "book.cbz"), None);
+}
+
+#[tokio::test]
 async fn stops_before_reading_files_once_stopped() {
     let fixture = Fixture::new();
     fixture.archive("book.cbz", 10, 20);

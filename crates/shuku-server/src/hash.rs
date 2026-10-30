@@ -50,7 +50,7 @@ impl App {
     }
 }
 
-/// 文件仍是扫描时记录的大小和修改时间，并且读的过程中没有变化时，返回整文件指纹。
+/// 文件仍是扫描时记录的大小、修改时间和快速指纹，并且读的过程中没有变化时，返回整文件指纹。
 fn hash_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
     let before = match fs::metadata(path) {
         Ok(metadata) => metadata,
@@ -58,6 +58,11 @@ fn hash_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
         Err(error) => return Err(error.into()),
     };
     if before.len() != entry.file_size || unix_seconds(before.modified()?)? != entry.mtime {
+        return Ok(None);
+    }
+    // 修改时间只记到秒，扫描后同一秒内被等长重写的文件靠大小和修改时间认不出来，
+    // 再核对快速指纹，免得把新内容的指纹写到描述旧内容的记录上。
+    if shuku_archive::quick_hash(path)? != entry.quick_hash {
         return Ok(None);
     }
     let hash = shuku_archive::content_hash(path)?;

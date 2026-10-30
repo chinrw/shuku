@@ -79,6 +79,9 @@
 	}
 
 	function onKeydown(event: KeyboardEvent) {
+		// 输入法组字期间方向键和回车是给候选窗的，不能拦下来选标签。
+		// Safari 在确认组字的那次 keydown 上 isComposing 为 false，只能靠 keyCode 229 认出。
+		if (event.isComposing || event.keyCode === 229) return;
 		if (suggestions.length === 0) return;
 		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
 			event.preventDefault();
