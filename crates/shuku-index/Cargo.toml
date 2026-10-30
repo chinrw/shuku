@@ -10,3 +10,6 @@ description = "In-memory tag and title search index for Shuku"
 memchr.workspace = true
 roaring.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
