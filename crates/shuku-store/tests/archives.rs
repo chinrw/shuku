@@ -40,6 +40,9 @@ fn reads_list_metadata_in_requested_order() {
     second_metadata.content_hash = Some("full".into());
     let second = store.save_archive(None, &second_metadata, &[]).unwrap();
     store.write_progress(first, 1, 1234).unwrap();
+    store
+        .replace_tags(first, &[tag("language", "中文"), tag("artist", "Alpha")])
+        .unwrap();
     let list = store.list_metadata(&[second, second + 1, first]).unwrap();
     assert_eq!(
         list.iter().map(|item| item.id).collect::<Vec<_>>(),
@@ -59,6 +62,12 @@ fn reads_list_metadata_in_requested_order() {
         store.archive(first).unwrap().unwrap().progress
     );
     assert!(list[1].content_hash.is_none());
+    assert!(list[0].tags.is_empty());
+    // 与详情一致，按小写完整名排序。
+    assert_eq!(
+        list[1].tags,
+        [tag("artist", "Alpha"), tag("language", "中文")]
+    );
     assert!(store.list_metadata(&[]).unwrap().is_empty());
     assert!(store.list_metadata(&[second + 1]).unwrap().is_empty());
 }

@@ -12,7 +12,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use shuku_index::Sort;
-use shuku_store::{Archive, Progress};
+use shuku_store::{Archive, Progress, Tag};
 use std::collections::BTreeMap;
 
 impl IntoResponse for Error {
@@ -119,7 +119,7 @@ async fn search(
         let items: Vec<_> = app.store()?.list_metadata(&result.ids)?.into_iter().map(|item| json!({
             "id": item.id, "title": item.title, "page_count": item.page_count,
             "is_new": item.is_new, "progress": progress(item.progress.as_ref()),
-            "cover_url": cover_url(item.id, &item.quick_hash),
+            "cover_url": cover_url(item.id, &item.quick_hash), "tags": tag_groups(item.tags),
         })).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": parsed.degraded, "items": items})))
     }).await
@@ -132,14 +132,7 @@ async fn detail(
     let Path(id) = id.map_err(Error::bad_request)?;
     app.blocking(move |app| {
         let archive = require_archive(&*app.store()?, id)?;
-        let mut tags: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for tag in archive.tags {
-            tags.entry(tag.namespace).or_default().push(tag.value);
-        }
-        let tags: Vec<_> = tags
-            .into_iter()
-            .map(|(namespace, values)| json!({"namespace": namespace, "values": values}))
-            .collect();
+        let tags = tag_groups(archive.tags);
         Ok(Json(json!({
             "id": archive.id, "title": archive.metadata.title,
             "summary": archive.metadata.summary, "page_count": archive.page_count,
@@ -171,6 +164,18 @@ async fn pages(
 
 pub(crate) fn require_archive(store: &shuku_store::Store, id: i64) -> Result<Archive> {
     store.archive(id)?.ok_or_else(Error::not_found)
+}
+
+/// 按命名空间分组，组按命名空间名排序，组内保持存储层给出的顺序。
+fn tag_groups(tags: Vec<Tag>) -> Vec<Value> {
+    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for tag in tags {
+        groups.entry(tag.namespace).or_default().push(tag.value);
+    }
+    groups
+        .into_iter()
+        .map(|(namespace, values)| json!({"namespace": namespace, "values": values}))
+        .collect()
 }
 
 fn progress(value: Option<&Progress>) -> Value {

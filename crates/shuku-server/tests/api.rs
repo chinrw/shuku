@@ -141,6 +141,13 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
     assert_eq!(first["items"][0]["progress"], Value::Null);
     assert_eq!(first["items"][0]["page_count"], 2);
     assert_eq!(first["items"][0]["is_new"], true);
+    assert_eq!(
+        first["items"][0]["tags"],
+        value!([
+            {"namespace": "", "values": ["独立标签"]},
+            {"namespace": "artist", "values": ["乙", "甲"]}
+        ])
+    );
     assert_eq!(first["next_after"], id);
     let second = json(
         &router,

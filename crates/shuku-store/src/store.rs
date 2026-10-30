@@ -292,9 +292,11 @@ impl Store {
 
     /// 按输入 ID 的顺序返回列表项，跳过已不存在的归档。
     /// 调用方传入一页搜索结果，ID 数量受 API 的分页上限约束。
+    /// 元数据和标签从同一个读取快照中取得。
     pub fn list_metadata(&self, ids: &[i64]) -> Result<Vec<ArchiveListItem>> {
         let placeholders = vec!["?"; ids.len()].join(",");
-        let mut statement = self.connection.prepare(&format!(
+        let transaction = self.connection.unchecked_transaction()?;
+        let mut statement = transaction.prepare(&format!(
             "SELECT a.id, a.title, a.page_count, a.quick_hash, a.content_hash, a.is_new,
                 p.page, p.client_time, p.updated_at
              FROM archive a LEFT JOIN progress p ON p.archive_id = a.id
@@ -309,6 +311,7 @@ impl Store {
                     quick_hash: row.get("quick_hash")?,
                     content_hash: row.get("content_hash")?,
                     is_new: row.get("is_new")?,
+                    tags: Vec::new(),
                     progress: if row.get::<_, Option<u32>>("page")?.is_some() {
                         Some(read_progress(row)?)
                     } else {
@@ -318,6 +321,21 @@ impl Store {
             })?
             .map(|row| row.map(|item| (item.id, item)))
             .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        let mut tags = transaction.prepare(&format!(
+            "SELECT archive_tag.archive_id, tag.namespace, tag.value
+             FROM archive_tag JOIN tag ON tag.id = archive_tag.tag_id
+             WHERE archive_tag.archive_id IN ({placeholders})
+             ORDER BY tag.full"
+        ))?;
+        let mut rows = tags.query(params_from_iter(ids))?;
+        while let Some(row) = rows.next()? {
+            if let Some(item) = items.get_mut(&row.get::<_, i64>(0)?) {
+                item.tags.push(Tag {
+                    namespace: row.get(1)?,
+                    value: row.get(2)?,
+                });
+            }
+        }
         Ok(ids.iter().filter_map(|id| items.remove(id)).collect())
     }
 

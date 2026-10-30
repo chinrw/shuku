@@ -80,6 +80,8 @@ pub struct ArchiveListItem {
     pub quick_hash: String,
     pub content_hash: Option<String>,
     pub is_new: bool,
+    /// 按小写完整名排序，与 [`Archive::tags`] 一致。
+    pub tags: Vec<Tag>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -23,9 +23,15 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
   "page_count": 180,
   "is_new": false,
   "progress": { "page": 12, "client_time": 1761800000000 },
-  "cover_url": "/api/archives/42/thumbnail?v=<quick_hash>"
+  "cover_url": "/api/archives/42/thumbnail?v=<quick_hash>",
+  "tags": [
+    { "namespace": "", "values": ["独立标签"] },
+    { "namespace": "artist", "values": ["某某"] }
+  ]
 }
 ```
+
+列表项带上全部标签，网页端在列表里直接显示，不用逐本请求详情。`tags` 的格式与归档详情相同。
 
 `cover_url` 和页面 URL 都由服务端生成，客户端原样使用，不自己拼接。URL 里的 `v` 是归档的快速指纹，文件内容变化后 URL 随之变化，所以图片响应可以永久缓存。
 
@@ -68,8 +74,8 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
   "progress": null,
   "cover_url": "/api/archives/42/thumbnail?v=<quick_hash>",
   "tags": [
-    { "namespace": "artist", "values": ["某某"] },
-    { "namespace": "", "values": ["独立标签"] }
+    { "namespace": "", "values": ["独立标签"] },
+    { "namespace": "artist", "values": ["某某"] }
   ]
 }
 ```
