@@ -1,7 +1,7 @@
 mod common;
 
 use common::{bmp, patch_first_entry_headers, write_zip};
-use shuku_archive::{CompressionMethod, Error, list_pages, read_page};
+use shuku_archive::{CompressionMethod, Error, MAX_PAGE_SIZE, list_pages, read_page};
 use zip::CompressionMethod::{Deflated, Stored};
 
 #[test]
@@ -263,4 +263,14 @@ fn natural_order_compares_numbers_without_integer_overflow() {
             "第100000000000000000000话.bmp",
         ]
     );
+}
+
+#[test]
+fn rejects_pages_whose_declared_size_exceeds_the_limit() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("book.zip");
+    write_zip(&path, &[("1.bmp", Deflated, &bmp(2, 3))]);
+    let declared = u32::try_from(MAX_PAGE_SIZE + 1).unwrap();
+    patch_first_entry_headers(&path, 22, 24, &declared.to_le_bytes());
+    assert!(matches!(list_pages(&path), Err(Error::CorruptEntry { .. })));
 }

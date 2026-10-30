@@ -35,6 +35,10 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// 原始大小来自中央目录，读页和尺寸探测都按它分配内存。
+/// 漫画单页远小于这个值，超过的条目视为损坏，避免伪造的大小耗尽内存。
+pub const MAX_PAGE_SIZE: u64 = 256 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressionMethod {
     Stored,
@@ -101,6 +105,12 @@ pub fn list_pages(path: impl AsRef<Path>) -> Result<Vec<Page>> {
             return Err(Error::CorruptEntry {
                 entry_name: page.entry_name,
                 reason: "stored 条目的压缩大小与原始大小不符",
+            });
+        }
+        if page.size > MAX_PAGE_SIZE {
+            return Err(Error::CorruptEntry {
+                entry_name: page.entry_name,
+                reason: "图片超过单页大小上限",
             });
         }
         drop(entry);
