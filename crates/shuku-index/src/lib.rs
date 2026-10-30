@@ -6,6 +6,9 @@
 //! rebuilds it (or swaps in a new one) after the database changes.
 
 mod natural;
+mod parser;
+
+pub use parser::{ParseError, ParsedQuery, parse_query};
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -47,6 +50,8 @@ pub enum Term {
     TagContains(String),
     /// Archives whose title contains this string.
     TitleContains(String),
+    /// 子条件取并集；空列表不匹配任何归档。
+    Any(Vec<Term>),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -271,6 +276,12 @@ impl Index {
                 Cow::Owned(self.union_of(hits))
             }
             Term::TitleContains(needle) => Cow::Owned(self.title_docs(&scan_text(needle))),
+            Term::Any(terms) => {
+                Cow::Owned(terms.iter().fold(RoaringBitmap::new(), |mut docs, term| {
+                    docs |= self.term_docs(term).as_ref();
+                    docs
+                }))
+            }
         }
     }
 
