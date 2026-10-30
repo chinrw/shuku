@@ -61,3 +61,9 @@ nix develop -c cargo run -p shuku-migrate-lrr -- \
 ```
 
 media-lxc 上 LRR 的 Redis（valkey）监听 6381，不是默认的 6379。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。找不到对应文件的记录会列在输出里。
+
+## 使用发布包
+
+推送 `vX.Y.Z` 或 `vX.Y.Z-后缀` 形式的标签（例如 `git tag v0.1.0 && git push origin v0.1.0`）后，GitHub Actions 构建并发布 `shuku-<标签>-x86_64-linux.tar.gz` 和它的 SHA-256 校验文件，在仓库的 Releases 页面下载。包里有静态链接（musl）的 `shuku` 和 `shuku-migrate-lrr`，不依赖系统库，NixOS 上也能直接运行；网页端构建产物在 `web/build`。
+
+在解压出的目录里运行 `./shuku`，默认的 `--web-dir web/build` 就能找到网页端；从别的目录运行时用 `--web-dir` 指向它。其余参数与上文相同。

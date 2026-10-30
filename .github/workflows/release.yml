@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# 构建作业只有读权限；install-nix-action 默认把作业令牌写进 Nix 配置，
+# 所以写权限只给不运行第三方代码的发布作业。
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # 标签名会进入文件名和 gh 的参数，gh 把附件参数里的 # 当作显示名分隔符。
+      - name: Check tag format
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::tag $TAG is not vX.Y.Z or vX.Y.Z-suffix"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+
+      # 网页端用 flake 里的 Node 和 pnpm 构建，与本地一致。
+      - name: Build web client
+        working-directory: web
+        run: nix develop -c sh -c 'pnpm install --frozen-lockfile && pnpm build'
+
+      # flake 里的 rustc 只带宿主的标准库，没有 musl 目标，所以用 runner 自带的 rustup
+      # 安装与 flake 相同版本的 rustc 和 musl 标准库。部署机是 NixOS，没有通用的 glibc
+      # 动态加载器，因此发布静态二进制。
+      - name: Install Rust matching the flake
+        run: |
+          version=$(nix develop -c rustc --version | awk '{print $2}')
+          rustup toolchain install "$version" --profile minimal --target "$TARGET"
+          rustup default "$version"
+
+      # rusqlite 的 bundled SQLite 用 musl-gcc 编译，AVIF 解码器的汇编需要 NASM。
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools nasm
+
+      - name: Build binaries
+        run: cargo build --release --locked --target "$TARGET" --bin shuku --bin shuku-migrate-lrr
+
+      # 解压后在包目录里直接运行 ./shuku，默认的 --web-dir web/build 就能找到网页端。
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          name="shuku-${TAG}-x86_64-linux"
+          mkdir -p "dist/$name/web"
+          cp "target/$TARGET/release/shuku" "target/$TARGET/release/shuku-migrate-lrr" "dist/$name/"
+          cp -r web/build "dist/$name/web/build"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release
+          path: dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            "dist/shuku-${TAG}-x86_64-linux.tar.gz" \
+            "dist/shuku-${TAG}-x86_64-linux.tar.gz.sha256"

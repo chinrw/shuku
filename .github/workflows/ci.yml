@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+# 私有仓库按分钟计费：同一分支上新的推送取消还在跑的旧运行。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      # 与本地相同，全部命令都在 flake 的开发环境里运行，工具链版本由 flake.lock 决定。
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Warm up the dev shell
+        run: nix develop -c true
+
+      # 回退前缀也带上 flake.lock，升级 rustc 后不恢复旧工具链的编译产物。
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.local/share/pnpm/store
+            target
+          key: ci-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ hashFiles('Cargo.lock', 'web/pnpm-lock.yaml') }}
+          restore-keys: ci-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+
+      - name: Rust format
+        run: nix develop -c cargo fmt --all --check
+
+      - name: Clippy
+        run: nix develop -c cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Rust tests
+        run: nix develop -c cargo test --workspace --locked
+
+      - name: Install web dependencies
+        working-directory: web
+        run: nix develop -c pnpm install --frozen-lockfile
+
+      - name: Web type check
+        working-directory: web
+        run: nix develop -c pnpm check
+
+      - name: Web tests
+        working-directory: web
+        run: nix develop -c pnpm test
+
+      - name: Web build
+        working-directory: web
+        run: nix develop -c pnpm build
