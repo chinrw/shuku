@@ -22,6 +22,8 @@
             rustfmt
             rust-analyzer
             sqlite
+            nodejs
+            pnpm
           ];
           RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };
