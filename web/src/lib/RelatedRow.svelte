@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { search, type ArchiveItem } from './api';
+	import { search, similar, type ArchiveItem } from './api';
 
-	// 详情页底部的一排推荐：同一个标签下的其他本子，最新加入的在前。
+	// 详情页底部给 archive 这本书的一排推荐，不含它自己。给 term 时是同一个标签下的
+	// 其他本子，最新加入的在前，带“全部”链接；不给时是按标签相似度排的相似作品。
 	const LIMIT = 13;
 
-	let { label, term, exclude }: { label: string; term: string; exclude: number } = $props();
+	let { label, term, archive }: { label: string; term?: string; archive: number } = $props();
 
 	let items = $state<ArchiveItem[] | null>(null);
 	let total = $state(0);
@@ -12,10 +13,14 @@
 
 	$effect(() => {
 		let cancelled = false;
-		search(fetch, { q: term, sort: 'date', limit: LIMIT })
+		const load =
+			term === undefined
+				? similar(fetch, archive, LIMIT).then((items) => ({ items, total: 0 }))
+				: search(fetch, { q: term, sort: 'date', limit: LIMIT });
+		load
 			.then((result) => {
 				if (cancelled) return;
-				items = result.items.filter((item) => item.id !== exclude).slice(0, LIMIT - 1);
+				items = result.items.filter((item) => item.id !== archive).slice(0, LIMIT - 1);
 				total = result.total;
 			})
 			.catch((error) => {
@@ -36,7 +41,9 @@
 	<section>
 		<h2>
 			{label}
-			<a class="all" href="/?q={encodeURIComponent(term)}&sort=date">全部 {total}</a>
+			{#if term !== undefined}
+				<a class="all" href="/?q={encodeURIComponent(term)}&sort=date">全部 {total}</a>
+			{/if}
 		</h2>
 		<div class="strip">
 			{#each items as item (item.id)}

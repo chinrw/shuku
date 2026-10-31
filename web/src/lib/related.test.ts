@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { relatedQueries } from './related';
+import { artistQueries, relatedQueries } from './related';
 
 describe('relatedQueries', () => {
 	it('uses artists, groups and parodies in that order and skips original works', () => {
@@ -32,5 +32,31 @@ describe('relatedQueries', () => {
 	it('stops at four rows', () => {
 		const groups = [{ namespace: 'artist', values: ['a', 'b', 'c', 'd', 'e'] }];
 		expect(relatedQueries(groups)).toHaveLength(4);
+	});
+});
+
+describe('artistQueries', () => {
+	it('lists only artists and stops at two rows', () => {
+		const groups = [
+			{ namespace: 'series', values: ['ONE PIECE'] },
+			{ namespace: 'Artist', values: ['a', 'b', 'c'] }
+		];
+		expect(artistQueries(groups)).toEqual([
+			{ label: '作者：a', term: '"Artist:a"' },
+			{ label: '作者：b', term: '"Artist:b"' }
+		]);
+	});
+
+	it('reads the Chinese namespaces of translated tags', () => {
+		const groups = [
+			{ namespace: '原作', values: ['原创'] },
+			{ namespace: '艺术家', values: ['三日月'] },
+			{ namespace: '团队', values: ['月光堂'] }
+		];
+		expect(artistQueries(groups)).toEqual([{ label: '作者：三日月', term: '"艺术家:三日月"' }]);
+		expect(relatedQueries(groups)).toEqual([
+			{ label: '作者：三日月', term: '"艺术家:三日月"' },
+			{ label: '社团：月光堂', term: '"团队:月光堂"' }
+		]);
 	});
 });

@@ -432,6 +432,64 @@ async fn escaped_wildcards_match_tags_literally_in_search() {
 }
 
 #[tokio::test]
+async fn similar_lists_archives_sharing_rare_tags_and_validates_limit() {
+    let fixture = Fixture::new();
+    for name in ["a.cbz", "b.cbz", "c.cbz", "d.cbz"] {
+        fixture.archive(name, 10, 20);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let mut store = Store::open(fixture.database()).unwrap();
+    let id = |name: &str| store.find_by_path(name).unwrap().unwrap();
+    let (a, b, c, d) = (id("a.cbz"), id("b.cbz"), id("c.cbz"), id("d.cbz"));
+    let tag = |namespace: &str, value: &str| Tag {
+        namespace: namespace.into(),
+        value: value.into(),
+    };
+    // b 和 a 共有作者，c 只共有更常见的 female:glasses，d 什么都不共有。
+    for (archive, tags) in [
+        (a, vec![tag("artist", "alpha"), tag("female", "glasses")]),
+        (b, vec![tag("artist", "alpha")]),
+        (c, vec![tag("female", "glasses")]),
+        (d, vec![tag("female", "ponytail")]),
+    ] {
+        store.replace_tags(archive, &tags).unwrap();
+    }
+    app.refresh().await.unwrap();
+    let router = app.router();
+
+    let ids = |body: Value| -> Vec<i64> {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect()
+    };
+    let similar = json(&router, &format!("/api/archives/{a}/similar")).await;
+    assert!(similar["items"][0]["cover_url"].is_string());
+    assert_eq!(ids(similar), [b, c]);
+    let first = json(&router, &format!("/api/archives/{a}/similar?limit=1")).await;
+    assert_eq!(ids(first), [b]);
+    // 不在快照里的编号和没有相似作品的书一样返回空列表。
+    assert_eq!(
+        json(&router, "/api/archives/999/similar").await,
+        value!({"items": []})
+    );
+    for uri in [
+        format!("/api/archives/{a}/similar?limit=0"),
+        format!("/api/archives/{a}/similar?limit=101"),
+        "/api/archives/x/similar".to_string(),
+    ] {
+        assert_eq!(
+            request(&router, "GET", &uri, None, &[]).await.0,
+            StatusCode::BAD_REQUEST,
+            "{uri}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn recent_lists_read_archives_newest_first_and_validates_limit() {
     let fixture = Fixture::new();
     for name in ["a.cbz", "b.cbz", "c.cbz", "unread.cbz"] {

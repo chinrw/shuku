@@ -62,6 +62,7 @@ impl App {
             .route("/api/random", get(random))
             .route("/api/series/{id}", get(series))
             .route("/api/archives/{id}/pages", get(pages))
+            .route("/api/archives/{id}/similar", get(similar))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
             .route(
                 "/api/archives/{id}/pages/{n}/thumbnail",
@@ -468,6 +469,35 @@ async fn series(
         Ok(Json(
             json!({"id": series.id, "name": series.name, "items": items}),
         ))
+    })
+    .await
+}
+
+#[derive(Default, Deserialize)]
+struct SimilarParams {
+    limit: Option<usize>,
+}
+
+/// 按标签和这本最相似的归档，见 [`shuku_index::Index::similar`]。和搜索一样读快照，
+/// 还不在快照里的书返回空列表。
+async fn similar(
+    State(app): State<App>,
+    id: std::result::Result<Path<i64>, PathRejection>,
+    params: std::result::Result<Query<SimilarParams>, QueryRejection>,
+) -> Result<Json<Value>> {
+    let Path(id) = id.map_err(Error::bad_request)?;
+    let Query(params) = params.map_err(Error::bad_request)?;
+    let limit = tag_limit(params.limit, 12)?;
+    app.blocking(move |app| {
+        let snapshot = app.snapshot();
+        let items: Vec<_> = snapshot
+            .index
+            .similar(id, limit)
+            .iter()
+            .filter_map(|id| snapshot.item(*id))
+            .map(|item| list_item(&item))
+            .collect();
+        Ok(Json(json!({ "items": items })))
     })
     .await
 }

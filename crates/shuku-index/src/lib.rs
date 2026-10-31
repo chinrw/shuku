@@ -7,6 +7,7 @@
 
 mod natural;
 mod parser;
+mod similar;
 
 pub use parser::{ParseError, ParsedQuery, ReadCondition, parse_query};
 

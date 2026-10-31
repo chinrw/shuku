@@ -259,6 +259,18 @@ fn main() {
             ms(max),
         );
     }
+
+    // 每次换一本，间隔取素数，让抽到的归档分散在整个书库里。
+    let mut next_id = 0i64;
+    let (median, max) = time(|| {
+        next_id = (next_id + 4_999) % ARCHIVES as i64;
+        black_box(index.similar(next_id + 1, 12));
+    });
+    println!(
+        "相似作品前 12 本：中位数 {} ms，最慢 {} ms",
+        ms(median),
+        ms(max),
+    );
 }
 
 /// 返回生成的归档，以及其中实际出现的不同标签数。

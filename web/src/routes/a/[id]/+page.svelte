@@ -157,8 +157,9 @@
 
 	<div class="related">
 		{#each relatedQueries(book.tags) as query (book.id + query.term)}
-			<RelatedRow label={query.label} term={query.term} exclude={book.id} />
+			<RelatedRow label={query.label} term={query.term} archive={book.id} />
 		{/each}
+		{#key book.id}<RelatedRow label="相似作品" archive={book.id} />{/key}
 	</div>
 </main>
 

@@ -4,6 +4,8 @@
 	import { archive as loadArchive, downloadUrl, type ArchiveItem, type Category } from '#lib/api.ts';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
+	import { artistQueries } from '#lib/related.ts';
+	import RelatedRow from '#lib/RelatedRow.svelte';
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
 
@@ -82,6 +84,12 @@
 	{:else if detailError}
 		<p class="error">分类和简介没有加载出来：{detailError}</p>
 	{/if}
+	{#key book.id}
+		{#each artistQueries(book.tags) as query (query.term)}
+			<RelatedRow label={query.label} term={query.term} archive={book.id} />
+		{/each}
+		<RelatedRow label="相似作品" archive={book.id} />
+	{/key}
 </aside>
 
 <style>

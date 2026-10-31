@@ -245,6 +245,13 @@ export async function recent(fetch: Fetch, limit?: number): Promise<ArchiveItem[
 	return (await request<{ items: ArchiveItem[] }>(fetch, `/api/recent${query}`)).items;
 }
 
+/** 按标签和这本最相似的书，最相似的在前；不含同一系列的其他卷。 */
+export async function similar(fetch: Fetch, id: number, limit?: number): Promise<ArchiveItem[]> {
+	const query = limit === undefined ? '' : `?${new URLSearchParams({ limit: String(limit) })}`;
+	return (await request<{ items: ArchiveItem[] }>(fetch, `/api/archives/${id}/similar${query}`))
+		.items;
+}
+
 export async function facets(fetch: Fetch, q: string): Promise<TagCount[]> {
 	const query = new URLSearchParams({ q });
 	return (await request<{ tags: TagCount[] }>(fetch, `/api/facets?${query}`)).tags;
