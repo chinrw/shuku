@@ -625,3 +625,27 @@ async fn webtoon_flags(router: &axum::Router, items: &Value) -> Vec<bool> {
     }
     flags
 }
+
+#[tokio::test]
+async fn requests_for_unknown_domain_names_are_rejected() {
+    let mut fixture = Fixture::new();
+    fixture.config.allowed_hosts = vec!["books.example.ts.net".into()];
+    let router = fixture.app().await.router();
+    for host in ["evil.example", "evil.example:3002"] {
+        for uri in ["/api/search", "/", "/api/admin/status"] {
+            let (status, _, body) = request(&router, "GET", uri, None, &[("host", host)]).await;
+            assert_eq!(status, StatusCode::MISDIRECTED_REQUEST, "{host} {uri}");
+            if uri != "/" {
+                assert!(serde_json::from_slice::<Value>(&body).unwrap()["error"].is_string());
+            }
+        }
+    }
+    for host in [
+        "192.168.1.20:3002",
+        "media-lxc:3002",
+        "books.example.ts.net",
+    ] {
+        let (status, _, _) = request(&router, "GET", "/api/search", None, &[("host", host)]).await;
+        assert_eq!(status, StatusCode::OK, "{host}");
+    }
+}

@@ -43,6 +43,11 @@
 				<dd class="adm-mono">{server.web_dir}</dd>
 				<dt>监听地址</dt>
 				<dd class="adm-mono">{server.listen}</dd>
+				<dt>允许的主机名</dt>
+				<dd>
+					IP、localhost 和不带点的主机名{#if server.allowed_hosts.length > 0}，以及
+						<span class="adm-mono">{server.allowed_hosts.join('、')}</span>{/if}（<code>--allowed-host</code>）
+				</dd>
 				<dt>隐藏目录</dt>
 				<dd>{server.scan_hidden ? '扫描' : '跳过以 . 开头的目录和文件'}（<code>--scan-hidden</code>）</dd>
 				<dt>条漫判断</dt>

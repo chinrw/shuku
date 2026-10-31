@@ -288,10 +288,7 @@ async fn write_requests_from_other_sites_are_rejected() {
     for headers in [
         &[("sec-fetch-site", "cross-site")][..],
         &[("sec-fetch-site", "same-site")][..],
-        &[
-            ("origin", "http://evil.example"),
-            ("host", "library.lan:3002"),
-        ][..],
+        &[("origin", "http://evil.example"), ("host", "library:3002")][..],
     ] {
         let (status, _, _) = request(&router, "POST", "/api/admin/refresh", None, headers).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{headers:?}");
@@ -300,10 +297,7 @@ async fn write_requests_from_other_sites_are_rejected() {
     }
     for headers in [
         &[("sec-fetch-site", "same-origin")][..],
-        &[
-            ("origin", "http://library.lan:3002"),
-            ("host", "library.lan:3002"),
-        ][..],
+        &[("origin", "http://library:3002"), ("host", "library:3002")][..],
         &[][..],
     ] {
         let (status, _, _) = request(&router, "POST", "/api/admin/refresh", None, headers).await;

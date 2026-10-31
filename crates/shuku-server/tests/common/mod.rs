@@ -74,6 +74,7 @@ impl Fixture {
             listen: "127.0.0.1:0".parse().unwrap(),
             scan_hidden: false,
             detect_webtoons: true,
+            allowed_hosts: Vec::new(),
         };
         fs::create_dir(&config.content_dir).unwrap();
         fs::create_dir(&config.web_dir).unwrap();

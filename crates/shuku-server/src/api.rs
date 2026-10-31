@@ -73,6 +73,10 @@ impl App {
                     message: "不支持的请求方法".into(),
                 }
             })
+            .layer(axum::middleware::from_fn_with_state(
+                self.clone(),
+                crate::hosts::check_host,
+            ))
             .with_state(self.clone())
     }
 }

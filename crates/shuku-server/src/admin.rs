@@ -352,6 +352,7 @@ async fn status(State(app): State<App>) -> Result<Json<Value>> {
                 "content_dir": config.content_dir, "data_dir": config.data_dir,
                 "web_dir": config.web_dir, "listen": config.listen.to_string(),
                 "scan_hidden": config.scan_hidden, "detect_webtoons": config.detect_webtoons,
+                "allowed_hosts": config.allowed_hosts,
             },
             "library": {
                 "archives": stats.archives, "pages": stats.pages, "bytes": stats.bytes,
@@ -613,6 +614,7 @@ mod tests {
             listen: "127.0.0.1:0".parse().unwrap(),
             scan_hidden: false,
             detect_webtoons: true,
+            allowed_hosts: Vec::new(),
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         let app = App::open(config).await.unwrap();

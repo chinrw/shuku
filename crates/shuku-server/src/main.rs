@@ -51,6 +51,14 @@ struct Cli {
         help = "不按页面宽高比自动判断条漫（默认判断）"
     )]
     no_webtoon_detection: bool,
+    #[arg(
+        long = "allowed-host",
+        env = "SHUKU_ALLOWED_HOSTS",
+        value_delimiter = ',',
+        global = true,
+        help = "额外允许的主机名，可重复或用逗号分隔；IP、localhost 和不带点的主机名总是允许"
+    )]
+    allowed_hosts: Vec<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -86,6 +94,7 @@ async fn main() -> Result<()> {
         listen: cli.listen,
         scan_hidden: cli.scan_hidden,
         detect_webtoons: !cli.no_webtoon_detection,
+        allowed_hosts: cli.allowed_hosts,
     };
     let app = App::open(config).await?;
     if matches!(cli.command, Some(Command::Scan)) {

@@ -34,6 +34,9 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
 | `--listen` | `SHUKU_LISTEN` | `0.0.0.0:3002` |
 | `--scan-hidden` | `SHUKU_SCAN_HIDDEN` | 关闭：跳过以 `.` 开头的目录和文件 |
 | `--no-webtoon-detection` | `SHUKU_NO_WEBTOON_DETECTION` | 关闭：按页面宽高比自动判断条漫 |
+| `--allowed-host`（可重复） | `SHUKU_ALLOWED_HOSTS`（逗号分隔） | 无 |
+
+服务端只接受 Host 是 IP 地址、`localhost` 或不带点的主机名（例如 `nas:3002`）的请求，其他域名返回 421。这是为了防 DNS rebinding：没有认证时，任意网页都能把自己的域名解析到局域网地址来读书库。用带点的名字访问（Tailscale 的完整域名、`.local`、自己的域名）时，把它加进 `--allowed-host`。
 
 相对路径以进程的工作目录为准。参数可以放在 `scan` 前后。按 Ctrl-C 停止 HTTP 服务。
 

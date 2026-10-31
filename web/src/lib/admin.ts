@@ -45,6 +45,7 @@ export interface Status {
 		listen: string;
 		scan_hidden: boolean;
 		detect_webtoons: boolean;
+		allowed_hosts: string[];
 	};
 	library: {
 		archives: number;
