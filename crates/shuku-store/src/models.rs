@@ -34,16 +34,30 @@ pub struct ArchiveMetadata {
 }
 
 /// LRR 导入时覆盖的元数据。文件信息和页面清单由扫描维护，导入不改动它们。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LrrArchive {
     pub lrr_id: String,
     pub title: String,
     pub summary: String,
-    /// 为 `None` 时保留扫描时记录的值。
+    /// 为 `None` 时用文件的修改时间。扫描时间对从 LRR 迁移来的整个书库都是同一天，
+    /// 按最新加入排序时这些书会全挤在最前面。
     pub date_added: Option<i64>,
     pub source_url: Option<String>,
     pub is_new: bool,
     pub tags: Vec<Tag>,
+}
+
+/// 导入时还没扫描到的归档，扫描新增它时由 [`crate::Writer::apply_lrr_pending`] 套用。
+/// 用 postcard 按字段顺序编码存进数据库，改字段要加迁移重写或清空 `lrr_pending` 表。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LrrPending {
+    pub archive: LrrArchive,
+    /// 从 0 开始的页码和 Unix 毫秒的阅读时间。
+    pub progress: Option<(u32, i64)>,
+    /// 所属静态分类的 LRR ID。
+    pub categories: Vec<String>,
+    /// 所属 Tankoubon 的 LRR ID 和在其中的位置。
+    pub tankoubons: Vec<(String, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,8 +76,9 @@ pub struct LrrTankoubon {
     pub name: String,
     pub summary: String,
     pub tags: Vec<Tag>,
-    /// 按阅读顺序排列。
-    pub archives: Vec<i64>,
+    /// 归档 ID 和它在 LRR 里的位置（从 1 开始）。还没扫描到的成员不在这里，
+    /// 扫描到时按同一个位置补进来，所以位置可以不连续。
+    pub archives: Vec<(i64, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +138,7 @@ pub struct LibraryArchive {
     pub tags: Vec<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tag {
     pub namespace: String,
     pub value: String,

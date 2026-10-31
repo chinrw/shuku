@@ -7,7 +7,7 @@ mod store;
 
 pub use models::{
     Archive, ArchiveMetadata, CompressionMethod, Library, LibraryArchive, LibraryTag, LrrArchive,
-    LrrCategory, LrrTankoubon, Page, Progress, ScanEntry, Tag,
+    LrrCategory, LrrPending, LrrTankoubon, Page, Progress, ScanEntry, Tag,
 };
 pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;
@@ -35,6 +35,7 @@ const MIGRATIONS: &[Migration] = &[
         include_str!("migrations/003_page_list.sql"),
         Some(store::pack_page_lists),
     ),
+    (include_str!("migrations/004_lrr_pending.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]

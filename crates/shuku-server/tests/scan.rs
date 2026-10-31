@@ -204,3 +204,57 @@ async fn reports_unchecked_records_and_fails_on_unreadable_content_root() {
     std::fs::set_permissions(content, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn new_archives_get_lrr_metadata_staged_before_the_scan() {
+    let fixture = Fixture::new();
+    fixture.archive("sub/staged.cbz", 80, 120);
+    fixture.archive("plain.cbz", 80, 120);
+    std::fs::create_dir_all(&fixture.config.data_dir).unwrap();
+    let mut store = Store::open(fixture.database()).unwrap();
+    store
+        .write(|writer| {
+            writer.stage_lrr_pending(
+                "sub/staged.cbz",
+                &shuku_store::LrrPending {
+                    archive: shuku_store::LrrArchive {
+                        lrr_id: "a".repeat(40),
+                        title: "LRR 的标题".into(),
+                        summary: String::new(),
+                        date_added: Some(1_600_000_000),
+                        source_url: None,
+                        is_new: false,
+                        tags: vec![Tag {
+                            namespace: "artist".into(),
+                            value: "Alpha".into(),
+                        }],
+                    },
+                    progress: Some((1, 1_700_000_000_000)),
+                    categories: Vec::new(),
+                    tankoubons: Vec::new(),
+                },
+            )
+        })
+        .unwrap();
+    let app = fixture.app().await;
+    assert_eq!(app.scan().await.unwrap().added, 2);
+
+    let staged = store.find_by_path("sub/staged.cbz").unwrap().unwrap();
+    let archive = store.archive(staged).unwrap().unwrap();
+    assert_eq!(archive.metadata.title, "LRR 的标题");
+    assert_eq!(archive.metadata.date_added, 1_600_000_000);
+    assert!(!archive.metadata.is_new);
+    assert_eq!(archive.progress.unwrap().page, 1);
+    assert_eq!(store.lrr_pending_count().unwrap(), 0);
+    let plain = store.find_by_path("plain.cbz").unwrap().unwrap();
+    assert_eq!(
+        store.archive(plain).unwrap().unwrap().metadata.title,
+        "plain"
+    );
+    // 扫描结束时重建的快照里已经是 LRR 的标签。
+    let found = app
+        .index()
+        .search(&shuku_index::parse_query("artist:alpha").unwrap().query)
+        .unwrap();
+    assert_eq!(found.ids, [staged]);
+}

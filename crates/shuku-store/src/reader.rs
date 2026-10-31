@@ -94,12 +94,14 @@ impl Reader {
     }
 
     pub fn find_by_path(&self, path: &str) -> Result<Option<i64>> {
+        find_by_path(&self.connection, path)
+    }
+
+    /// 暂存着、等扫描到时套用的 LRR 记录数。
+    pub fn lrr_pending_count(&self) -> Result<u64> {
         Ok(self
             .connection
-            .query_row("SELECT id FROM archive WHERE path = ?1", [path], |row| {
-                row.get(0)
-            })
-            .optional()?)
+            .query_row("SELECT count(*) FROM lrr_pending", [], |row| row.get(0))?)
     }
 
     /// 一次读出搜索快照需要的全部数据：标签字典、每本的列表元数据和全部进度，
@@ -256,4 +258,12 @@ pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Ar
         )
         .optional()?;
     Ok(Some(archive))
+}
+
+pub(crate) fn find_by_path(connection: &Connection, path: &str) -> Result<Option<i64>> {
+    Ok(connection
+        .query_row("SELECT id FROM archive WHERE path = ?1", [path], |row| {
+            row.get(0)
+        })
+        .optional()?)
 }

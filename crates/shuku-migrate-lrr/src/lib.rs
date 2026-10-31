@@ -1,6 +1,7 @@
 //! 把 LANraragi 存在 Redis 里的元数据导入 Shuku 的 SQLite。
 //!
-//! 归档必须先由 `shuku scan` 入库，导入按文件路径把 LRR 记录对应到已有归档。
+//! 导入按文件路径把 LRR 记录对应到归档。已经扫描入库的归档直接写入；
+//! 还没扫描到的暂存起来，扫描新增那个路径时再套用，所以导入和扫描谁先谁后都可以。
 //! 可以反复运行，每次都以 LRR 的数据为准覆盖已导入的部分。
 
 mod redis_source;
@@ -8,7 +9,7 @@ mod redis_source;
 use std::collections::HashMap;
 
 pub use redis_source::RedisSource;
-use shuku_store::{LrrArchive, LrrCategory, LrrTankoubon, Store, Tag};
+use shuku_store::{LrrArchive, LrrCategory, LrrPending, LrrTankoubon, Store, Tag, Writer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -37,13 +38,40 @@ pub trait Source {
 
 #[derive(Debug, Default)]
 pub struct Report {
+    /// 直接写进已入库归档的记录数。
     pub archives: usize,
-    /// 在 Shuku 里找不到对应文件的 LRR 记录的 `file` 字段。
+    /// 还没扫描到、暂存起来等扫描时套用的记录数。
+    pub pending: usize,
+    /// 路径不在 `lrr_content_dir` 下的 LRR 记录的 `file` 字段。
     pub unmatched: Vec<String>,
+    /// 写入或暂存的记录里没有 date_added 标签的数量，这些归档用文件的修改时间作为加入时间。
+    pub undated: usize,
     pub categories: usize,
     pub tankoubons: usize,
-    /// 分类和 Tankoubon 里指向未导入归档的成员数。
+    /// 分类和 Tankoubon 里指向不存在的 LRR 记录的成员数。
     pub missing_members: usize,
+}
+
+/// 每个事务写这么多本。服务端可能同时在运行，事务短一些，它的写入等得也短。
+const BATCH: usize = 512;
+
+struct Record {
+    path: String,
+    archive: LrrArchive,
+    progress: Option<(u32, i64)>,
+}
+
+/// 一本归档所属的分类和 Tankoubon，暂存时随元数据一起保存。
+#[derive(Clone, Default)]
+struct Memberships {
+    categories: Vec<String>,
+    tankoubons: Vec<(String, u32)>,
+}
+
+struct Group<T> {
+    value: T,
+    /// 按顺序排列的 LRR 归档 ID。
+    members: Vec<String>,
 }
 
 /// `lrr_content_dir` 是 LRR 看到的内容目录。LRR 跑在 Docker 里时它和本机路径不同。
@@ -54,9 +82,140 @@ pub fn migrate(
 ) -> Result<Report> {
     let prefix = lrr_content_dir.trim_end_matches('/');
     let mut report = Report::default();
-    // LRR 归档 ID 到 Shuku 归档 ID，用于对应分类和 Tankoubon 的成员。
-    let mut ids = HashMap::new();
+    // 先把 LRR 的数据全部读进内存：暂存还没扫描到的归档时要带上它所属的分类和 Tankoubon。
+    let records = read_archives(source, prefix, &mut report)?;
+    let categories = read_categories(source)?;
+    let tankoubons = read_tankoubons(source)?;
 
+    let mut memberships: HashMap<&str, Memberships> = HashMap::new();
+    for category in &categories {
+        for member in &category.members {
+            let entry = memberships.entry(member).or_default();
+            entry.categories.push(category.value.lrr_id.clone());
+        }
+    }
+    for tankoubon in &tankoubons {
+        for (position, member) in positions(&tankoubon.members) {
+            let entry = memberships.entry(member).or_default();
+            entry
+                .tankoubons
+                .push((tankoubon.value.lrr_id.clone(), position));
+        }
+    }
+
+    // 没有对应 LRR 记录的成员算缺失；暂存的成员不算，扫描到时会补进分类和 Tankoubon。
+    let paths: HashMap<&str, &str> = records
+        .iter()
+        .map(|record| (record.archive.lrr_id.as_str(), record.path.as_str()))
+        .collect();
+    for members in categories
+        .iter()
+        .map(|category| &category.members)
+        .chain(tankoubons.iter().map(|tankoubon| &tankoubon.members))
+    {
+        report.missing_members += members
+            .iter()
+            .filter(|member| !paths.contains_key(member.as_str()))
+            .count();
+    }
+    report.categories = categories.len();
+    report.tankoubons = tankoubons.len();
+
+    // 分类和 Tankoubon 先于归档写入，成员按本次 LRR 记录的路径找已入库的归档。服务端可能
+    // 同时在扫描，后面每一步都只往分类里加成员，不会被这里的整体替换覆盖：
+    // - 这个事务之后、所在批次之前被扫描入库的归档，批次里直接写入时补上成员；
+    // - 在批次里暂存、之后被扫描到的归档，扫描套用暂存时分类已经存在，由扫描插入。
+    // 旧的暂存在同一个事务里清掉，扫描不会再按上次的成员关系插回已经移除的成员。
+    store.write(|writer| -> Result<()> {
+        let resolve = |member: &String| -> Result<Option<i64>> {
+            match paths.get(member.as_str()) {
+                Some(path) => Ok(writer.find_by_path(path)?),
+                None => Ok(None),
+            }
+        };
+        let mut resolved = Vec::new();
+        for category in &categories {
+            let mut archives = Vec::new();
+            for member in &category.members {
+                archives.extend(resolve(member)?);
+            }
+            resolved.push(archives);
+        }
+        let mut ordered = Vec::new();
+        for tankoubon in &tankoubons {
+            let mut archives = Vec::new();
+            for (position, member) in positions(&tankoubon.members) {
+                archives.extend(resolve(member)?.map(|id| (id, position)));
+            }
+            ordered.push(archives);
+        }
+        for (category, archives) in categories.iter().zip(resolved) {
+            writer.import_lrr_category(&LrrCategory {
+                archives,
+                ..category.value.clone()
+            })?;
+        }
+        for (tankoubon, archives) in tankoubons.iter().zip(ordered) {
+            writer.import_lrr_tankoubon(&LrrTankoubon {
+                archives,
+                ..tankoubon.value.clone()
+            })?;
+        }
+        writer.clear_lrr_pending()?;
+        Ok(())
+    })?;
+
+    for batch in records.chunks(BATCH) {
+        store.write(|writer| -> Result<()> {
+            for record in batch {
+                let lrr_id = record.archive.lrr_id.as_str();
+                report.undated += usize::from(record.archive.date_added.is_none());
+                let Memberships {
+                    categories,
+                    tankoubons,
+                } = memberships.get(lrr_id).cloned().unwrap_or_default();
+                if let Some(id) = writer.find_by_path(&record.path)? {
+                    write_archive(writer, id, record)?;
+                    writer.add_lrr_memberships(id, &categories, &tankoubons)?;
+                    report.archives += 1;
+                } else {
+                    writer.stage_lrr_pending(
+                        &record.path,
+                        &LrrPending {
+                            archive: record.archive.clone(),
+                            progress: record.progress,
+                            categories,
+                            tankoubons,
+                        },
+                    )?;
+                    report.pending += 1;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    Ok(report)
+}
+
+fn write_archive(writer: &mut Writer<'_>, id: i64, record: &Record) -> Result<()> {
+    writer.import_lrr_archive(id, &record.archive)?;
+    if let Some((page, client_time)) = record.progress {
+        writer.write_progress(id, page, client_time)?;
+    }
+    Ok(())
+}
+
+/// 位置从 1 开始，与 LRR 里的顺序一致。
+fn positions(members: &[String]) -> impl Iterator<Item = (u32, &String)> {
+    (1..).zip(members)
+}
+
+fn read_archives(
+    source: &mut impl Source,
+    prefix: &str,
+    report: &mut Report,
+) -> Result<Vec<Record>> {
+    let mut records = Vec::new();
     for key in source.scan(&"?".repeat(40))? {
         let Ok(lrr_id) = String::from_utf8(key) else {
             continue;
@@ -66,25 +225,24 @@ pub fn migrate(
         }
         let fields = source.hash(lrr_id.as_bytes())?;
         let file = text(&fields, "file");
-        let found = match file
+        let Some(path) = file
             .strip_prefix(prefix)
             .and_then(|path| path.strip_prefix('/'))
-        {
-            Some(path) => store.find_by_path(path)?,
-            None => None,
-        };
-        let Some(id) = found else {
+        else {
             report.unmatched.push(file);
             continue;
         };
-        store.import_lrr_archive(id, &archive(&lrr_id, &fields)?)?;
-        if let Some((page, client_time)) = progress(&lrr_id, &fields)? {
-            store.write_progress(id, page, client_time)?;
-        }
-        ids.insert(lrr_id, id);
-        report.archives += 1;
+        records.push(Record {
+            path: path.to_owned(),
+            progress: progress(&lrr_id, &fields)?,
+            archive: archive(&lrr_id, &fields)?,
+        });
     }
+    Ok(records)
+}
 
+fn read_categories(source: &mut impl Source) -> Result<Vec<Group<LrrCategory>>> {
+    let mut categories = Vec::new();
     for key in source.scan("SET_??????????")? {
         let lrr_id = String::from_utf8_lossy(&key).into_owned();
         let fields = source.hash(&key)?;
@@ -96,17 +254,22 @@ pub fn migrate(
         } else {
             Vec::new()
         };
-        let archives = resolve(&members, &ids, &mut report.missing_members);
-        store.import_lrr_category(&LrrCategory {
-            name: text(&fields, "name"),
-            search,
-            pinned: text(&fields, "pinned") == "1",
-            archives,
-            lrr_id,
-        })?;
-        report.categories += 1;
+        categories.push(Group {
+            value: LrrCategory {
+                name: text(&fields, "name"),
+                search,
+                pinned: text(&fields, "pinned") == "1",
+                archives: Vec::new(),
+                lrr_id,
+            },
+            members,
+        });
     }
+    Ok(categories)
+}
 
+fn read_tankoubons(source: &mut impl Source) -> Result<Vec<Group<LrrTankoubon>>> {
+    let mut tankoubons = Vec::new();
     for key in source.scan("TANK_??????????")? {
         let lrr_id = String::from_utf8_lossy(&key).into_owned();
         let mut tankoubon = LrrTankoubon {
@@ -132,15 +295,13 @@ pub fn migrate(
             }
         }
         members.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let members: Vec<String> = members.into_iter().map(|(_, member)| member).collect();
-        tankoubon.archives = resolve(&members, &ids, &mut report.missing_members);
-        store.import_lrr_tankoubon(&tankoubon)?;
-        report.tankoubons += 1;
+        tankoubons.push(Group {
+            value: tankoubon,
+            members: members.into_iter().map(|(_, member)| member).collect(),
+        });
     }
-
-    Ok(report)
+    Ok(tankoubons)
 }
-
 fn archive(lrr_id: &str, fields: &HashMap<String, Vec<u8>>) -> Result<LrrArchive> {
     let mut archive = LrrArchive {
         lrr_id: lrr_id.into(),
@@ -188,17 +349,6 @@ fn number(lrr_id: &str, fields: &HashMap<String, Vec<u8>>, field: &'static str) 
         return Ok(0);
     }
     raw.parse().map_err(|_| invalid(lrr_id, field, raw))
-}
-
-fn resolve(members: &[String], ids: &HashMap<String, i64>, missing: &mut usize) -> Vec<i64> {
-    members
-        .iter()
-        .filter_map(|member| {
-            let id = ids.get(member).copied();
-            *missing += usize::from(id.is_none());
-            id
-        })
-        .collect()
 }
 
 fn split_tags(tags: &str) -> impl Iterator<Item = &str> {

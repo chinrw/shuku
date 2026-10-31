@@ -1,12 +1,12 @@
 use std::ops::Deref;
 use std::path::Path;
 
-use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
 
 use crate::reader::read_archive;
 use crate::{
-    Archive, ArchiveMetadata, Error, LrrArchive, LrrCategory, LrrTankoubon, Page, Reader, Result,
-    ScanEntry, Tag, open_connection,
+    Archive, ArchiveMetadata, Error, LrrArchive, LrrCategory, LrrPending, LrrTankoubon, Page,
+    Reader, Result, ScanEntry, Tag, open_connection,
 };
 
 /// 读写连接，打开时完成迁移。读方法通过 [`Deref`] 来自 [`Reader`]，
@@ -163,6 +163,11 @@ impl Writer<'_> {
         )? > 0)
     }
 
+    /// 读到的是本事务里已经做过的修改。
+    pub fn find_by_path(&self, path: &str) -> Result<Option<i64>> {
+        crate::reader::find_by_path(self.connection, path)
+    }
+
     /// `None` 插入新归档，`Some(id)` 更新已有归档并保留其身份。
     /// 页面清单整体替换，page_no 和 page_count 由清单顺序和长度生成。
     pub fn save_archive(
@@ -230,7 +235,7 @@ impl Writer<'_> {
     pub fn import_lrr_archive(&mut self, id: i64, lrr: &LrrArchive) -> Result<()> {
         let transaction = self.connection;
         let updated = transaction.execute(
-            "UPDATE archive SET title = ?1, summary = ?2, date_added = COALESCE(?3, date_added),
+            "UPDATE archive SET title = ?1, summary = ?2, date_added = COALESCE(?3, mtime),
                 source_url = ?4, is_new = ?5, lrr_id = ?6
              WHERE id = ?7",
             params![
@@ -279,7 +284,7 @@ impl Writer<'_> {
         Ok(())
     }
 
-    /// 按 LRR ID 新建或更新 Tankoubon，标签和归档成员整体替换，position 从 1 开始。
+    /// 按 LRR ID 新建或更新 Tankoubon，标签和归档成员整体替换。
     pub fn import_lrr_tankoubon(&mut self, tankoubon: &LrrTankoubon) -> Result<()> {
         let transaction = self.connection;
         let id: i64 = transaction.query_row(
@@ -306,9 +311,74 @@ impl Writer<'_> {
                 "INSERT INTO tankoubon_archive (tankoubon_id, archive_id, position)
                  VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING",
             )?;
-            for (index, member) in tankoubon.archives.iter().enumerate() {
-                archive.execute(params![id, member, index as i64 + 1])?;
+            for (member, position) in &tankoubon.archives {
+                archive.execute(params![id, member, position])?;
             }
+        }
+        Ok(())
+    }
+
+    /// 删除全部暂存的 LRR 元数据。迁移工具每次运行先清空再按 LRR 的现状重新暂存。
+    pub fn clear_lrr_pending(&mut self) -> Result<()> {
+        self.connection.execute("DELETE FROM lrr_pending", [])?;
+        Ok(())
+    }
+
+    /// 暂存一本还没扫描到的归档的 LRR 元数据，`path` 是相对内容目录的路径。
+    pub fn stage_lrr_pending(&mut self, path: &str, pending: &LrrPending) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO lrr_pending (path, data) VALUES (?1, ?2)
+             ON CONFLICT(path) DO UPDATE SET data = excluded.data",
+            params![path, postcard::to_stdvec(pending)?],
+        )?;
+        Ok(())
+    }
+
+    /// 归档 `id` 的路径有暂存的 LRR 元数据时，套用元数据、阅读进度和分类、
+    /// Tankoubon 成员，然后删除暂存，返回是否套用。分类或 Tankoubon 已经不在时跳过那一项。
+    pub fn apply_lrr_pending(&mut self, id: i64, path: &str) -> Result<bool> {
+        let data: Option<Vec<u8>> = self
+            .connection
+            .query_row(
+                "DELETE FROM lrr_pending WHERE path = ?1 RETURNING data",
+                [path],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(data) = data else {
+            return Ok(false);
+        };
+        let pending: LrrPending = postcard::from_bytes(&data)?;
+        self.import_lrr_archive(id, &pending.archive)?;
+        if let Some((page, client_time)) = pending.progress {
+            self.write_progress(id, page, client_time)?;
+        }
+        self.add_lrr_memberships(id, &pending.categories, &pending.tankoubons)?;
+        Ok(true)
+    }
+
+    /// 把归档加进按 LRR ID 指定的分类和 Tankoubon，已经在里面的不变，
+    /// 分类或 Tankoubon 不存在时跳过。
+    pub fn add_lrr_memberships(
+        &mut self,
+        id: i64,
+        categories: &[String],
+        tankoubons: &[(String, u32)],
+    ) -> Result<()> {
+        let transaction = self.connection;
+        let mut category = transaction.prepare_cached(
+            "INSERT INTO category_archive (category_id, archive_id)
+             SELECT id, ?2 FROM category WHERE lrr_id = ?1 ON CONFLICT DO NOTHING",
+        )?;
+        for lrr_id in categories {
+            category.execute(params![lrr_id, id])?;
+        }
+        let mut tankoubon = transaction.prepare_cached(
+            "INSERT INTO tankoubon_archive (tankoubon_id, archive_id, position)
+             SELECT id, ?2, ?3 FROM tankoubon WHERE lrr_id = ?1 ON CONFLICT DO NOTHING",
+        )?;
+        for (lrr_id, position) in tankoubons {
+            tankoubon.execute(params![lrr_id, id, position])?;
         }
         Ok(())
     }

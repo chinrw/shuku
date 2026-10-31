@@ -139,7 +139,12 @@ impl App {
                     metadata.quick_hash = prepared.quick_hash;
                     // 完整指纹要读整个文件，由后台任务计算。内容变了，旧值也随之作废。
                     metadata.content_hash = None;
-                    writer.save_archive(id, &metadata, &prepared.pages)?;
+                    let path = metadata.path.clone();
+                    let saved = writer.save_archive(id, &metadata, &prepared.pages)?;
+                    // 迁移工具先于扫描运行时，LRR 的元数据按路径暂存着，在同一个事务里套用。
+                    if existing_id.is_none() {
+                        writer.apply_lrr_pending(saved, &path)?;
+                    }
                     if moved_id.is_some() {
                         report.moved += 1;
                     } else if existing_id.is_some() {

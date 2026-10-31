@@ -81,7 +81,7 @@ LRR 的 Redis 结构（以 LRR master 源码为准，`lib/LANraragi/Utils/Databa
 - 分类是 `SET_<10 位数字>` 哈希：`name`、`search`（非空表示动态分类）、`pinned`、`archives`（ID 的 JSON 数组）。
 - Tankoubon 是 `TANK_<10 位数字>` 有序集合：分值 0 的成员是 `name_<名字>`，-1 是 `summary_<摘要>`，-2 是 `tags_<逗号分隔标签>`，-3 是 `progress_<页>`；分值 ≥ 1 的成员是归档 ID，分值就是顺序。
 - 归档按文件路径对应：LRR 的 `file` 去掉内容目录前缀后，与 `archive.path` 匹配。命令行参数提供 Redis 地址、db 编号、LRR 的内容目录前缀（LRR 跑在 Docker 里时路径前缀与本机不同）。
-- 找不到对应文件的 LRR 记录不导入，最后汇总报告数量和前若干个路径。
+- 路径不在内容目录前缀下的 LRR 记录不导入，最后汇总报告数量和前若干个路径。在前缀下但还没扫描入库的记录暂存到 `lrr_pending` 表（迁移 004，按相对路径，带所属分类和 Tankoubon 的位置），扫描新增那个路径时在同一个事务里套用并删除，所以导入可以早于扫描。每次导入先清空暂存表再重建。
 - 迁移进度：LRR 的 `progress` 从 1 开始计，0 或空表示没读过，写入时减 1；`client_time` 用 `lastreadtime`（秒转毫秒）。
 - 分类和 Tankoubon 在 Shuku 里记录 LRR 的 ID（`lrr_id` 列），重复导入时更新同一行；在 Shuku 里新建的不受影响。Tankoubon 的整套阅读进度（分值 -3）不导入。
 - 读取 Redis 时用 `SCAN`，不用 `KEYS`。

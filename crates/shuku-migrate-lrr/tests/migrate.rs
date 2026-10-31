@@ -143,12 +143,11 @@ fn imports_archive_metadata_tags_and_progress_matched_by_path() {
     let report = migrate(&mut lrr(), &mut library.store, &format!("{PREFIX}/")).unwrap();
 
     assert_eq!(report.archives, 2);
-    let mut unmatched = report.unmatched.clone();
-    unmatched.sort();
-    assert_eq!(
-        unmatched,
-        ["/elsewhere/missing.zip", &format!("{PREFIX}/gone.zip")]
-    );
+    // gone.zip 在内容目录下但还没入库，暂存；C 的路径不在内容目录下。
+    assert_eq!(report.pending, 1);
+    assert_eq!(report.unmatched, ["/elsewhere/missing.zip"]);
+    // B 和 D 没有 date_added 标签。
+    assert_eq!(report.undated, 2);
 
     let one = library.store.archive(library.one).unwrap().unwrap();
     assert_eq!(one.metadata.title, "漫画");
@@ -182,7 +181,8 @@ fn imports_archive_metadata_tags_and_progress_matched_by_path() {
     let two = library.store.archive(library.two).unwrap().unwrap();
     assert_eq!(two.metadata.title, "Two");
     assert!(two.tags.is_empty());
-    assert_eq!(two.metadata.date_added, 1_700_000_000);
+    // 没有 date_added 标签时用文件的修改时间，不用扫描时记录的加入时间。
+    assert_eq!(two.metadata.date_added, 1_700_000_001);
     assert!(two.metadata.is_new);
     assert!(two.progress.is_none());
 
@@ -196,8 +196,8 @@ fn imports_categories_and_tankoubon_with_ordered_members() {
     let mut library = library();
     let report = migrate(&mut lrr(), &mut library.store, PREFIX).unwrap();
     assert_eq!((report.categories, report.tankoubons), (2, 1));
-    // 分类里的 D 和 Tankoubon 里的 D 都没有对应文件。
-    assert_eq!(report.missing_members, 2);
+    // D 还没扫描入库，暂存着，不算缺失。
+    assert_eq!(report.missing_members, 0);
 
     let connection = open_connection(&library.path).unwrap();
     assert_eq!(
@@ -261,6 +261,138 @@ fn imports_categories_and_tankoubon_with_ordered_members() {
 }
 
 #[test]
+fn members_that_are_not_in_lrr_are_reported_missing() {
+    let mut library = library();
+    let mut source = lrr();
+    let archives = format!("[\"{A}\", \"{}\"]", "e".repeat(40));
+    source
+        .hashes
+        .get_mut("SET_1600000000")
+        .unwrap()
+        .insert("archives".into(), archives.into_bytes());
+    let report = migrate(&mut source, &mut library.store, PREFIX).unwrap();
+    assert_eq!(report.missing_members, 1);
+}
+
+#[test]
+fn archives_scanned_after_the_import_get_the_staged_lrr_metadata() {
+    let mut library = library();
+    migrate(&mut lrr(), &mut library.store, PREFIX).unwrap();
+    assert_eq!(library.store.lrr_pending_count().unwrap(), 1);
+
+    // 像扫描那样在同一个事务里新增归档并套用暂存的元数据。
+    let gone = add_archive(&mut library.store, "gone.zip", 3);
+    let applied = library
+        .store
+        .write(|writer| writer.apply_lrr_pending(gone, "gone.zip"))
+        .unwrap();
+    assert!(applied);
+    assert_eq!(library.store.lrr_pending_count().unwrap(), 0);
+    let applied_again = library
+        .store
+        .write(|writer| writer.apply_lrr_pending(gone, "gone.zip"))
+        .unwrap();
+    assert!(!applied_again);
+
+    let archive = library.store.archive(gone).unwrap().unwrap();
+    assert_eq!(archive.metadata.title, "D");
+    assert_eq!(archive.metadata.lrr_id.as_deref(), Some(D));
+    // D 没有 date_added，用文件的修改时间。
+    assert_eq!(archive.metadata.date_added, 1_700_000_001);
+    let connection = open_connection(&library.path).unwrap();
+    assert_eq!(
+        rows(
+            &connection,
+            "SELECT c.lrr_id, ca.archive_id FROM category_archive ca JOIN category c ON c.id = ca.category_id ORDER BY ca.archive_id"
+        ),
+        [
+            [
+                "Text(\"SET_1600000000\")".to_string(),
+                format!("Integer({})", library.one)
+            ],
+            [
+                "Text(\"SET_1600000000\")".to_string(),
+                format!("Integer({gone})")
+            ],
+        ]
+    );
+    // D 在 Tankoubon 里排第三，补进来后仍是第三。
+    assert_eq!(
+        rows(
+            &connection,
+            "SELECT archive_id, position FROM tankoubon_archive ORDER BY position"
+        ),
+        [
+            [format!("Integer({})", library.two), "Integer(1)".into()],
+            [format!("Integer({})", library.one), "Integer(2)".into()],
+            [format!("Integer({gone})"), "Integer(3)".into()],
+        ]
+    );
+
+    // 再导入一次时它已经入库，直接写入，不再暂存。
+    let report = migrate(&mut lrr(), &mut library.store, PREFIX).unwrap();
+    assert_eq!((report.archives, report.pending), (3, 0));
+    assert_eq!(library.store.lrr_pending_count().unwrap(), 0);
+}
+
+#[test]
+fn a_member_removed_in_lrr_is_not_added_back_by_an_old_staged_record() {
+    let mut library = library();
+    migrate(&mut lrr(), &mut library.store, PREFIX).unwrap();
+    // LRR 里把 D 移出了分类，再导入一次；上次暂存的 D 还记着旧的分类。
+    let mut changed = lrr();
+    changed
+        .hashes
+        .get_mut("SET_1600000000")
+        .unwrap()
+        .insert("archives".into(), format!("[\"{A}\"]").into_bytes());
+    migrate(&mut changed, &mut library.store, PREFIX).unwrap();
+    let gone = add_archive(&mut library.store, "gone.zip", 3);
+    library
+        .store
+        .write(|writer| writer.apply_lrr_pending(gone, "gone.zip"))
+        .unwrap();
+
+    let connection = open_connection(&library.path).unwrap();
+    assert_eq!(
+        rows(&connection, "SELECT archive_id FROM category_archive"),
+        [[format!("Integer({})", library.one)]]
+    );
+}
+
+#[test]
+fn staged_progress_is_applied_with_the_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = Store::open(directory.path().join("shuku.sqlite")).unwrap();
+    // 什么都还没扫描时也能导入。
+    let report = migrate(&mut lrr(), &mut store, PREFIX).unwrap();
+    assert_eq!((report.archives, report.pending), (0, 3));
+    let one = add_archive(&mut store, "a/one.cbz", 10);
+    store
+        .write(|writer| writer.apply_lrr_pending(one, "a/one.cbz"))
+        .unwrap();
+    let archive = store.archive(one).unwrap().unwrap();
+    assert_eq!(archive.metadata.date_added, 1_600_000_000);
+    // 首次导入时分类在暂存之前写入，扫描套用暂存时能把这本加进分类。
+    let connection = open_connection(directory.path().join("shuku.sqlite")).unwrap();
+    assert_eq!(
+        rows(
+            &connection,
+            "SELECT c.lrr_id, ca.archive_id FROM category_archive ca JOIN category c ON c.id = ca.category_id"
+        ),
+        [[
+            "Text(\"SET_1600000000\")".to_string(),
+            format!("Integer({one})")
+        ]]
+    );
+    let progress = archive.progress.unwrap();
+    assert_eq!(
+        (progress.page, progress.client_time),
+        (4, 1_700_000_000_000)
+    );
+}
+
+#[test]
 fn running_again_overwrites_from_lrr_without_duplicating_rows() {
     let mut library = library();
     migrate(&mut lrr(), &mut library.store, PREFIX).unwrap();
@@ -274,6 +406,7 @@ fn running_again_overwrites_from_lrr_without_duplicating_rows() {
             "SELECT * FROM tankoubon_archive ORDER BY 1, 2",
             "SELECT * FROM tankoubon_tag ORDER BY 1, 2",
             "SELECT archive_id, page, client_time FROM progress ORDER BY 1",
+            "SELECT path FROM lrr_pending ORDER BY 1",
         ]
         .map(|sql| rows(connection, sql))
     };

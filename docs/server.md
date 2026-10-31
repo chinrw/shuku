@@ -51,7 +51,7 @@ JPEG、PNG、GIF、WebP、AVIF、JXL 和 BMP 都可以读取原图并生成 JPEG
 
 ## 从 LRR 导入元数据
 
-先用 `shuku scan` 让归档入库，再运行迁移工具。它按文件路径把 LRR 的记录对应到已入库的归档，导入标题、标签、简介、分类、Tankoubon 和阅读进度，可以反复运行，每次以 LRR 为准。
+迁移工具把 LRR 的标题、标签、简介、加入时间、来源、分类、Tankoubon 和阅读进度导入 Shuku，可以反复运行，每次以 LRR 为准。扫描前后都可以运行：它按文件路径对应归档，已经扫描入库的直接写入，还没扫描到的暂存起来，`shuku` 扫描到那个文件时自动套用。服务端在运行时也可以导入，写进已入库归档的数据要等服务端下次重建快照（扫描提交一批或扫描结束）才出现在搜索结果里，最简单的做法是导入后重启服务。
 
 ```bash
 nix develop -c cargo run -p shuku-migrate-lrr -- \
@@ -60,7 +60,7 @@ nix develop -c cargo run -p shuku-migrate-lrr -- \
   --data-dir /path/to/shuku-data
 ```
 
-`--redis` 填 LRR 所用 Redis 的地址，路径部分是元数据所在的库编号。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。找不到对应文件的记录会列在输出里。
+`--redis` 填 LRR 所用 Redis 的地址，路径部分是元数据所在的库编号。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。路径不在这个目录下的记录不导入，会列在输出里。LRR 里没有 `date_added` 标签的归档用文件的修改时间作为加入时间，输出里会报告数量。
 
 ## 使用发布包
 
