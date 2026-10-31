@@ -5,7 +5,9 @@
 
 	// 书库首页顶部的一排最近读过的本子，点封面直接继续读。链接不带页码：这里的进度来自
 	// 搜索快照，可能落后约 10 秒，阅读器自己读详情接口的最新进度。
-	let { items }: { items: ArchiveItem[] } = $props();
+	// 和书库的卡片一样：点封面接着读，点标题打开详情抽屉（ondetail）。
+	let { items, ondetail }: { items: ArchiveItem[]; ondetail: (item: ArchiveItem) => void } =
+		$props();
 	const now = Date.now();
 
 	// 和 LRR 一样是横向轮播：触屏直接滑，电脑上两侧有按钮，每次翻过大半屏。
@@ -42,19 +44,19 @@
 	<div class="strip" bind:this={strip} onscroll={measure}>
 		{#each items as item (item.id)}
 			{@const page = item.progress?.page ?? 0}
-			<a class="book" href="/a/{item.id}/read" title={item.title}>
-				<span class="cover">
+			<div class="book">
+				<a class="cover" href="/a/{item.id}/read" aria-label="接着读 {item.title}">
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.page_count > 0}
 						<span class="progress" style:width="{((page + 1) / item.page_count) * 100}%"></span>
 					{/if}
-				</span>
-				<span class="title">{item.title}</span>
+				</a>
+				<button class="title" title={item.title} onclick={() => ondetail(item)}>{item.title}</button>
 				<span class="meta">
 					{page + 1}/{item.page_count}
 					{#if item.progress}· {ago(item.progress.client_time, now)}{/if}
 				</span>
-			</a>
+			</div>
 		{/each}
 	</div>
 	<button class="nav next" onclick={() => page(1)} disabled={atEnd} aria-label="往后">
@@ -158,6 +160,13 @@
 	}
 
 	.title {
+		padding: 0;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		line-clamp: 2;
@@ -170,7 +179,7 @@
 		font-size: 0.72rem;
 	}
 
-	.book:hover .title {
+	.title:hover {
 		color: var(--link);
 	}
 </style>

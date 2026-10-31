@@ -404,8 +404,13 @@
 	afterNavigate(() => {
 		const id = route.state.drawer;
 		drawerInHistory = id;
-		drawer = id === undefined ? null : (items.find((item) => item.id === id) ?? null);
+		drawer = id === undefined ? null : findBook(id);
 	});
+
+	// 抽屉里的书可能来自列表，也可能来自最近阅读；前进后退回到抽屉开着的记录时按 ID 找回来。
+	function findBook(id: number): ArchiveItem | null {
+		return items.find((item) => item.id === id) ?? data.recent.find((item) => item.id === id) ?? null;
+	}
 
 	// 打开抽屉时加一条历史记录，手机的返回手势和浏览器的后退只关抽屉，不离开书库。
 	function openDrawer(item: ArchiveItem) {
@@ -428,7 +433,7 @@
 		if (id === drawerInHistory) return;
 		drawerInHistory = id;
 		untrack(() => {
-			drawer = id === undefined ? null : (items.find((item) => item.id === id) ?? null);
+			drawer = id === undefined ? null : findBook(id);
 		});
 	});
 </script>
@@ -642,7 +647,7 @@
 {/if}
 
 {#if data.recent.length > 0}
-	<RecentRow items={data.recent} />
+	<RecentRow items={data.recent} ondetail={openDrawer} />
 {/if}
 
 {#if batchMessage}
