@@ -19,8 +19,14 @@ export interface DeviceToken extends Device {
 	last_used_at: number | null;
 }
 
+/** 令牌失效了（接口返回 401），让 Service Worker 清掉这台设备上离线缓存的书库数据。 */
+function forgetOfflineData() {
+	navigator.serviceWorker?.controller?.postMessage('forget');
+}
+
 /** 接口返回 401 时转到登录页，登录后回到原来的地址。已经在登录页时不转。 */
 export function redirectToLogin() {
+	forgetOfflineData();
 	if (location.pathname === '/login') return;
 	const next = location.pathname + location.search;
 	location.assign(`/login?${new URLSearchParams({ next })}`);
@@ -28,6 +34,7 @@ export function redirectToLogin() {
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(path, init);
+	if (response.status === 401) forgetOfflineData();
 	if (!response.ok) {
 		const body = await response.json().catch(() => null);
 		throw new ApiError(response.status, body?.error ?? response.statusText);

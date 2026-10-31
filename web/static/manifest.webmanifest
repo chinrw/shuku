@@ -1,6 +1,9 @@
 {
+	"id": "/",
 	"name": "Shuku 书库",
 	"short_name": "书库",
+	"description": "自用的漫画书库",
+	"lang": "zh-CN",
 	"start_url": "/",
 	"scope": "/",
 	"display": "standalone",

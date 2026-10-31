@@ -47,7 +47,7 @@ nix develop -c cargo fmt --all
 - LRR 的元数据（标签、标题、分类、Tankoubon、阅读进度）要迁移过来，迁移完成后下线 LRR。
 - 书库里既有同人志（含条漫这类单本的作品），也有按卷出版的普通漫画（一部作品分成多卷，每卷一个归档），Shuku 按通用的漫画书库设计。README、文档和默认界面不以 E-Hentai/ExHentai 为中心，也不假设标签用 E-Hentai 的命名空间（`female:`、`parody:` 等）；E-Hentai 只是可选的元数据来源之一。
 - 书库约 30 万本，每本约 10 个标签。归档格式绝大部分是 zip（含 cbz），固实的 7z 和 RAR 很少。
-- 部署在局域网内，用 HTTP 直连，不配置 HTTPS。
+- 部署在局域网内，局域网里用 HTTP 直连，服务本身不配置 HTTPS；从外面访问走 Tailscale，由 `tailscale serve` 提供 HTTPS，这时网页端可以装成 PWA。
 - 写入必须一致：一次写入要么完整提交，要么不留痕迹。读取可以滞后 10 到 20 秒，所以读可以走内存快照，写可以合并成组提交。
 
 ## 架构
@@ -130,7 +130,9 @@ SQLite 的约定：
 
 ## 客户端（服务端设计时需要知道的部分）
 
-- 网页端是主力，覆盖 iOS 和桌面：TypeScript + Svelte 5，SvelteKit `adapter-static`、关闭 SSR。因为不用 HTTPS，网页端不使用 Service Worker，重复浏览依赖 HTTP 缓存头，所以缓存头必须正确。
+- 网页端是主力，覆盖 iOS 和桌面：TypeScript + Svelte 5，SvelteKit `adapter-static`、关闭 SSR。局域网 HTTP 下浏览器不提供 Service Worker，重复浏览依赖 HTTP 缓存头，所以缓存头必须正确。
+- 实际常用的访问方式是 Tailscale 的 HTTPS（`tailscale serve` 转发到只监听本机的服务），这时网页端是可安装的 PWA（`static/manifest.webmanifest`，iOS 的 Safari 和 Android 的 Chrome 都能装）。Service Worker 在 `web/src/service-worker/`，由根布局注册、开发时不注册：网页端自己的文件按版本预缓存；原图和缩略图按地址里的内容指纹缓存，命中就不请求；书库和阅读器用的几个 GET 接口先走网络、连不上时用上次的结果。原图最多占配额的 1/4 且不超过 1 GiB，缩略图 200 MiB，接口 30 MiB，超出时先删最早存入的（`bounded.ts`）。退出登录或接口返回 401 时清掉接口和图片的缓存。控制台、登录、`/api/info`、下载、MCP 和写接口不经过缓存，加接口时在 `routes.ts` 里决定要不要离线可用。离线时进度上报失败，还不排队补传。
+- 桌面和 Android 的 Tauri 应用加载服务端托管的网页端，不打包自己的一份，所以网页端的改动对它们同样生效。
 - Android 原生客户端（Kotlin + Compose）在 M4，离线阅读由它和桌面 Tauri 负责。
 
 ## 插件

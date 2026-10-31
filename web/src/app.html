@@ -10,7 +10,7 @@
 		<meta name="color-scheme" content="dark light" />
 		<meta name="theme-color" content="#34353b" media="(prefers-color-scheme: dark)" />
 		<meta name="theme-color" content="#e3e0d1" media="(prefers-color-scheme: light)" />
-		<!-- 局域网 HTTP 下没有 Service Worker，manifest 只负责“添加到主屏幕”后的全屏外观和图标。 -->
+		<!-- HTTPS 下可以装成应用，Service Worker 在 src/service-worker；局域网 HTTP 下 manifest 只管“添加到主屏幕”后的外观和图标。 -->
 		<link rel="manifest" href="/manifest.webmanifest" />
 		<link rel="icon" type="image/png" href="/favicon.png" />
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
