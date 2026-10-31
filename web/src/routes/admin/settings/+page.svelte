@@ -9,6 +9,7 @@
 	} from '#lib/admin.ts';
 	import { adminStatus } from '#lib/adminStatus.svelte.ts';
 	import MetadataSettings from './MetadataSettings.svelte';
+	import TokenSettings from './TokenSettings.svelte';
 	import { settings, type Direction, type LibraryView, type ReaderMode } from '#lib/settings.svelte.ts';
 
 	const prefs = settings();
@@ -98,7 +99,6 @@
 
 <div class="adm-head">
 	<h1>设置</h1>
-	<span class="adm-sub">设备令牌和插件在 M2 加到这里</span>
 </div>
 
 <div class="adm-stack">
@@ -230,6 +230,8 @@
 	</section>
 
 	<MetadataSettings />
+
+	<TokenSettings />
 
 	<section class="adm-card">
 		<h2>这台设备</h2>

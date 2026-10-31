@@ -14,9 +14,11 @@ anyhow = "1"
 arc-swap = "1"
 avif-decode = { version = "3", default-features = false }
 axum = "0.8"
+blake3 = "1"
 bytemuck = "1"
 clap = { version = "4", features = ["derive", "env"] }
 fast_image_resize = { version = "6", features = ["image"] }
+getrandom = "0.3"
 httpdate = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 jxl-oxide = { version = "0.12", default-features = false, features = ["image"] }

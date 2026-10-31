@@ -8,7 +8,7 @@ use shuku_store::{Error, Store, open_connection};
 fn rejects_newer_schema_versions_without_changing_them() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    for version in [11, 13] {
+    for version in [12, 14] {
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "user_version", version)
@@ -60,7 +60,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(pragma("user_version"), 10);
+    assert_eq!(pragma("user_version"), 11);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
     assert_eq!(pragma("mmap_size"), 0x7fff_0000);
@@ -86,6 +86,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             "archive_tag",
             "category",
             "category_archive",
+            "device_token",
             "lrr_pending",
             "metadata_candidate",
             "metadata_queue",
@@ -258,4 +259,49 @@ fn migration_keeps_categories_and_members_and_stops_reusing_category_ids() {
         })
         .unwrap();
     assert_eq!(members, 0);
+}
+
+#[test]
+fn device_tokens_are_found_by_hash_touched_and_revoked() {
+    let mut store = Store::open(":memory:").unwrap();
+    let (first, second) = store
+        .write(|writer| {
+            Ok::<_, Error>((
+                writer.create_device_token("手机", "aa", 1)?,
+                writer.create_device_token("agent", "bb", 2)?,
+            ))
+        })
+        .unwrap();
+    // 同一个摘要不能有两个令牌。
+    assert!(
+        store
+            .write(|writer| writer.create_device_token("重复", "aa", 3))
+            .is_err()
+    );
+    store
+        .write(|writer| writer.touch_device_token(first, 10))
+        .unwrap();
+    let found = store.device_token_by_hash("aa").unwrap().unwrap();
+    assert_eq!(
+        (found.id, found.name.as_str(), found.last_used_at),
+        (first, "手机", Some(10))
+    );
+    assert!(
+        store
+            .write(|writer| writer.delete_device_token(first))
+            .unwrap()
+    );
+    assert!(
+        !store
+            .write(|writer| writer.delete_device_token(first))
+            .unwrap()
+    );
+    assert_eq!(store.device_token_by_hash("aa").unwrap(), None);
+    let ids: Vec<i64> = store
+        .device_tokens()
+        .unwrap()
+        .iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, [second]);
 }

@@ -1,8 +1,32 @@
 # HTTP API（M1）
 
-服务端和网页客户端共同遵守本文件定义的接口。所有接口都在 `/api` 下，请求和响应都是 JSON（图片接口除外）。出错时返回合适的状态码和 `{"error": "说明"}`。M1 没有认证；Host 不是 IP、`localhost`、不带点的主机名或控制台设置里允许的域名时，所有路径都返回 421（防 DNS rebinding）。
+服务端和网页客户端共同遵守本文件定义的接口。所有接口都在 `/api` 下，请求和响应都是 JSON（图片接口除外）。出错时返回合适的状态码和 `{"error": "说明"}`。认证见下面的“认证”一节，默认不需要令牌；Host 不是 IP、`localhost`、不带点的主机名或控制台设置里允许的域名时，所有路径都返回 421（防 DNS rebinding）。
 
 ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Unix 毫秒，只有 `date_added` 是 Unix 秒（沿用 LRR 的数据）。
+
+## 认证
+
+每台设备（浏览器、阅读程序、agent）一个令牌，可以单独吊销。令牌形如 `shuku_` 加 64 个十六进制字符，只在新建时显示一次，服务端只存它的摘要。
+
+- `/mcp` 总是要令牌。
+- `/api` 默认不要，和以前一样只在局域网里用。控制台打开“网页端也需要令牌”（`require_token`）以后，除了 `GET /api/auth` 和 `/api/auth/session`，都要令牌。
+- 网页、网页端的静态文件不要令牌；网页端收到 401 时转到 `/login`。
+
+令牌放在 `Authorization: Bearer <令牌>` 头里，`Bearer` 不分大小写；网页端登录后由服务端放进 HttpOnly、`SameSite=Strict` 的 cookie，名字是 `shuku_token_<监听端口>`，同一台机器上的几个实例互不覆盖。请求带了 `Authorization` 头而令牌无效、已吊销或者头的格式不对时，即使这个接口不需要令牌也返回 401，好让程序发现令牌失效。401 带 `WWW-Authenticate: Bearer`。需要令牌时，图片接口的 `Cache-Control` 从 `public` 改成 `private`，共享缓存不会把一台设备取到的图片转给别的设备。
+
+`GET /api/auth`：`{"require_token": false, "device": {"id": 3, "name": "客厅 iPad"}}`，没登录时 `device` 为 `null`。
+
+`PUT /api/auth`：`{"require_token": true}` 打开或关闭。打开时这个请求本身必须带有效的令牌，否则返回 409，免得一打开就把自己挡在外面。
+
+`POST /api/auth/session`：网页端登录，请求体 `{"token": "shuku_…"}`，令牌有效时返回 `{"device": {...}}` 并设置 cookie，无效时返回 401。`DELETE /api/auth/session` 清掉 cookie，返回 204。
+
+`GET /api/admin/tokens`：`{"tokens": [{"id": 3, "name": "客厅 iPad", "created_at": 1761800000000, "last_used_at": 1761900000000}]}`，时间是 Unix 毫秒，最近使用时间最多每 10 分钟更新一次，从没用过时为 `null`。
+
+`POST /api/admin/tokens`：请求体 `{"name": "客厅 iPad"}`，名字去掉首尾空白后不能为空，最多 100 个字。返回 201 和上面的一项，外加只出现这一次的 `token`。
+
+`DELETE /api/admin/tokens/{id}`：吊销，返回 204；不存在时返回 404。
+
+令牌也可以在服务器上用命令行管理，服务运行时也能用，马上生效：`shuku token create <设备名>`、`shuku token list`、`shuku token revoke <ID>`。
 
 ## 共用对象
 
@@ -78,7 +102,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 { "categories": [{ "id": 2, "name": "收藏", "pinned": true, "dynamic": false, "count": 812 }] }
 ```
 
-下面几个接口修改分类。M1 没有认证，它们和进度上报一样只在局域网里用；和控制台一样，`Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致的请求返回 403。写入提交后服务端立即刷新快照里的分类，紧接着的分类列表和按分类搜索已经是新的。
+下面几个接口修改分类。没有打开“网页端也需要令牌”时，它们和进度上报一样不要令牌，只在局域网里用；和控制台一样，`Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致的请求返回 403。写入提交后服务端立即刷新快照里的分类，紧接着的分类列表和按分类搜索已经是新的。
 
 `POST /api/categories`：新建分类，请求体 `{"name": "收藏", "search": "", "pinned": false}`，`search` 和 `pinned` 可省略。`name` 去掉首尾空白后不能为空，最多 100 个字。`search` 非空是动态分类，语句要能被搜索接口解析，否则返回 400。成功返回 201 和 `{"id": 7}`。名字可以重复。
 
@@ -152,7 +176,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 ## 编辑和删除
 
-下面几个接口修改数据。和分类接口一样还没有认证，只在局域网里用，跨站请求返回 403。
+下面几个接口修改数据。和分类接口一样默认不要令牌，跨站请求返回 403。
 
 `PATCH /api/archives/{id}`
 
@@ -383,7 +407,7 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 
 ## 控制台
 
-网页端的 `/admin` 页用下面这些接口。M1 没有认证，它们和其他接口一样只在局域网里用；删除失踪记录和标签改名见上面的“编辑和删除”。为了不让别的网页借浏览器触发任务，POST 和 DELETE 请求的 `Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致时返回 403；两个头都没有的请求（curl 等）照常处理。
+网页端的 `/admin` 页用下面这些接口。它们和其他接口一样默认不要令牌；删除失踪记录和标签改名见上面的“编辑和删除”。为了不让别的网页借浏览器触发任务，POST 和 DELETE 请求的 `Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致时返回 403；两个头都没有的请求（curl 等）照常处理。
 
 `GET /api/admin/status`
 

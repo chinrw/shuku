@@ -1,5 +1,6 @@
 // 控制台的接口，格式见仓库的 docs/api.md 的“控制台”一节。
 import { ApiError } from './api';
+import { redirectToLogin } from './auth';
 
 export interface ScanReport {
 	added: number;
@@ -103,6 +104,7 @@ export interface LogEntry {
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(path, init);
+	if (response.status === 401) redirectToLogin();
 	if (!response.ok) {
 		const body = await response.json().catch(() => null);
 		throw new ApiError(response.status, body?.error ?? response.statusText);

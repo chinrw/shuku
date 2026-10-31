@@ -272,3 +272,12 @@ pub struct MetadataCandidate {
     /// Unix 毫秒。
     pub fetched_at: i64,
 }
+
+/// 一个设备令牌，不含令牌本身。时间都是 Unix 毫秒。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceToken {
+    pub id: i64,
+    pub name: String,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+}

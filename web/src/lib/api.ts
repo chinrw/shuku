@@ -1,4 +1,5 @@
 // 接口格式见仓库的 docs/api.md。
+import { redirectToLogin } from './auth';
 
 export interface Progress {
 	page: number;
@@ -103,6 +104,8 @@ type Fetch = typeof fetch;
 
 async function send(fetch: Fetch, path: string, init?: RequestInit): Promise<Response> {
 	const response = await fetch(path, init);
+	// 打开了“网页端也需要令牌”而这台设备没登录，或者令牌被吊销了。
+	if (response.status === 401) redirectToLogin();
 	if (!response.ok) {
 		// 服务端的错误统一是 {"error": "..."}；代理或网络层的错误可能不是 JSON。
 		const body = await response.json().catch(() => null);

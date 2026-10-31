@@ -52,6 +52,25 @@ struct Cli {
 enum Command {
     /// 扫描内容目录并更新数据库，不启动 HTTP 服务。
     Scan,
+    /// 管理设备令牌。服务运行时也可以用，新建和吊销马上生效。
+    #[command(subcommand)]
+    Token(TokenCommand),
+}
+
+#[derive(Subcommand)]
+enum TokenCommand {
+    /// 新建令牌并打印出来。令牌只显示这一次。
+    Create {
+        /// 设备名，例如“客厅 iPad”或“Claude”。
+        name: String,
+    },
+    /// 列出全部令牌（不含令牌本身）。
+    List,
+    /// 吊销令牌。
+    Revoke {
+        /// `list` 里显示的 ID。
+        id: i64,
+    },
 }
 
 #[tokio::main]
@@ -79,6 +98,9 @@ async fn main() -> Result<()> {
         listen: cli.listen,
     };
     let app = App::open(config).await?;
+    if let Some(Command::Token(command)) = cli.command {
+        return token_command(&app, command);
+    }
     if matches!(cli.command, Some(Command::Scan)) {
         let report = app.scan().await?;
         anyhow::ensure!(
@@ -121,5 +143,33 @@ async fn main() -> Result<()> {
             stopper.stop();
         })
         .await?;
+    Ok(())
+}
+
+fn token_command(app: &App, command: TokenCommand) -> Result<()> {
+    match command {
+        TokenCommand::Create { name } => {
+            let (record, token) = app.create_device_token(&name)?;
+            println!("{token}");
+            eprintln!(
+                "已为“{}”新建令牌（ID {}），只显示这一次。",
+                record.name, record.id
+            );
+        }
+        TokenCommand::List => {
+            for token in app.device_tokens()? {
+                let used = token.last_used_at.map_or("从未使用".to_owned(), |ms| {
+                    let at = std::time::UNIX_EPOCH
+                        + std::time::Duration::from_millis(u64::try_from(ms).unwrap_or(0));
+                    format!("最近使用 {}", httpdate::fmt_http_date(at))
+                });
+                println!("{}\t{}\t{used}", token.id, token.name);
+            }
+        }
+        TokenCommand::Revoke { id } => {
+            app.revoke_device_token(id)?;
+            eprintln!("已吊销令牌 {id}");
+        }
+    }
     Ok(())
 }

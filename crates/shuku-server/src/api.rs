@@ -77,6 +77,7 @@ impl App {
             .merge(self.categories_router())
             .merge(self.metadata_router())
             .merge(self.batch_router())
+            .merge(self.auth_router())
             .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
             .route("/api/", any(|| async { Error::not_found() }))
@@ -92,6 +93,10 @@ impl App {
                     message: "不支持的请求方法".into(),
                 }
             })
+            .layer(axum::middleware::from_fn_with_state(
+                self.clone(),
+                crate::auth::authenticate,
+            ))
             .layer(axum::middleware::from_fn_with_state(
                 self.clone(),
                 crate::hosts::check_host,

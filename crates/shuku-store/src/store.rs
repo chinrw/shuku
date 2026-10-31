@@ -536,6 +536,32 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 新建设备令牌，`hash` 是令牌的摘要，返回 ID。
+    pub fn create_device_token(&mut self, name: &str, hash: &str, now: i64) -> Result<i64> {
+        Ok(self.connection.query_row(
+            "INSERT INTO device_token (name, hash, created_at) VALUES (?1, ?2, ?3) RETURNING id",
+            params![name, hash, now],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// 吊销令牌，返回它是否存在。
+    pub fn delete_device_token(&mut self, id: i64) -> Result<bool> {
+        Ok(self
+            .connection
+            .execute("DELETE FROM device_token WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    /// 记下令牌最近一次使用的时间。
+    pub fn touch_device_token(&mut self, id: i64, now: i64) -> Result<()> {
+        self.connection.execute(
+            "UPDATE device_token SET last_used_at = ?2 WHERE id = ?1",
+            [id, now],
+        )?;
+        Ok(())
+    }
+
     pub fn delete_setting(&mut self, key: &str) -> Result<()> {
         self.connection
             .execute("DELETE FROM setting WHERE key = ?1", [key])?;

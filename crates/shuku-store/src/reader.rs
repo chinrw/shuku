@@ -4,7 +4,7 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
-    Archive, ArchiveMetadata, BrokenArchive, Category, DuplicateFile, Error, Library,
+    Archive, ArchiveMetadata, BrokenArchive, Category, DeviceToken, DuplicateFile, Error, Library,
     LibraryArchive, LibraryStats, LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry,
     Series, Tag, configure,
 };
@@ -96,6 +96,26 @@ impl Reader {
 
     pub fn find_by_path(&self, path: &str) -> Result<Option<i64>> {
         find_by_path(&self.connection, path)
+    }
+
+    /// 全部设备令牌，按 ID 升序。
+    pub fn device_tokens(&self) -> Result<Vec<DeviceToken>> {
+        Ok(self
+            .connection
+            .prepare("SELECT id, name, created_at, last_used_at FROM device_token ORDER BY id")?
+            .query_map([], device_token)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// 摘要对应的令牌，已经吊销或者从来没有时返回 `None`。
+    pub fn device_token_by_hash(&self, hash: &str) -> Result<Option<DeviceToken>> {
+        Ok(self
+            .connection
+            .prepare_cached(
+                "SELECT id, name, created_at, last_used_at FROM device_token WHERE hash = ?1",
+            )?
+            .query_row([hash], device_token)
+            .optional()?)
     }
 
     /// 一组设置。每个功能一个键（例如 `scan`），值是那组设置的 JSON；没存过时返回 `None`。
@@ -514,4 +534,13 @@ fn read_categories(connection: &Connection) -> Result<Vec<Category>> {
         }
     }
     Ok(categories)
+}
+
+fn device_token(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceToken> {
+    Ok(DeviceToken {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        created_at: row.get(2)?,
+        last_used_at: row.get(3)?,
+    })
 }

@@ -34,6 +34,8 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
 | `--listen` | `SHUKU_LISTEN` | `0.0.0.0:3002` |
 | `--no-watch` | `SHUKU_NO_WATCH` | 关闭：监视内容目录，有变化时自动扫描 |
 
+默认网页端和 API 不需要令牌，只给 agent 用的 `/mcp` 需要。要让网页端也需要令牌，先在控制台设置页的“设备令牌”里新建一个、在这台设备上登录，再打开“网页端也需要令牌”。没有设备能登录时，在服务器上运行 `shuku token create <设备名>` 新建令牌，再到登录页输入。`shuku token list` 列出令牌，`shuku token revoke <ID>` 吊销；命令行和服务共用数据目录，服务运行时也能用，马上生效。
+
 服务端只接受 Host 是 IP 地址、`localhost` 或不带点的主机名（例如 `nas:3002`）的请求，其他域名返回 421。这是为了防 DNS rebinding：没有认证时，任意网页都能把自己的域名解析到局域网地址来读书库。用带点的名字访问（Tailscale 的完整域名、`.local`、自己的域名）时，先用 IP 打开控制台，在设置页的“允许的域名”里加上它。
 
 相对路径以进程的工作目录为准。参数可以放在 `scan` 前后。按 Ctrl-C 停止 HTTP 服务。

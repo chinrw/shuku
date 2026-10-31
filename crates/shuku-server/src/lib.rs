@@ -2,6 +2,7 @@
 
 mod admin;
 mod api;
+mod auth;
 mod batch;
 mod categories;
 mod db;
@@ -132,6 +133,8 @@ struct Inner {
     scan_batch_hook: Mutex<Option<Box<dyn FnMut() + Send>>>,
     /// 元数据功能的设置、翻译表和后台 E-Hentai 队列。
     metadata: metadata::MetadataState,
+    /// 设备令牌的设置。
+    auth: auth::AuthState,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
     stopping: AtomicBool,
 }
@@ -159,6 +162,7 @@ impl App {
             let snapshot = snapshot::Snapshot::load(&*database.reader()?)?;
             let settings = settings::Settings::load(&*database.reader()?);
             let metadata = metadata::MetadataState::load(&*database.reader()?)?;
+            let auth = auth::AuthState::load(database.reader()?.setting(auth::KEY));
             let changed = Arc::new(Notify::new());
             let writes = db::spawn_writer(database.clone(), changed.clone())?;
             Ok(Self(Arc::new(Inner {
@@ -179,6 +183,7 @@ impl App {
                 #[cfg(test)]
                 scan_batch_hook: Mutex::new(None),
                 metadata,
+                auth,
                 stopping: AtomicBool::new(false),
             })))
         })
