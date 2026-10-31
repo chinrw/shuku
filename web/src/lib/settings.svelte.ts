@@ -6,6 +6,8 @@ export type Direction = 'rtl' | 'ltr';
 /** 翻页模式下整页放进屏幕，或者页宽占满屏幕、上下滚动。 */
 export type Fit = 'screen' | 'width';
 export type LibraryView = 'grid' | 'list';
+/** 手机和平板上阅读器按屏幕取缩小的图（放大时换原图），或者总用原图。 */
+export type Quality = 'auto' | 'original';
 
 const KEY = 'shuku.settings';
 
@@ -18,6 +20,7 @@ class Settings {
 	fit = $state<Fit>('screen');
 	/** 横屏时把相邻两页并排显示。 */
 	spread = $state(true);
+	quality = $state<Quality>('auto');
 	view = $state<LibraryView>('grid');
 	/** 书库页同一系列的各卷合成一张卡。 */
 	groupSeries = $state(true);
@@ -43,6 +46,7 @@ class Settings {
 		if (saved.direction === 'rtl' || saved.direction === 'ltr') this.direction = saved.direction;
 		if (saved.fit === 'screen' || saved.fit === 'width') this.fit = saved.fit;
 		if (typeof saved.spread === 'boolean') this.spread = saved.spread;
+		if (saved.quality === 'auto' || saved.quality === 'original') this.quality = saved.quality;
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
 		if (typeof saved.groupSeries === 'boolean') this.groupSeries = saved.groupSeries;
 		if (typeof saved.hideFinished === 'boolean') this.hideFinished = saved.hideFinished;
@@ -68,7 +72,7 @@ class Settings {
 	save() {
 		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
 			this;
-		const { sort, order } = this;
+		const { sort, order, quality } = this;
 		localStorage.setItem(
 			KEY,
 			JSON.stringify({
@@ -76,6 +80,7 @@ class Settings {
 				direction,
 				fit,
 				spread,
+				quality,
 				view,
 				groupSeries,
 				hideFinished,

@@ -123,8 +123,11 @@ fn respond(
             message: "图片像素太多，不能缩放".into(),
         });
     }
+    // 以前的版本对动图也缓存过静帧 JPEG，页面变体换个名字（`w1440`），数据目录里的旧缓存
+    // 就不再使用。缩略图仍是 `jpeg-500`。
     let variant = match width {
-        Some(width) => format!("jpeg-{width}"),
+        Some(width) if thumbnail => format!("jpeg-{width}"),
+        Some(width) => format!("w{width}"),
         None => "original".into(),
     };
     let key = format!("{id}-{}-{n}-{variant}", archive.metadata.quick_hash);
@@ -170,17 +173,23 @@ fn respond(
         Some(width) => {
             let directory = app.0.config.data_dir.join("cache/images");
             let cache_path = directory.join(format!("{key}.jpg"));
-            let bytes = match fs::read(&cache_path) {
-                Ok(bytes) => bytes,
+            match fs::read(&cache_path) {
+                Ok(bytes) => (bytes, "image/jpeg"),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    let bytes = resize(&read_original()?, width)?;
-                    fs::create_dir_all(&directory)?;
-                    write_cache(&cache_path, &bytes)?;
-                    bytes
+                    let original = read_original()?;
+                    // 转成 JPEG 会丢掉动画，手机上的阅读器对每页都带 `w`，所以动图原样返回。
+                    if !thumbnail && animated(&original) {
+                        let content_type = content_type(&original)?;
+                        (original, content_type)
+                    } else {
+                        let bytes = resize(&original, width)?;
+                        fs::create_dir_all(&directory)?;
+                        write_cache(&cache_path, &bytes)?;
+                        (bytes, "image/jpeg")
+                    }
                 }
                 Err(error) => return Err(error.into()),
-            };
-            (bytes, "image/jpeg")
+            }
         }
         None => {
             let bytes = read_original()?;
@@ -224,6 +233,36 @@ fn write_cache(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// GIF 一律算动图：静态的大 GIF 很少，调色板图转 JPEG 也不省多少。PNG 看 IDAT 之前有没有
+/// APNG 的 acTL 块，WebP 看 VP8X 头的动画标志。
+fn animated(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"GIF8") {
+        return true;
+    }
+    if let Some(mut chunks) = bytes.strip_prefix(b"\x89PNG\r\n\x1a\n") {
+        while let [a, b, c, d, kind @ ..] = chunks
+            && kind.len() >= 4
+        {
+            let length = u32::from_be_bytes([*a, *b, *c, *d]) as usize;
+            match &kind[..4] {
+                b"acTL" => return true,
+                b"IDAT" => return false,
+                _ => {}
+            }
+            // 类型 4 字节、数据、CRC 4 字节。
+            let Some(rest) = kind.get(length.saturating_add(8)..) else {
+                return false;
+            };
+            chunks = rest;
+        }
+        return false;
+    }
+    bytes.len() > 20
+        && &bytes[..4] == b"RIFF"
+        && &bytes[8..16] == b"WEBPVP8X"
+        && bytes[20] & 0x02 != 0
+}
+
 /// 认不出格式的是坏页（全是 0、0 字节、改了扩展名的别的文件），返回 422。
 fn content_type(bytes: &[u8]) -> Result<&'static str> {
     if crate::decode::is_jxl(bytes) {
@@ -253,5 +292,54 @@ fn file_error(error: std::io::Error) -> Error {
         Error::not_found()
     } else {
         error.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::animated;
+
+    fn png(chunks: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        for (kind, data) in chunks {
+            bytes.extend((data.len() as u32).to_be_bytes());
+            bytes.extend(*kind);
+            bytes.extend(*data);
+            bytes.extend([0; 4]);
+        }
+        bytes
+    }
+
+    #[test]
+    fn detects_apng_only_when_actl_precedes_idat() {
+        let header: &[u8] = &[0; 13];
+        assert!(animated(&png(&[
+            (b"IHDR", header),
+            (b"acTL", &[0; 8]),
+            (b"IDAT", &[1])
+        ])));
+        assert!(!animated(&png(&[
+            (b"IHDR", header),
+            (b"IDAT", &[1]),
+            (b"acTL", &[0; 8])
+        ])));
+        assert!(!animated(&png(&[(b"IHDR", header), (b"IDAT", &[1])])));
+        // 块长度超出文件时不越界。
+        let mut truncated = png(&[(b"IHDR", header)]);
+        truncated[8..12].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(!animated(&truncated));
+    }
+
+    #[test]
+    fn detects_animated_webp_from_the_vp8x_flags() {
+        let webp = |flags: u8| {
+            let mut bytes = b"RIFF\0\0\0\0WEBPVP8X\x0a\0\0\0".to_vec();
+            bytes.push(flags);
+            bytes.extend([0; 9]);
+            bytes
+        };
+        assert!(animated(&webp(0x02)));
+        assert!(!animated(&webp(0x10)));
+        assert!(!animated(b"RIFF\0\0\0\0WEBPVP8 \0\0\0\0\0\0\0\0\0\0"));
     }
 }

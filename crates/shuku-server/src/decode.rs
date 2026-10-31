@@ -13,9 +13,14 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<DynamicImage> {
         return Ok(DynamicImage::from_decoder(decoder)?);
     }
     if image::guess_format(bytes)? != ImageFormat::Avif {
-        return Ok(ImageReader::new(Cursor::new(bytes))
+        // 浏览器显示原图时按 EXIF 方向转正，缩出来的 JPEG 不带 EXIF，要在这里转好。
+        let mut decoder = ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()?
-            .decode()?);
+            .into_decoder()?;
+        let orientation = decoder.orientation()?;
+        let mut image = DynamicImage::from_decoder(decoder)?;
+        image.apply_orientation(orientation);
+        return Ok(image);
     }
     // image 的内置 AVIF 解码器需要系统 dav1d；这里使用 Rust 解码器。
     macro_rules! convert {

@@ -2,6 +2,7 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { afterNavigate, pushState, replaceState } from '$app/navigation';
 	import { page as route } from '$app/state';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { downloadUrl } from '#lib/api.ts';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
@@ -203,21 +204,86 @@
 		finishedVolume = !target && delta > 0 && nextVolume !== null;
 	}
 
-	// 阅读器总是用原图。原来按屏幕宽度和像素密度请求缩小的 JPEG，电脑上整页显示时只有
-	// 720 宽，放大或在高分屏上看会糊。缩略图另有接口，不受影响。
-	function src(index: number) {
-		return pages[index].url;
+	// 手机和平板默认按显示需要的宽度取服务端缩小的 JPEG：几千万像素的原图在手机上要解码一两秒、
+	// 占上百 MB 内存，翻页会卡。只用 1440 和 2160 两档，比屏幕清晰度略高，稍微放大也不糊；
+	// 真正放大过的页换成原图。电脑上照旧用原图，原来按屏幕请求时整页显示只有 720 宽，放大看会糊。
+	// 动图由服务端原样返回，超过服务端缩放上限（6400 万像素）的和坏页直接用原图。
+	const VARIANT_WIDTHS = [1440, 2160];
+	const MAX_VARIANT_PIXELS = 64_000_000;
+	let variants = $derived(touchDevice && prefs.quality === 'auto');
+	// 放大看过的页，之后一直用原图。原图加载失败（例如离线时只缓存过缩小的图）的页不再换。
+	const upgraded = new SvelteSet<number>();
+	const keepVariant = new Set<number>();
+
+	/** 这一页在当前布局下显示的宽度（CSS 像素）。 */
+	function displayWidth(index: number): number {
+		if (mode === 'scroll') return Math.min(stageWidth, columnWidth);
+		const across = stageWidth / (spreads.find((spread) => spread.includes(index))?.length ?? 1);
+		if (fitWidth) return across;
+		const { width, height } = pages[index];
+		return Math.min(across, (stageHeight * width) / height);
 	}
+
+	/** 按屏幕该取的缩小的图；不该缩（电脑、设成原图、图本来就不大、坏页）时是 null。 */
+	function variantUrl(index: number): string | null {
+		const page = pages[index];
+		if (!variants || page.width === 0) return null;
+		if (page.width * page.height > MAX_VARIANT_PIXELS) return null;
+		const needed = displayWidth(index) * window.devicePixelRatio;
+		const width = VARIANT_WIDTHS.find((tier) => tier >= needed);
+		return width && width < page.width ? `${page.url}&w=${width}` : null;
+	}
+
+	function src(index: number) {
+		return (!upgraded.has(index) && variantUrl(index)) || pages[index].url;
+	}
+
+	// 两指放大（viewport 的缩放）时把眼前的页换成原图；换 src 时旧图一直显示到新图加载完。
+	// 放大着点两侧翻页时新的一屏也换。滚动模式按当前页和前后各一页算。
+	function upgradeIfZoomed() {
+		if (!variants || (window.visualViewport?.scale ?? 1) <= 1.05) return;
+		const shown = mode === 'paged' ? visible : [current - 1, current, current + 1];
+		for (const index of shown) {
+			if (pages[index] && !keepVariant.has(index) && variantUrl(index)) upgraded.add(index);
+		}
+	}
+
+	$effect(() => {
+		const viewport = window.visualViewport;
+		if (!viewport || !variants) return;
+		viewport.addEventListener('resize', upgradeIfZoomed);
+		return () => viewport.removeEventListener('resize', upgradeIfZoomed);
+	});
+
+	$effect(() => {
+		void visible;
+		void current;
+		untrack(upgradeIfZoomed);
+	});
 
 	// 浏览器解不了原图的格式（例如 Chrome 不支持的 JPEG XL）时，改要服务端转出的 JPEG：
 	// 取比原图窄的最宽一档，服务端只缩不放，不比原图窄就会原样返回。
 	const JPEG_WIDTHS = [2160, 1440, 1080, 720];
 
+	// 每个 img 记下失败过的地址，依次试原图、按屏幕取的图、转出的 JPEG，每个地址只试一次。
+	// 按屏幕取的图失败时（服务端缩不了、离线时只缓存过原图）因此会退回原图。
 	function fallback(event: Event, index: number) {
 		const image = event.currentTarget as HTMLImageElement;
-		const width = JPEG_WIDTHS.find((tier) => tier < pages[index].width);
-		const jpeg = width ? `${pages[index].url}&w=${width}` : null;
-		if (jpeg && !image.src.endsWith(jpeg)) image.src = jpeg;
+		const page = pages[index];
+		const failed = new Set(image.dataset.failed?.split('\n'));
+		failed.add(image.getAttribute('src') ?? '');
+		image.dataset.failed = [...failed].join('\n');
+		const variant = variantUrl(index);
+		// 放大时换的原图失败了，退回缩小的图：去掉标记后 src() 重新算出它的地址。
+		if (upgraded.has(index) && variant && !failed.has(variant)) {
+			upgraded.delete(index);
+			keepVariant.add(index);
+			return;
+		}
+		const width = JPEG_WIDTHS.find((tier) => tier < page.width);
+		const jpeg = width ? `${page.url}&w=${width}` : null;
+		const next = [page.url, variant, jpeg].find((url) => url && !failed.has(url));
+		if (next) image.src = next;
 	}
 
 	// 非全屏时工具栏上显示的当前页分辨率和文件大小，和 LRR 一样；双页时两页都写。
@@ -275,7 +341,7 @@
 	}
 
 	/**
-	 * 超过这个像素数的原图预取时不解码（约 48 MiB 的 RGBA）。离屏的 `decode()` 按原尺寸解码，
+	 * 超过这个像素数的图预取时不解码（约 48 MiB 的 RGBA）。离屏的 `decode()` 按原尺寸解码，
 	 * 7000×4700 的图要占 125 MiB，超过 Chrome 的解码缓存预算，翻过去时多半已被淘汰；
 	 * 显示时浏览器可以按屏幕尺寸缩小着解码，反而更快。
 	 */
@@ -305,8 +371,9 @@
 				started.push(image);
 				image.src = src(index);
 				await settled(image);
-				const { width, height } = pages[index];
-				if (decode && !cancelled && width * height <= PREDECODE_PIXELS) {
+				// 按下载到的图算：缩小的长条图和服务端原样返回的动图也可能很大。
+				const small = image.naturalWidth * image.naturalHeight <= PREDECODE_PIXELS;
+				if (decode && !cancelled && small) {
 					image.decode().catch(() => {});
 				}
 			}
@@ -756,6 +823,20 @@
 							<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
 							<button class:on={!prefs.spread} onclick={() => update(() => (prefs.spread = false))}
 								>关</button
+							>
+						</div>
+					{/if}
+					{#if touchDevice}
+						<span>图片</span>
+						<div class="segmented">
+							<button
+								class:on={prefs.quality === 'auto'}
+								onclick={() => update(() => (prefs.quality = 'auto'))}
+								title="按屏幕取缩小的图，放大时换原图">按屏幕</button
+							>
+							<button
+								class:on={prefs.quality === 'original'}
+								onclick={() => update(() => (prefs.quality = 'original'))}>原图</button
 							>
 						</div>
 					{/if}

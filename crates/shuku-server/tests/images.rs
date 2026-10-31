@@ -389,3 +389,101 @@ async fn refuses_to_resize_pages_above_the_pixel_limit() {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
     }
 }
+
+#[tokio::test]
+async fn animated_pages_are_returned_unchanged_when_a_width_is_requested() {
+    use image::{Delay, Frame, RgbaImage, codecs::gif::GifEncoder};
+    use std::{fs::File, io::Write};
+    use zip::{ZipWriter, write::SimpleFileOptions};
+
+    let mut gif = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut gif);
+        for shade in [0, 255] {
+            let frame = RgbaImage::from_pixel(800, 8, image::Rgba([shade, 0, 0, 255]));
+            let delay = Delay::from_numer_denom_ms(100, 1);
+            encoder
+                .encode_frame(Frame::from_parts(frame, 0, 0, delay))
+                .unwrap();
+        }
+    }
+    let fixture = Fixture::new();
+    let mut zip =
+        ZipWriter::new(File::create(fixture.config.content_dir.join("book.cbz")).unwrap());
+    zip.start_file("1.gif", SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(&gif).unwrap();
+    zip.finish().unwrap();
+    let app = fixture.app().await;
+    assert_eq!(app.scan().await.unwrap().added, 1);
+    let router = app.router();
+    let item = &json(&router, "/api/search").await["items"][0];
+    let listing = json(&router, &format!("/api/archives/{}/pages", item["id"])).await;
+    let url = listing["pages"][0]["url"].as_str().unwrap();
+
+    let (status, headers, bytes) =
+        request(&router, "GET", &format!("{url}&w=720"), None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["content-type"], "image/gif");
+    assert_eq!(bytes, gif);
+    // 缩略图不需要动，照样转成 JPEG。
+    let (status, headers, _) = request(
+        &router,
+        "GET",
+        item["cover_url"].as_str().unwrap(),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["content-type"], "image/jpeg");
+}
+
+#[tokio::test]
+async fn resized_images_follow_the_exif_orientation() {
+    use image::{ImageEncoder, RgbImage, codecs::jpeg::JpegEncoder};
+    use std::{fs::File, io::Write};
+    use zip::{ZipWriter, write::SimpleFileOptions};
+
+    // 存的是 800×400，EXIF 方向 6 表示显示时顺时针转 90 度，看到的是 400×800。
+    let pixels = RgbImage::from_pixel(800, 400, image::Rgb([90, 90, 90]));
+    let mut jpeg = Vec::new();
+    let mut encoder = JpegEncoder::new(&mut jpeg);
+    let exif = b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06\0\0\0\0\0\0".to_vec();
+    encoder.set_exif_metadata(exif).unwrap();
+    encoder
+        .write_image(&pixels, 800, 400, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    let fixture = Fixture::new();
+    let mut zip =
+        ZipWriter::new(File::create(fixture.config.content_dir.join("book.cbz")).unwrap());
+    zip.start_file("1.jpg", SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(&jpeg).unwrap();
+    zip.finish().unwrap();
+    let app = fixture.app().await;
+    assert_eq!(app.scan().await.unwrap().added, 1);
+    let router = app.router();
+    let item = &json(&router, "/api/search").await["items"][0];
+    let listing = json(&router, &format!("/api/archives/{}/pages", item["id"])).await;
+    let url = listing["pages"][0]["url"].as_str().unwrap();
+
+    let (status, _, bytes) = request(&router, "GET", &format!("{url}&w=720"), None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        image::load_from_memory(&bytes).unwrap().dimensions(),
+        (400, 800)
+    );
+    let (_, _, cover) = request(
+        &router,
+        "GET",
+        item["cover_url"].as_str().unwrap(),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(
+        image::load_from_memory(&cover).unwrap().dimensions(),
+        (400, 800)
+    );
+}
