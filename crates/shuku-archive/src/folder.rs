@@ -4,7 +4,7 @@
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{BrokenPage, CompressionMethod, Error, MAX_PAGE_SIZE, Page, Result, is_image, jpeg};
 
@@ -24,7 +24,7 @@ fn images(dir: &Path) -> Result<Vec<(String, fs::Metadata)>> {
             images.push((name, metadata));
         }
     }
-    images.sort_by(|a, b| crate::natural_cmp(&a.0.to_lowercase(), &b.0.to_lowercase()));
+    images.sort_by(|a, b| crate::page_order(&a.0, &b.0));
     Ok(images)
 }
 
@@ -45,21 +45,50 @@ fn open_image(path: &Path) -> Result<File> {
     Ok(file)
 }
 
-/// 归档文件的大小和修改时间；文件夹是其中图片的总大小，和图片与文件夹本身里最新的修改时间。
-/// 算上文件夹本身，页面改名、增删时修改时间也会变（总大小可能不变）。扫描和读页都用它判断内容是否变过。
-pub fn identity(path: impl AsRef<Path>) -> Result<(u64, SystemTime)> {
+/// 判断归档有没有变过用的身份。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Identity {
+    /// 文件大小；文件夹是其中图片的总大小。
+    pub size: u64,
+    /// Unix 秒。文件是修改时间；文件夹是文件夹本身和每张图修改时间之和：任何一张图被改、
+    /// 页面改名或增删（文件夹本身的修改时间会变）都会让它变，即使有的图带着未来的时间戳。
+    /// 只用来比较，不是一个时刻。
+    pub modified: i64,
+    /// 最新的修改时间，文件夹里也算上文件夹本身。新书的加入时间用它。
+    pub newest: SystemTime,
+}
+
+fn unix_seconds(time: SystemTime) -> i64 {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => elapsed.as_secs() as i64,
+        Err(before) => -(before.duration().as_secs() as i64),
+    }
+}
+
+/// 归档文件或散放图片的文件夹的身份。扫描、补算指纹和读页都用它判断内容是否变过。
+pub fn identity(path: impl AsRef<Path>) -> Result<Identity> {
     let path = path.as_ref();
     let metadata = fs::metadata(path)?;
+    let own = metadata.modified()?;
     if !metadata.is_dir() {
-        return Ok((metadata.len(), metadata.modified()?));
+        return Ok(Identity {
+            size: metadata.len(),
+            modified: unix_seconds(own),
+            newest: own,
+        });
     }
-    let mut size = 0;
-    let mut newest = metadata.modified()?;
+    let mut identity = Identity {
+        size: 0,
+        modified: unix_seconds(own),
+        newest: own,
+    };
     for (_, metadata) in images(path)? {
-        size += metadata.len();
-        newest = newest.max(metadata.modified()?);
+        let modified = metadata.modified()?;
+        identity.size += metadata.len();
+        identity.modified = identity.modified.wrapping_add(unix_seconds(modified));
+        identity.newest = identity.newest.max(modified);
     }
-    Ok((size, newest))
+    Ok(identity)
 }
 
 /// 和 [`crate::list_pages_with_broken`] 一样，坏页的宽和高记为 0。

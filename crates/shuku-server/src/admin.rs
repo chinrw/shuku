@@ -542,8 +542,9 @@ fn already_running(task: &str) -> Error {
 }
 
 impl App {
-    /// 在后台扫描，结束后接着补算指纹，和服务启动时一样。已经在扫描时返回 `false`。
-    pub(crate) fn start_background_scan(&self) -> bool {
+    /// 在后台扫描整个内容目录，结束后接着补算指纹，和服务启动时一样。已经在扫描时返回 `false`。
+    /// 没变的文件只比对大小和修改时间，所以文件监视之类需要“这里变了”的调用方可以直接用它。
+    pub fn start_background_scan(&self) -> bool {
         let claimed = self.tasks(|tasks| {
             if tasks.scan.running {
                 return false;

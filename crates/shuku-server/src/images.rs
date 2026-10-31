@@ -1,4 +1,4 @@
-use crate::{App, Error, Result, scan::unix_seconds};
+use crate::{App, Error, Result};
 use axum::{
     body::Body,
     extract::{
@@ -94,11 +94,11 @@ fn respond(
     // 路径由扫描写入，是内容目录里的普通文件或散放图片的文件夹。内容被替换但还没重新扫描时，
     // 记录的偏移已经失效，按旧 URL 返回新内容会被浏览器永久缓存，所以先比对大小和修改时间。
     let path = app.0.config.content_dir.join(&archive.metadata.path);
-    let (size, modified) = shuku_archive::identity(&path).map_err(|error| match error {
+    let identity = shuku_archive::identity(&path).map_err(|error| match error {
         shuku_archive::Error::Io(error) => file_error(error),
         error => error.into(),
     })?;
-    if size != archive.metadata.file_size || unix_seconds(modified)? != archive.metadata.mtime {
+    if identity.size != archive.metadata.file_size || identity.modified != archive.metadata.mtime {
         return Err(changed_file());
     }
     if thumbnail && page.width == 0 {

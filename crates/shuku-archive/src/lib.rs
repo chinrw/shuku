@@ -6,7 +6,9 @@ mod header;
 mod jpeg;
 
 pub use fingerprint::{content_hash, content_hash_file, quick_hash, quick_hash_file};
-pub use folder::{folder_content_hash, folder_quick_hash, identity, list_folder_pages_with_broken};
+pub use folder::{
+    Identity, folder_content_hash, folder_quick_hash, identity, list_folder_pages_with_broken,
+};
 
 use std::cmp::Ordering;
 use std::fs::File;
@@ -172,7 +174,7 @@ pub fn list_pages_with_broken(path: impl AsRef<Path>) -> Result<(Vec<Page>, Vec<
         }
         pages.push(page);
     }
-    pages.sort_by(|a, b| natural_cmp(&a.entry_name.to_lowercase(), &b.entry_name.to_lowercase()));
+    pages.sort_by(|a, b| page_order(&a.entry_name, &b.entry_name));
     Ok((pages, broken))
 }
 
@@ -218,7 +220,20 @@ pub fn is_image(name: &str) -> bool {
     )
 }
 
-pub(crate) fn natural_cmp(mut a: &str, mut b: &str) -> Ordering {
+/// 页面顺序：不分大小写的自然序；`1.jpg` 和 `01.jpg`、`A.jpg` 和 `a.jpg` 这样相等的再按原名排，
+/// 结果不随目录或 ZIP 里的枚举顺序变化，文件夹的指纹按这个顺序算才是确定的。
+pub(crate) fn page_order(a: &str, b: &str) -> Ordering {
+    natural_cmp(&a.to_lowercase(), &b.to_lowercase()).then_with(|| a.cmp(b))
+}
+
+/// 文件开头是不是 ZIP 的魔数。空 zip 只有结束记录，所以也接受 PK\x05\x06。
+pub fn has_zip_magic(path: impl AsRef<Path>) -> Result<bool> {
+    let mut magic = Vec::with_capacity(4);
+    File::open(path)?.take(4).read_to_end(&mut magic)?;
+    Ok(matches!(magic.as_slice(), b"PK\x03\x04" | b"PK\x05\x06"))
+}
+
+fn natural_cmp(mut a: &str, mut b: &str) -> Ordering {
     while !a.is_empty() && !b.is_empty() {
         if a.as_bytes()[0].is_ascii_digit() && b.as_bytes()[0].is_ascii_digit() {
             let a_end = a.bytes().take_while(u8::is_ascii_digit).count();

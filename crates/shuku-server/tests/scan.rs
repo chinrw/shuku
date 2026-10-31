@@ -432,3 +432,32 @@ async fn folders_of_loose_images_are_read_as_books() {
     let issues = common::json(&router, "/api/admin/issues").await;
     assert_eq!(issues["missing"]["items"][0]["id"], id);
 }
+
+#[tokio::test]
+async fn zips_named_like_images_are_still_archives_and_hidden_images_are_not_pages() {
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 30, 40);
+    let content = &fixture.config.content_dir;
+    std::fs::create_dir(content.join("sub")).unwrap();
+    std::fs::rename(content.join("book.cbz"), content.join("sub/cover.jpg")).unwrap();
+    let png = fixture.archive("other.cbz", 30, 40);
+    std::fs::create_dir(content.join("only-hidden")).unwrap();
+    std::fs::write(content.join("only-hidden/.1.png"), &png).unwrap();
+    let app = fixture.app().await;
+    common::request(
+        &app.router(),
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"scan_hidden": true})),
+        &[],
+    )
+    .await;
+    let report = app.scan().await.unwrap();
+    // sub/cover.jpg 按魔数当 ZIP 入库，sub 不成书；只有隐藏图片的目录也不成书。
+    assert_eq!(report.added, 2);
+    let store = Store::open(fixture.database()).unwrap();
+    let zip = store.find_by_path("sub/cover.jpg").unwrap().unwrap();
+    assert_eq!(store.archive(zip).unwrap().unwrap().page_count, 2);
+    assert!(store.find_by_path("sub").unwrap().is_none());
+    assert!(store.find_by_path("only-hidden").unwrap().is_none());
+}

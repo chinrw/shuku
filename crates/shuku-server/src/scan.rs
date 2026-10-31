@@ -22,7 +22,10 @@ struct Prepared {
     /// 散放图片的文件夹，标题取文件夹名而不是去掉扩展名的文件名。
     folder: bool,
     file_size: u64,
+    /// 见 [`shuku_archive::Identity::modified`]，文件夹的不是一个时刻。
     mtime: i64,
+    /// 最新的修改时间，Unix 秒，新书的加入时间用它。
+    newest: i64,
     quick_hash: String,
     pages: Vec<Page>,
 }
@@ -61,10 +64,11 @@ impl App {
         for entry in walk {
             match entry {
                 Ok(entry) if entry.file_type().is_file() => {
-                    let image = entry
-                        .file_name()
-                        .to_str()
-                        .is_some_and(shuku_archive::is_image);
+                    // 文件夹的页面不含以 `.` 开头的文件，它们不让所在目录成书。改成图片扩展名的
+                    // ZIP 仍按魔数当归档扫描，读不了魔数的交给后面的扫描报错。
+                    let image = entry.file_name().to_str().is_some_and(|name| {
+                        !name.starts_with('.') && shuku_archive::is_image(name)
+                    }) && !shuku_archive::has_zip_magic(entry.path()).unwrap_or(true);
                     // 内容目录本身直接放着的图片不成书，照旧当作不支持的文件。
                     match entry.path().parent() {
                         Some(parent) if image && entry.depth() > 1 => {
@@ -291,7 +295,7 @@ fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
         // 用文件的修改时间：第一次扫描已有的书库时，扫描时间会让所有书都显示成今天加入。
         // 修改时间在未来（时钟不准）时用现在。
         date_added: prepared
-            .mtime
+            .newest
             .min(unix_seconds(std::time::SystemTime::now())?),
         source_url: None,
         is_new: true,
@@ -301,10 +305,10 @@ fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
 
 fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<Option<Prepared>> {
     let folder = path.is_dir();
-    // 文件夹的大小和修改时间是其中图片的总大小和最新的修改时间。
     let before = shuku_archive::identity(path)?;
-    let mtime = unix_seconds(before.1)?;
-    if existing.is_some_and(|entry| entry.file_size == before.0 && entry.mtime == mtime) {
+    if existing
+        .is_some_and(|entry| entry.file_size == before.size && entry.mtime == before.modified)
+    {
         return Ok(None);
     }
     let (quick_hash, (pages, broken)) = if folder {
@@ -346,8 +350,9 @@ fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<
     Ok(Some(Prepared {
         path: relative.into(),
         folder,
-        file_size: before.0,
-        mtime,
+        file_size: before.size,
+        mtime: before.modified,
+        newest: unix_seconds(before.newest)?,
         quick_hash,
         pages,
     }))

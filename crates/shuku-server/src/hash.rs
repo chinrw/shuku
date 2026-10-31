@@ -141,7 +141,7 @@ fn hash_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
 fn hash_folder_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
     let identity = |path: &Path| -> Result<Option<(u64, i64)>> {
         match shuku_archive::identity(path) {
-            Ok((size, modified)) => Ok(Some((size, unix_seconds(modified)?))),
+            Ok(identity) => Ok(Some((identity.size, identity.modified))),
             Err(shuku_archive::Error::Io(error)) if error.kind() == ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         }

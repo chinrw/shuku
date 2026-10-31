@@ -42,15 +42,19 @@ fn folder_pages_are_its_images_in_natural_order() {
         );
     }
 
-    let (size, modified) = identity(&book).unwrap();
-    assert_eq!(size, (bmp(4, 6).len() + bmp(5, 7).len()) as u64);
-    // 文件夹本身的修改时间也算进去，页面改名时总大小不变，靠它发现变化。
-    let newest = ["10.bmp", "2.BMP", "empty.jpg", ""]
+    let identity = identity(&book).unwrap();
+    assert_eq!(identity.size, (bmp(4, 6).len() + bmp(5, 7).len()) as u64);
+    let times: Vec<_> = ["10.bmp", "2.BMP", "empty.jpg", ""]
         .iter()
         .map(|name| fs::metadata(book.join(name)).unwrap().modified().unwrap())
-        .max()
-        .unwrap();
-    assert_eq!(modified, newest);
+        .collect();
+    assert_eq!(identity.newest, *times.iter().max().unwrap());
+    let seconds = |time: &std::time::SystemTime| {
+        time.duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    };
+    assert_eq!(identity.modified, times.iter().map(seconds).sum::<i64>());
 }
 
 #[test]
@@ -117,4 +121,43 @@ fn a_page_replaced_by_a_symlink_is_not_followed() {
     // 扫描也不把符号链接当页面。
     let (pages, _) = list_folder_pages_with_broken(&book).unwrap();
     assert!(pages.is_empty());
+}
+
+#[test]
+fn identity_changes_on_rename_even_next_to_a_future_timestamp() {
+    let directory = tempfile::tempdir().unwrap();
+    let book = directory.path().join("book");
+    fs::create_dir(&book).unwrap();
+    fs::write(book.join("1.bmp"), bmp(4, 6)).unwrap();
+    fs::write(book.join("2.bmp"), bmp(4, 6)).unwrap();
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(86_400 * 365);
+    fs::File::options()
+        .write(true)
+        .open(book.join("2.bmp"))
+        .unwrap()
+        .set_modified(future)
+        .unwrap();
+    let before = identity(&book).unwrap();
+    // 改名不改变总大小，最新的修改时间也还是那张未来的图，但文件夹本身的修改时间变了。
+    fs::rename(book.join("1.bmp"), book.join("3.bmp")).unwrap();
+    fs::File::open(&book)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+        .unwrap();
+    let after = identity(&book).unwrap();
+    assert_eq!((after.size, after.newest), (before.size, before.newest));
+    assert_ne!(after.modified, before.modified);
+}
+
+#[test]
+fn names_equal_in_natural_order_are_ordered_by_their_exact_spelling() {
+    let directory = tempfile::tempdir().unwrap();
+    let book = directory.path().join("book");
+    fs::create_dir(&book).unwrap();
+    for name in ["a.bmp", "1.bmp", "A.bmp", "01.bmp"] {
+        fs::write(book.join(name), bmp(1, 1)).unwrap();
+    }
+    let (pages, _) = list_folder_pages_with_broken(&book).unwrap();
+    let names: Vec<_> = pages.iter().map(|page| page.entry_name.as_str()).collect();
+    assert_eq!(names, ["01.bmp", "1.bmp", "A.bmp", "a.bmp"]);
 }
