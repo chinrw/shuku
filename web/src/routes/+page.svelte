@@ -467,16 +467,18 @@
 			<ul id="tag-suggestions" class="suggestions" role="listbox">
 				{#each suggestions as suggestion, index (suggestion.tag)}
 					{@const tag = splitTag(suggestion.tag)}
-					<!-- 用 pointerdown 而不是 click：输入框失焦会先关掉列表。 -->
+					<!-- 按下时阻止默认动作，输入框不失焦，列表不会先关掉；松开后的 click 才选中。
+					     原来在 pointerdown 里就选中并关掉列表，手机上随后的 click 会落到列表下面的元素上。 -->
+					<!-- 键盘在输入框里用上下键和回车选，见 onKeydown。 -->
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
 					<li
 						id="suggestion-{index}"
 						role="option"
 						aria-selected={index === active}
 						class:active={index === active}
-						onpointerdown={(event) => {
-							event.preventDefault();
-							pick(suggestion.tag);
-						}}
+						onpointerdown={(event) => event.preventDefault()}
+						onmousedown={(event) => event.preventDefault()}
+						onclick={() => pick(suggestion.tag)}
 					>
 						<span>
 							{#if tag.namespace}<span class="ns {namespaceClass(tag.namespace)}"
