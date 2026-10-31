@@ -8,7 +8,7 @@
 	import { fittedWidth, pageUrl, widthTier } from '#lib/image.ts';
 	import PageGrid from '#lib/PageGrid.svelte';
 	import { ProgressReporter } from '#lib/progress.ts';
-	import { settings } from '#lib/settings.svelte.ts';
+	import { settings, WEBTOON_WIDTH } from '#lib/settings.svelte.ts';
 	import { buildSpreads } from '#lib/spreads.ts';
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
@@ -44,6 +44,11 @@
 	const detectedWebtoon = untrack(() => data.webtoon);
 	let webtoon = $derived(prefs.webtoon[book.id] ?? detectedWebtoon);
 	let mode = $derived(webtoon ? 'scroll' : prefs.mode);
+	// 滚动视图那一栏的最大宽度。条漫在电脑和 iPad 横屏上用设置里的宽度，两侧留黑；
+	// 竖屏（手机、iPad 竖放）占满宽度。
+	let columnWidth = $derived(
+		!webtoon ? SCROLL_MAX_WIDTH : innerHeight > innerWidth ? Infinity : prefs.webtoonWidth
+	);
 
 	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。
 	let spreads = $derived(
@@ -204,7 +209,25 @@
 			else if (immersive && !document.fullscreenElement) exitFullscreen();
 			return;
 		}
-		if (mode !== 'paged' || panel) return;
+		if (panel || event.defaultPrevented) return;
+		// 焦点在按钮、滑块这些控件上时，空格和方向键是它们自己的操作。
+		const target = event.target as Element | null;
+		if (target?.closest('button, a, input, select, textarea, [contenteditable]')) return;
+		if (mode === 'scroll') {
+			// 滚动视图没有焦点，方向键和空格不会自己滚它。
+			const keys: Record<string, () => void> = {
+				' ': () => scrollScreen(event.shiftKey ? -1 : 1),
+				PageDown: () => scrollScreen(1),
+				PageUp: () => scrollScreen(-1),
+				ArrowDown: () => scroller?.scrollBy({ top: scroller.clientHeight * 0.2 }),
+				ArrowUp: () => scroller?.scrollBy({ top: -scroller.clientHeight * 0.2 })
+			};
+			const action = keys[event.key];
+			if (!action) return;
+			action();
+			event.preventDefault();
+			return;
+		}
 		const rtl = prefs.direction === 'rtl';
 		switch (event.key) {
 			case 'ArrowLeft':
@@ -263,16 +286,34 @@
 	}
 
 	/**
-	 * 工具栏上的左右按钮和两侧点击一致：从右往左读时左边是下一页。滚动模式下按屏滚动，
-	 * 不按页跳：当前页按屏幕中线判定，按页顶对齐的跳转在一屏有好几页时会原地不动。
+	 * 滚动视图里跳到下一张或上一张图的顶端。按现在的滚动位置找，不按当前页：当前页按屏幕
+	 * 中线判定，一屏有好几张短图时从当前页往前数会原地不动。
 	 */
+	function scrollToImage(direction: 1 | -1) {
+		const view = scroller;
+		if (!view) return;
+		const top = view.scrollTop;
+		const images = [...view.children] as HTMLElement[];
+		const target =
+			direction > 0
+				? images.find((image) => image.offsetTop > top + 1)
+				: images.findLast((image) => image.offsetTop < top - 1);
+		if (target) view.scrollTo({ top: target.offsetTop });
+	}
+
+	// 空格和 PageDown 在滚动视图里滚一屏，留一点上一屏的底边方便接着读。
+	function scrollScreen(direction: 1 | -1) {
+		scroller?.scrollBy({ top: direction * scroller.clientHeight * 0.9 });
+	}
+
+	/** 工具栏上的左右按钮和两侧点击一致：从右往左读时左边是下一页。 */
 	function stepLeft() {
-		if (mode === 'scroll') scroller?.scrollBy({ top: -scroller.clientHeight * 0.9 });
+		if (mode === 'scroll') scrollToImage(-1);
 		else step(prefs.direction === 'rtl' ? 1 : -1);
 	}
 
 	function stepRight() {
-		if (mode === 'scroll') scroller?.scrollBy({ top: scroller.clientHeight * 0.9 });
+		if (mode === 'scroll') scrollToImage(1);
 		else step(prefs.direction === 'rtl' ? -1 : 1);
 	}
 
@@ -366,6 +407,7 @@
 			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 			<div
 				class="scroll"
+				style:--column={Number.isFinite(columnWidth) ? `${columnWidth}px` : 'none'}
 				bind:this={scroller}
 				onclick={() => {
 					if (immersive) overlay = !overlay;
@@ -375,7 +417,7 @@
 				{#each pages as page, index (index)}
 					<img
 						data-index={index}
-						src={src(index, Math.min(stageWidth, SCROLL_MAX_WIDTH))}
+						src={src(index, Math.min(stageWidth, columnWidth))}
 						width={page.width}
 						height={page.height}
 						loading={Math.abs(index - current) <= 1 ? 'eager' : 'lazy'}
@@ -432,7 +474,22 @@
 						<button class:on={prefs.webtoon[book.id] === true} onclick={() => setWebtoon(true)}>开</button>
 						<button class:on={prefs.webtoon[book.id] === false} onclick={() => setWebtoon(false)}>关</button>
 					</div>
-					{#if !webtoon}
+					{#if webtoon}
+						<span>条漫宽度</span>
+						<label class="width">
+							<input
+								type="range"
+								min={WEBTOON_WIDTH.min}
+								max={WEBTOON_WIDTH.max}
+								step={WEBTOON_WIDTH.step}
+								value={prefs.webtoonWidth}
+								oninput={(event) =>
+									update(() => (prefs.webtoonWidth = Number(event.currentTarget.value)))}
+								aria-label="条漫宽度"
+							/>
+							<span>{prefs.webtoonWidth}px</span>
+						</label>
+					{:else}
 						<span>阅读方式</span>
 						<div class="segmented">
 							<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
@@ -628,7 +685,9 @@
 		width: 50%;
 	}
 
+	/* 定位后图片的 offsetTop 相对这个滚动容器，跳到上一张、下一张时按它算。 */
 	.scroll {
+		position: relative;
 		height: 100%;
 		overflow-y: auto;
 		overscroll-behavior: contain;
@@ -637,7 +696,7 @@
 	.scroll img {
 		display: block;
 		width: 100%;
-		max-width: 960px;
+		max-width: var(--column, 960px);
 		height: auto;
 		margin: 0 auto;
 	}
@@ -694,6 +753,14 @@
 		margin-bottom: 1.25rem;
 		font-size: 0.9rem;
 		color: #a6a9ae;
+	}
+
+	/* 竖屏时条漫总是占满宽度，这个宽度只在横屏生效。 */
+	.width {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.segmented {

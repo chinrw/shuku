@@ -6,6 +6,9 @@ export type LibraryView = 'grid' | 'list';
 
 const KEY = 'shuku.settings';
 
+/** 条漫宽度滑块的范围和默认值。 */
+export const WEBTOON_WIDTH = { min: 480, max: 1200, step: 40, default: 800 } as const;
+
 class Settings {
 	mode = $state<ReaderMode>('paged');
 	direction = $state<Direction>('rtl');
@@ -22,6 +25,8 @@ class Settings {
 	 * 都和服务端实际修改的书对不上。
 	 */
 	ungroupForBatch = false;
+	/** 电脑和 iPad 横屏上条漫那一栏的最大宽度（CSS 像素）。 */
+	webtoonWidth = $state<number>(WEBTOON_WIDTH.default);
 	/** 手动指定的条漫开关，按归档 ID 记。没有记录的书按页面宽高比自动判断。 */
 	webtoon = $state<Record<number, boolean>>({});
 
@@ -34,6 +39,13 @@ class Settings {
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
 		if (typeof saved.groupSeries === 'boolean') this.groupSeries = saved.groupSeries;
 		if (typeof saved.hideFinished === 'boolean') this.hideFinished = saved.hideFinished;
+		if (
+			typeof saved.webtoonWidth === 'number' &&
+			saved.webtoonWidth >= WEBTOON_WIDTH.min &&
+			saved.webtoonWidth <= WEBTOON_WIDTH.max
+		) {
+			this.webtoonWidth = saved.webtoonWidth;
+		}
 		if (saved.webtoon && typeof saved.webtoon === 'object') {
 			for (const [id, value] of Object.entries(saved.webtoon)) {
 				if (typeof value === 'boolean') this.webtoon[Number(id)] = value;
@@ -42,10 +54,21 @@ class Settings {
 	}
 
 	save() {
-		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoon } = this;
+		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
+			this;
 		localStorage.setItem(
 			KEY,
-			JSON.stringify({ mode, direction, fit, spread, view, groupSeries, hideFinished, webtoon })
+			JSON.stringify({
+				mode,
+				direction,
+				fit,
+				spread,
+				view,
+				groupSeries,
+				hideFinished,
+				webtoonWidth,
+				webtoon
+			})
 		);
 	}
 }
