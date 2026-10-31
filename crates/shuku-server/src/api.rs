@@ -118,7 +118,7 @@ async fn search(
         parsed.query.after = params.after;
         parsed.query.limit = limit;
         let result = app.index().search(&parsed.query).map_err(Error::bad_request)?;
-        let items: Vec<_> = app.store()?.list_metadata(&result.ids)?.into_iter().map(|item| json!({
+        let items: Vec<_> = app.reader()?.list_metadata(&result.ids)?.into_iter().map(|item| json!({
             "id": item.id, "title": item.title, "page_count": item.page_count,
             "is_new": item.is_new, "progress": progress(item.progress.as_ref()),
             "cover_url": cover_url(item.id, &item.quick_hash), "tags": tag_groups(item.tags),
@@ -190,7 +190,7 @@ async fn detail(
 ) -> Result<Json<Value>> {
     let Path(id) = id.map_err(Error::bad_request)?;
     app.blocking(move |app| {
-        let archive = require_archive(&*app.store()?, id)?;
+        let archive = require_archive(&*app.reader()?, id)?;
         let tags = tag_groups(archive.tags);
         Ok(Json(json!({
             "id": archive.id, "title": archive.metadata.title,
@@ -210,9 +210,9 @@ async fn pages(
 ) -> Result<Json<Value>> {
     let Path(id) = id.map_err(Error::bad_request)?;
     app.blocking(move |app| {
-        let store = app.store()?;
-        let archive = require_archive(&store, id)?;
-        let pages: Vec<_> = store.pages(id)?.into_iter().enumerate().map(|(n, page)| json!({
+        let reader = app.reader()?;
+        let archive = require_archive(&reader, id)?;
+        let pages: Vec<_> = reader.pages(id)?.into_iter().enumerate().map(|(n, page)| json!({
             "width": page.width, "height": page.height,
             "url": format!("/api/archives/{id}/pages/{n}?v={}", archive.metadata.quick_hash),
         })).collect();
@@ -221,8 +221,8 @@ async fn pages(
     .await
 }
 
-pub(crate) fn require_archive(store: &shuku_store::Store, id: i64) -> Result<Archive> {
-    store.archive(id)?.ok_or_else(Error::not_found)
+pub(crate) fn require_archive(reader: &shuku_store::Reader, id: i64) -> Result<Archive> {
+    reader.archive(id)?.ok_or_else(Error::not_found)
 }
 
 /// 按命名空间分组，组按命名空间名排序，组内保持存储层给出的顺序。

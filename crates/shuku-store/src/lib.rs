@@ -1,12 +1,16 @@
 //! Shuku 的 SQLite 存储层。
 
 mod models;
+mod pool;
+mod reader;
 mod store;
 
 pub use models::{
     Archive, ArchiveListItem, ArchiveMetadata, CompressionMethod, LrrArchive, LrrCategory,
     LrrTankoubon, Page, Progress, ScanEntry, Tag,
 };
+pub use pool::{PooledReader, ReaderPool};
+pub use reader::Reader;
 pub use store::Store;
 
 use std::{path::Path, time::Duration};
@@ -39,6 +43,8 @@ pub enum Error {
     Sqlite(#[from] rusqlite::Error),
     #[error("数据库版本 {found} 比当前程序支持的 {supported} 新")]
     UnsupportedVersion { found: i64, supported: i64 },
+    #[error("数据库版本 {found} 与当前程序的 {supported} 不一致，需要先由读写连接完成迁移")]
+    VersionMismatch { found: i64, supported: i64 },
     #[error("归档 {0} 不存在")]
     ArchiveNotFound(i64),
     #[error("页面清单编码错误：{0}")]

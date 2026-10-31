@@ -25,7 +25,7 @@ impl App {
         let mut report = HashReport::default();
         let mut after = 0;
         while !self.0.stopping.load(Ordering::Relaxed) {
-            let batch = self.store()?.missing_content_hashes(after, BATCH)?;
+            let batch = self.reader()?.missing_content_hashes(after, BATCH)?;
             let Some(last) = batch.last() else { break };
             after = last.id;
             for entry in batch {

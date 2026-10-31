@@ -62,12 +62,12 @@ fn respond(
     thumbnail: bool,
 ) -> Result<Response> {
     let (archive, page) = {
-        let store = app.store()?;
-        let archive = require_archive(&store, id)?;
+        let reader = app.reader()?;
+        let archive = require_archive(&reader, id)?;
         if params.v != archive.metadata.quick_hash {
             return Err(Error::not_found());
         }
-        let page = store
+        let page = reader
             .pages(id)?
             .into_iter()
             .nth(n)

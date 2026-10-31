@@ -35,7 +35,7 @@ impl App {
     fn scan_blocking(&self) -> Result<ScanReport> {
         let _scan = self.0.scan_lock.lock().map_err(|_| Error::Lock)?;
         let content = &self.0.config.content_dir;
-        let entries = self.store()?.scan_entries()?;
+        let entries = self.reader()?.scan_entries()?;
         let mut missing: HashMap<String, VecDeque<i64>> = HashMap::new();
         for entry in &entries {
             if !content.join(&entry.path).try_exists()? {
@@ -142,7 +142,8 @@ impl App {
                 }
             }
         }
-        let index = build_index(&*self.store()?)?;
+        // 在写锁外构建，期间进度上报照常写入。
+        let index = build_index(&*self.reader()?)?;
         self.0.index.store(Arc::new(index));
         tracing::info!(?report, "扫描完成");
         Ok(report)

@@ -8,7 +8,7 @@ mod scan;
 
 use arc_swap::ArcSwap;
 use shuku_index::Index;
-use shuku_store::Store;
+use shuku_store::{PooledReader, Reader, ReaderPool, Store};
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -83,7 +83,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 struct Inner {
     config: Config,
+    /// 唯一的写连接。读走 `readers`，不和写争这把锁。
     store: Mutex<Store>,
+    readers: ReaderPool,
     index: ArcSwap<Index>,
     scan_lock: Mutex<()>,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
@@ -109,11 +111,14 @@ impl App {
                 ));
             }
             std::fs::create_dir_all(&config.data_dir)?;
-            let store = Store::open(config.data_dir.join("shuku.sqlite"))?;
-            let index = build_index(&store)?;
+            let database = config.data_dir.join("shuku.sqlite");
+            let store = Store::open(&database)?;
+            let readers = ReaderPool::new(database);
+            let index = build_index(&*readers.get()?)?;
             Ok(Self(Arc::new(Inner {
                 config,
                 store: Mutex::new(store),
+                readers,
                 index: ArcSwap::from_pointee(index),
                 scan_lock: Mutex::new(()),
                 stopping: AtomicBool::new(false),
@@ -134,6 +139,10 @@ impl App {
 
     fn store(&self) -> Result<MutexGuard<'_, Store>> {
         self.0.store.lock().map_err(|_| Error::Lock)
+    }
+
+    fn reader(&self) -> Result<PooledReader<'_>> {
+        Ok(self.0.readers.get()?)
     }
 
     async fn blocking<T: Send + 'static>(
@@ -161,10 +170,10 @@ fn destination(path: &std::path::Path) -> Result<PathBuf> {
     }
 }
 
-fn build_index(store: &Store) -> Result<Index> {
+fn build_index(reader: &Reader) -> Result<Index> {
     let start = Instant::now();
     let mut records = Vec::new();
-    store.for_each_archive_record(|record| {
+    reader.for_each_archive_record(|record| {
         records.push(record);
         Ok(())
     })?;
