@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { afterNavigate, replaceState } from '$app/navigation';
+	import { downloadUrl } from '#lib/api.ts';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { fittedWidth, pageUrl, widthTier } from '#lib/image.ts';
+	import PageGrid from '#lib/PageGrid.svelte';
 	import { ProgressReporter } from '#lib/progress.ts';
 	import { settings } from '#lib/settings.svelte.ts';
 	import { buildSpreads } from '#lib/spreads.ts';
@@ -21,13 +23,18 @@
 	let members = $state(untrack(() => data.archive.categories));
 
 	let current = $state(untrack(() => data.start));
-	let toolbar = $state(false);
-	let panel = $state(false);
+	// 平时顶部有工具栏，和 LRR 一样；全屏时收起，点屏幕中间临时叫出底栏。
+	let immersive = $state(false);
+	let overlay = $state(false);
+	let panel = $state<'overview' | 'settings' | null>(null);
 	let progressError = $state<string | null>(null);
 	// 关闭了 SSR，这里一定在浏览器里运行。先取一次真实值，免得第一次渲染按宽度 0 请求图片。
 	let innerWidth = $state(window.innerWidth);
 	let innerHeight = $state(window.innerHeight);
 	let devicePixelRatio = $state(window.devicePixelRatio);
+	// 图片区域的大小，不含工具栏。挂载前先按整个窗口估计。
+	let stageWidth = $state(window.innerWidth);
+	let stageHeight = $state(window.innerHeight);
 	let scroller = $state<HTMLElement>();
 	let pagedView = $state<HTMLElement>();
 	let fitWidth = $derived(prefs.fit === 'width');
@@ -42,17 +49,57 @@
 	);
 	let spreadIndex = $derived(Math.max(spreads.findIndex((spread) => spread.includes(current)), 0));
 	let visible = $derived(spreads[spreadIndex] ?? []);
+	let rtlPaged = $derived(mode === 'paged' && prefs.direction === 'rtl');
+	let pageLabel = $derived(
+		mode === 'paged' && visible.length === 2 ? `${visible[0] + 1}-${visible[1] + 1}` : `${current + 1}`
+	);
 
-	let fromDetail = false;
+	// 从书库或详情页进来时用浏览器返回，书库的滚动位置才会恢复。
+	let cameFromList = false;
 	afterNavigate(({ from }) => {
-		fromDetail = from?.route.id === '/a/[id]';
+		cameFromList = from?.route.id === '/' || from?.route.id === '/a/[id]';
 	});
 
 	function back(event: MouseEvent) {
-		if (!fromDetail) return;
+		if (!cameFromList) return;
 		event.preventDefault();
 		history.back();
 	}
+
+	// iPhone 的 Safari 不支持网页元素全屏，这时只收起工具栏。
+	const canFullscreen = typeof document.documentElement.requestFullscreen === 'function';
+
+	function enterFullscreen() {
+		immersive = true;
+		overlay = false;
+		if (canFullscreen) {
+			document.documentElement.requestFullscreen().catch(() => {
+				// 浏览器拒绝（例如不是由点击触发）时保持只收起工具栏。
+			});
+		}
+	}
+
+	function exitFullscreen() {
+		immersive = false;
+		overlay = false;
+		if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+	}
+
+	// 用 Esc 或系统手势退出浏览器全屏时，工具栏跟着回来。
+	$effect(() => {
+		if (!canFullscreen) return;
+		const onChange = () => {
+			if (!document.fullscreenElement) {
+				immersive = false;
+				overlay = false;
+			}
+		};
+		document.addEventListener('fullscreenchange', onChange);
+		return () => {
+			document.removeEventListener('fullscreenchange', onChange);
+			if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+		};
+	});
 
 	const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 	const reporter = new ProgressReporter(book.id, (error) => {
@@ -82,7 +129,7 @@
 
 	// 双页时每页只占半个屏幕宽。适应宽度时页面比屏幕高的部分靠上下滚动，不受屏幕高度限制。
 	function pagedSrc(index: number, count: number) {
-		const viewport = { width: innerWidth / count, height: innerHeight };
+		const viewport = { width: stageWidth / count, height: stageHeight };
 		return src(index, fitWidth ? viewport.width : fittedWidth(pages[index], viewport));
 	}
 
@@ -129,10 +176,11 @@
 		};
 	});
 
+	// 两侧三分之一翻页，中间在全屏时叫出或收起底栏。
 	function tap(event: MouseEvent) {
-		const x = event.clientX / innerWidth;
+		const x = event.clientX / stageWidth;
 		if (x > 1 / 3 && x < 2 / 3) {
-			toolbar = !toolbar;
+			if (immersive) overlay = !overlay;
 			return;
 		}
 		const forward = x >= 2 / 3 === (prefs.direction === 'ltr');
@@ -140,8 +188,10 @@
 	}
 
 	function key(event: KeyboardEvent) {
-		if (event.key === 'Escape' && panel) {
-			panel = false;
+		if (event.key === 'Escape') {
+			// 浏览器全屏时 Esc 由浏览器处理，这里只管面板和只收起工具栏的情况。
+			if (panel) panel = null;
+			else if (immersive && !document.fullscreenElement) exitFullscreen();
 			return;
 		}
 		if (mode !== 'paged' || panel) return;
@@ -191,6 +241,20 @@
 		return () => observer.disconnect();
 	}
 
+	/**
+	 * 工具栏上的左右按钮和两侧点击一致：从右往左读时左边是下一页。滚动模式下按屏滚动，
+	 * 不按页跳：当前页按屏幕中线判定，按页顶对齐的跳转在一屏有好几页时会原地不动。
+	 */
+	function stepLeft() {
+		if (mode === 'scroll') scroller?.scrollBy({ top: -scroller.clientHeight * 0.9 });
+		else step(prefs.direction === 'rtl' ? 1 : -1);
+	}
+
+	function stepRight() {
+		if (mode === 'scroll') scroller?.scrollBy({ top: scroller.clientHeight * 0.9 });
+		else step(prefs.direction === 'rtl' ? -1 : 1);
+	}
+
 	function jump(page: number) {
 		if (mode === 'scroll') scroller?.children[page]?.scrollIntoView();
 		else go(spreads.find((spread) => spread.includes(page))?.[0] ?? page);
@@ -216,130 +280,191 @@
 
 <svelte:window bind:innerWidth bind:innerHeight bind:devicePixelRatio onkeydown={key} />
 
-<div class="reader">
-	{#if pages.length === 0}
-		<p class="empty">这本书没有可显示的页面。</p>
-	{:else if mode === 'paged'}
-		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div
-			class="paged"
-			class:rtl={prefs.direction === 'rtl'}
-			class:fit-width={fitWidth}
-			bind:this={pagedView}
-			onclick={tap}
-		>
-			{#each visible as index (index)}
-				<img
-					class="page"
-					class:half={visible.length === 2}
-					src={pagedSrc(index, visible.length)}
-					width={pages[index].width}
-					height={pages[index].height}
-					alt="第 {index + 1} 页"
-				/>
-			{/each}
-		</div>
-	{:else}
-		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div class="scroll" bind:this={scroller} onclick={() => (toolbar = !toolbar)} {@attach trackScroll}>
-			{#each pages as page, index (index)}
-				<img
-					data-index={index}
-					src={src(index, Math.min(innerWidth, SCROLL_MAX_WIDTH))}
-					width={page.width}
-					height={page.height}
-					loading={Math.abs(index - current) <= 1 ? 'eager' : 'lazy'}
-					alt="第 {index + 1} 页"
-				/>
-			{/each}
-		</div>
+<div class="reader" class:immersive>
+	{#if !immersive}
+		<header class="top">
+			<a class="bar-button" href="/" onclick={back} aria-label="返回书库"><Icon name="back" /></a>
+			<h1 title={book.title}>{book.title}</h1>
+			{#if pages.length > 0}
+				<button class="bar-button" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
+					<Icon name="chevron-left" />
+				</button>
+				<button class="counter" onclick={() => (panel = 'overview')} aria-label="页面总览">
+					{pageLabel} / {pages.length}
+				</button>
+				<button class="bar-button" onclick={stepRight} aria-label={rtlPaged ? '上一页' : '下一页'}>
+					<Icon name="chevron-right" />
+				</button>
+			{/if}
+			<button class="bar-button" onclick={() => (panel = 'overview')} aria-label="总览">
+				<Icon name="overview" />
+			</button>
+			<button class="bar-button" onclick={() => (panel = 'settings')} aria-label="阅读设置">
+				<Icon name="settings" />
+			</button>
+			<!-- 空书没有能点的图片区域，全屏后在 iPhone 上就叫不回工具栏。 -->
+			{#if pages.length > 0}
+				<button class="bar-button" onclick={enterFullscreen} aria-label="全屏">
+					<Icon name="maximize" />
+				</button>
+			{/if}
+		</header>
 	{/if}
 
-	<!-- 平时不显示任何控件；点屏幕中间出现一条底栏，设置和标签都收在菜单里。 -->
-	{#if toolbar}
+	<div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
+		{#if pages.length === 0}
+			<p class="empty">这本书没有可显示的页面。</p>
+		{:else if mode === 'paged'}
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+			<div
+				class="paged"
+				class:rtl={prefs.direction === 'rtl'}
+				class:fit-width={fitWidth}
+				bind:this={pagedView}
+				onclick={tap}
+			>
+				{#each visible as index (index)}
+					<img
+						class="page"
+						class:half={visible.length === 2}
+						src={pagedSrc(index, visible.length)}
+						width={pages[index].width}
+						height={pages[index].height}
+						alt="第 {index + 1} 页"
+					/>
+				{/each}
+			</div>
+		{:else}
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+			<div
+				class="scroll"
+				bind:this={scroller}
+				onclick={() => {
+					if (immersive) overlay = !overlay;
+				}}
+				{@attach trackScroll}
+			>
+				{#each pages as page, index (index)}
+					<img
+						data-index={index}
+						src={src(index, Math.min(stageWidth, SCROLL_MAX_WIDTH))}
+						width={page.width}
+						height={page.height}
+						loading={Math.abs(index - current) <= 1 ? 'eager' : 'lazy'}
+						alt="第 {index + 1} 页"
+					/>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<!-- 全屏时不显示任何控件；点屏幕中间出现一条底栏，可以拖动跳页或退出全屏。 -->
+	{#if immersive && overlay}
 		<footer class="bar">
-			<a class="bar-button" href="/a/{book.id}" onclick={back} aria-label="返回"><Icon name="back" /></a>
+			<button class="bar-button" onclick={exitFullscreen} aria-label="退出全屏">
+				<Icon name="minimize" />
+			</button>
 			<input
 				type="range"
 				min="0"
 				max={Math.max(pages.length - 1, 0)}
 				value={current}
-				dir={mode === 'paged' && prefs.direction === 'rtl' ? 'rtl' : 'ltr'}
+				dir={rtlPaged ? 'rtl' : 'ltr'}
 				onchange={(event) => jump(Number(event.currentTarget.value))}
 				aria-label="跳到页"
 			/>
-			<span class="counter">
-				{visible.length === 2 ? `${visible[0] + 1}-${visible[1] + 1}` : current + 1} / {pages.length}
-			</span>
-			<button class="bar-button" onclick={() => (panel = true)} aria-label="菜单">
-				<Icon name="more" />
+			<span class="counter">{pageLabel} / {pages.length}</span>
+			<button class="bar-button" onclick={() => (panel = 'overview')} aria-label="总览">
+				<Icon name="overview" />
 			</button>
 		</footer>
 	{/if}
 
 	{#if panel}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div class="scrim" onclick={() => (panel = false)}></div>
-		<aside class="panel" aria-label="设置和标签">
+		<div class="scrim" onclick={() => (panel = null)}></div>
+		<aside
+			class="panel"
+			class:wide={panel === 'overview'}
+			aria-label={panel === 'overview' ? '总览' : '阅读设置'}
+		>
 			<div class="panel-head">
-				<h2>{book.title}</h2>
-				<button class="bar-button" onclick={() => (panel = false)} aria-label="关闭">
+				<h2>{panel === 'overview' ? book.title : '阅读设置'}</h2>
+				<button class="bar-button" onclick={() => (panel = null)} aria-label="关闭">
 					<Icon name="close" />
 				</button>
 			</div>
-			<div class="settings">
-				<span>条漫</span>
-				<div class="segmented">
-					<button class:on={prefs.webtoon[book.id] === undefined} onclick={() => setWebtoon(undefined)}
-						>自动（{detectedWebtoon ? '是' : '否'}）</button
-					>
-					<button class:on={prefs.webtoon[book.id] === true} onclick={() => setWebtoon(true)}>开</button>
-					<button class:on={prefs.webtoon[book.id] === false} onclick={() => setWebtoon(false)}>关</button>
+			{#if panel === 'settings'}
+				<div class="settings">
+					<span>条漫</span>
+					<div class="segmented">
+						<button class:on={prefs.webtoon[book.id] === undefined} onclick={() => setWebtoon(undefined)}
+							>自动（{detectedWebtoon ? '是' : '否'}）</button
+						>
+						<button class:on={prefs.webtoon[book.id] === true} onclick={() => setWebtoon(true)}>开</button>
+						<button class:on={prefs.webtoon[book.id] === false} onclick={() => setWebtoon(false)}>关</button>
+					</div>
+					{#if !webtoon}
+						<span>阅读方式</span>
+						<div class="segmented">
+							<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
+								>翻页</button
+							>
+							<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
+								>滚动</button
+							>
+						</div>
+					{/if}
+					{#if mode === 'paged'}
+						<span>方向</span>
+						<div class="segmented">
+							<button
+								class:on={prefs.direction === 'rtl'}
+								onclick={() => update(() => (prefs.direction = 'rtl'))}>右→左</button
+							>
+							<button
+								class:on={prefs.direction === 'ltr'}
+								onclick={() => update(() => (prefs.direction = 'ltr'))}>左→右</button
+							>
+						</div>
+						<span>缩放</span>
+						<div class="segmented">
+							<button class:on={prefs.fit === 'screen'} onclick={() => update(() => (prefs.fit = 'screen'))}
+								>整页</button
+							>
+							<button class:on={prefs.fit === 'width'} onclick={() => update(() => (prefs.fit = 'width'))}
+								>适应宽度</button
+							>
+						</div>
+						<span>横屏双页</span>
+						<div class="segmented">
+							<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
+							<button class:on={!prefs.spread} onclick={() => update(() => (prefs.spread = false))}
+								>关</button
+							>
+						</div>
+					{/if}
 				</div>
-				{#if !webtoon}
-					<span>阅读方式</span>
-					<div class="segmented">
-						<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
-							>翻页</button
-						>
-						<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
-							>滚动</button
-						>
-					</div>
-				{/if}
-				{#if mode === 'paged'}
-					<span>方向</span>
-					<div class="segmented">
-						<button
-							class:on={prefs.direction === 'rtl'}
-							onclick={() => update(() => (prefs.direction = 'rtl'))}>右→左</button
-						>
-						<button
-							class:on={prefs.direction === 'ltr'}
-							onclick={() => update(() => (prefs.direction = 'ltr'))}>左→右</button
-						>
-					</div>
-					<span>缩放</span>
-					<div class="segmented">
-						<button class:on={prefs.fit === 'screen'} onclick={() => update(() => (prefs.fit = 'screen'))}
-							>整页</button
-						>
-						<button class:on={prefs.fit === 'width'} onclick={() => update(() => (prefs.fit = 'width'))}
-							>适应宽度</button
-						>
-					</div>
-					<span>横屏双页</span>
-					<div class="segmented">
-						<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
-						<button class:on={!prefs.spread} onclick={() => update(() => (prefs.spread = false))}
-							>关</button
-						>
-					</div>
-				{/if}
-			</div>
-			<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
-			<TagTable rows={tagRows(book)} />
-			{#if book.summary}<p class="summary">{book.summary}</p>{/if}
+			{:else}
+				<div class="actions">
+					<a href="/a/{book.id}">详情和相关作品</a>
+					<a href={downloadUrl(book.id)} download>下载</a>
+				</div>
+				<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
+				<TagTable rows={tagRows(book)} />
+				{#if book.summary}<p class="summary">{book.summary}</p>{/if}
+				<div class="overview-pages">
+					<PageGrid
+						archive={book.id}
+						{pages}
+						{current}
+						onpick={(page) => {
+							panel = null;
+							jump(page);
+						}}
+					/>
+				</div>
+			{/if}
 		</aside>
 	{/if}
 
@@ -352,10 +477,63 @@
 	.reader {
 		position: fixed;
 		inset: 0;
+		display: flex;
+		flex-direction: column;
 		background: #000;
 		color: #eee;
 		user-select: none;
 		-webkit-user-select: none;
+	}
+
+	.top {
+		display: flex;
+		flex: none;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.3rem 0.5rem;
+		padding-top: max(0.3rem, env(safe-area-inset-top));
+		background: #2b2c31;
+		border-bottom: 1px solid #43464e;
+	}
+
+	.top h1 {
+		flex: 1;
+		min-width: 0;
+		margin: 0 0.4rem;
+		overflow: hidden;
+		font-size: 0.95rem;
+		font-weight: 500;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	/* 320px 宽的手机上要放下六个按钮和三位数页码，按钮收窄、标题让位。 */
+	@media (max-width: 400px) {
+		.top {
+			gap: 0;
+			padding-inline: 0.25rem;
+		}
+
+		.top .bar-button {
+			width: 2rem;
+		}
+
+		.top h1 {
+			margin: 0 0.2rem;
+		}
+	}
+
+	@media (max-width: 360px) {
+		.top h1 {
+			visibility: hidden;
+		}
+	}
+
+	/* 图片区域占满工具栏以下的部分，翻页和滚动视图都相对它定位。 */
+	.stage {
+		position: relative;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.paged {
@@ -445,6 +623,9 @@
 
 	.counter {
 		flex: none;
+		padding: 0.3rem 0.4rem;
+		border: none;
+		background: transparent;
 		font-size: 0.85rem;
 		font-variant-numeric: tabular-nums;
 		color: #bbb;
@@ -510,8 +691,33 @@
 		padding: 1rem;
 		padding-top: max(1rem, env(safe-area-inset-top));
 		background: #34353b;
+		--accent: #3b97ea;
 		user-select: text;
 		-webkit-user-select: text;
+	}
+
+	.panel.wide {
+		width: min(48rem, 100%);
+	}
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.actions a {
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #50545c;
+		border-radius: 6px;
+		color: #ddd;
+		font-size: 0.85rem;
+		text-decoration: none;
+	}
+
+	.overview-pages {
+		margin-top: 1.25rem;
 	}
 
 	@media (max-width: 599px) {
@@ -521,6 +727,10 @@
 			max-height: 75%;
 			border-radius: 12px 12px 0 0;
 			padding-bottom: max(1rem, env(safe-area-inset-bottom));
+		}
+
+		.panel.wide {
+			max-height: 90%;
 		}
 	}
 

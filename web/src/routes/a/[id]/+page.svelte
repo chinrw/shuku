@@ -10,6 +10,7 @@
 	import ArchiveEditor from '#lib/ArchiveEditor.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
+	import PageGrid from '#lib/PageGrid.svelte';
 	import { relatedQueries } from '#lib/related.ts';
 	import RelatedRow from '#lib/RelatedRow.svelte';
 	import TagTable from '#lib/TagTable.svelte';
@@ -142,20 +143,9 @@
 	{/if}
 
 	{#if data.pages.length}
-		<section class="pages" aria-label="页面">
-			{#each data.pages as page, index (index)}
-				<a href="/a/{book.id}/read?page={index}" class:current={book.progress && index === resumePage}>
-					<img
-						src={page.thumbnail_url}
-						width={page.width}
-						height={page.height}
-						loading="lazy"
-						alt="第 {index + 1} 页"
-					/>
-					<span>{index + 1}</span>
-				</a>
-			{/each}
-		</section>
+		<div class="pages">
+			<PageGrid archive={book.id} pages={data.pages} current={book.progress ? resumePage : null} />
+		</div>
 	{/if}
 
 	<div class="related">
@@ -319,49 +309,10 @@
 		overflow-wrap: anywhere;
 	}
 
-	/* 缩略图按原图宽高比占位，懒加载时网格不会跳动。 */
 	.pages {
 		grid-area: pages;
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-		gap: 0.75rem 0.6rem;
+		min-width: 0;
 		margin-top: 0.5rem;
-	}
-
-	@media (min-width: 720px) {
-		.pages {
-			grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-		}
-	}
-
-	.pages a {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.25rem;
-		color: var(--muted);
-		font-size: 0.8rem;
-		text-decoration: none;
-	}
-
-	/* 长条漫画的页很长，只显示顶部一截。 */
-	.pages img {
-		width: 100%;
-		height: auto;
-		max-height: 18rem;
-		object-fit: cover;
-		object-position: top;
-		border: 2px solid transparent;
-		border-radius: 4px;
-		background: var(--chip);
-	}
-
-	.pages a.current img {
-		border-color: var(--accent);
-	}
-
-	.pages a.current {
-		color: var(--accent);
 	}
 
 	.related {

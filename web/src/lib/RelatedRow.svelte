@@ -40,7 +40,7 @@
 		</h2>
 		<div class="strip">
 			{#each items as item (item.id)}
-				<a class="book" href="/a/{item.id}">
+				<a class="book" href="/a/{item.id}/read">
 					<img src={item.cover_url} alt="" loading="lazy" />
 					<span>{item.title}</span>
 				</a>

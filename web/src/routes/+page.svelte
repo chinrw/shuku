@@ -60,7 +60,7 @@
 		try {
 			const id = await random({ q: data.q, category: data.category, filter: data.filter });
 			if (id === null) randomError = '没有符合条件的书，随机不到';
-			else await goto(`/a/${id}`);
+			else await goto(`/a/${id}/read`);
 		} catch (error) {
 			randomError = `随机失败：${error instanceof Error ? error.message : String(error)}`;
 		} finally {
@@ -370,8 +370,8 @@
 	<main class="grid">
 		{#each items as item (item.id)}
 			<div class="card">
-				<a class="title" href="/a/{item.id}" title={item.title}>{item.title}</a>
-				<a class="cover" href="/a/{item.id}">
+				<a class="title" href="/a/{item.id}/read" title={item.title}>{item.title}</a>
+				<a class="cover" href="/a/{item.id}/read">
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
 					<span class="badge pages">{item.page_count}P</span>
@@ -401,11 +401,11 @@
 	<main class="list">
 		{#each items as item (item.id)}
 			<article class="row">
-				<a class="thumb" href="/a/{item.id}">
+				<a class="thumb" href="/a/{item.id}/read">
 					<img src={item.cover_url} alt="" loading="lazy" />
 				</a>
 				<div class="body">
-					<a class="title" href="/a/{item.id}">{item.title}</a>
+					<a class="title" href="/a/{item.id}/read">{item.title}</a>
 					<div class="meta">
 						{item.page_count} 页
 						{#if progressText(item)}· <span class:fresh={item.is_new && !item.progress}>{progressText(item)}</span>{/if}
