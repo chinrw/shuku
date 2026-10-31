@@ -360,3 +360,50 @@ async fn books_with_broken_pages_are_imported_and_listed() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers["content-type"], "image/jpeg");
 }
+
+#[tokio::test]
+async fn page_thumbnails_are_per_page_and_folder_books_have_no_file_to_download() {
+    let fixture = Fixture::new();
+    let png = fixture.archive("unused.cbz", 30, 40);
+    let book = fixture.config.content_dir.join("pictures");
+    std::fs::create_dir(&book).unwrap();
+    std::fs::write(book.join("1.png"), b"").unwrap();
+    std::fs::write(book.join("2.png"), &png).unwrap();
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let id = Store::open(fixture.database())
+        .unwrap()
+        .find_by_path("pictures")
+        .unwrap()
+        .unwrap();
+    let pages = json(&router, &format!("/api/archives/{id}/pages")).await;
+    // 坏掉的第一页的缩略图是 422，不会悄悄换成别的页；封面才挑第一张好的。
+    let (status, _, _) = request(
+        &router,
+        "GET",
+        pages["pages"][0]["thumbnail_url"].as_str().unwrap(),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _, _) = request(
+        &router,
+        "GET",
+        pages["pages"][1]["thumbnail_url"].as_str().unwrap(),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = request(
+        &router,
+        "GET",
+        &format!("/api/archives/{id}/file"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}

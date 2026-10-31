@@ -37,7 +37,7 @@ pub(crate) async fn page(
     if params.w.is_some_and(|width| !WIDTHS.contains(&width)) {
         return Err(Error::bad_request("w 只能是 720、1080、1440 或 2160"));
     }
-    app.blocking(move |app| respond(&app, id, n, params, headers, false))
+    app.blocking(move |app| respond(&app, id, Which::Page(n), params, headers))
         .await
 }
 
@@ -49,7 +49,7 @@ pub(crate) async fn thumbnail(
 ) -> Result<Response> {
     let UrlPath(id) = path.map_err(Error::bad_request)?;
     let Query(params) = params.map_err(Error::bad_request)?;
-    app.blocking(move |app| respond(&app, id, 0, params, headers, true))
+    app.blocking(move |app| respond(&app, id, Which::Cover, params, headers))
         .await
 }
 
@@ -62,19 +62,28 @@ pub(crate) async fn page_thumbnail(
 ) -> Result<Response> {
     let UrlPath((id, n)) = path.map_err(Error::bad_request)?;
     let Query(params) = params.map_err(Error::bad_request)?;
-    app.blocking(move |app| respond(&app, id, n, params, headers, true))
+    app.blocking(move |app| respond(&app, id, Which::Thumbnail(n), params, headers))
         .await
+}
+
+/// 要哪一页、要不要缩成缩略图。
+#[derive(Clone, Copy)]
+enum Which {
+    Page(usize),
+    Thumbnail(usize),
+    /// 第一张读得出尺寸的页的缩略图，封面坏了也有图；全是坏页时仍用第一页，解码失败返回 422。
+    Cover,
 }
 
 fn respond(
     app: &App,
     id: i64,
-    n: usize,
+    which: Which,
     params: ImageParams,
     headers: HeaderMap,
-    thumbnail: bool,
 ) -> Result<Response> {
-    let (archive, page) = {
+    let thumbnail = !matches!(which, Which::Page(_));
+    let (archive, n, page) = {
         let (archive, pages) = app
             .reader()?
             .archive_with_pages(id)?
@@ -82,14 +91,12 @@ fn respond(
         if params.v != archive.metadata.quick_hash {
             return Err(Error::not_found());
         }
-        // 缩略图用第一张读得出尺寸的页，封面坏了也有图；全是坏页时仍用第一页，解码失败返回 422。
-        let n = if thumbnail {
-            pages.iter().position(|page| page.width > 0).unwrap_or(0)
-        } else {
-            n
+        let n = match which {
+            Which::Page(n) | Which::Thumbnail(n) => n,
+            Which::Cover => pages.iter().position(|page| page.width > 0).unwrap_or(0),
         };
         let page = pages.into_iter().nth(n).ok_or_else(Error::not_found)?;
-        (archive, page)
+        (archive, n, page)
     };
     // 路径由扫描写入，是内容目录里的普通文件或散放图片的文件夹。内容被替换但还没重新扫描时，
     // 记录的偏移已经失效，按旧 URL 返回新内容会被浏览器永久缓存，所以先比对大小和修改时间。

@@ -26,6 +26,13 @@ pub(crate) async fn file(
     if !tokio::fs::try_exists(&path).await? {
         return Err(Error::not_found());
     }
+    // 散放图片的文件夹没有单个原文件。
+    if tokio::fs::metadata(&path).await?.is_dir() {
+        return Err(Error::Http {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            message: "这本书是散放图片的文件夹，没有原文件可以下载".into(),
+        });
+    }
     let name = std::path::Path::new(&relative)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
