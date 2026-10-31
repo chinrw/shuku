@@ -893,14 +893,13 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	/* 一行横向滚动，不把书挤到下面去。 */
+	/* 放不下时换行。手机上原来是一排横向滑动，最右边的“编辑”和“隐藏读完的”要滑到头才看得见。 */
 	.facets {
 		display: flex;
-		gap: 0.35rem;
+		flex-wrap: wrap;
+		gap: 0.4rem 0.35rem;
 		margin: 0.5rem 0 0;
 		padding: 0 1rem 0.2rem;
-		overflow-x: auto;
-		scrollbar-width: none;
 	}
 
 	.facets a,
@@ -940,9 +939,23 @@
 	/* 编辑时分类和收藏的标签后面跟一个 ×。 */
 	.facets .item {
 		display: inline-flex;
-		flex: none;
+		flex: 0 1 auto;
 		align-items: center;
 		gap: 0.15rem;
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	/* 很长的分类名或标签不撑出屏幕：按钮最宽到一行，名字截断成省略号。 */
+	.facets .item a {
+		flex: 0 1 auto;
+		min-width: 0;
+	}
+
+	.facets .item a > span:not(.count) {
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
 	}
 
 	.facets .remove {
@@ -958,10 +971,16 @@
 		color: var(--danger);
 	}
 
+	/* 顶栏搜索框的 form 样式（边框、底色、固定高度）在这里不要。 */
 	.add-tag {
 		position: relative;
+		display: block;
 		width: min(20rem, calc(100% - 2rem));
+		height: auto;
 		margin: 0.4rem 1rem 0;
+		padding: 0;
+		border: none;
+		background: none;
 	}
 
 	.add-tag input {
@@ -1019,14 +1038,6 @@
 		color: var(--muted);
 		font-size: 0.8rem;
 		white-space: nowrap;
-	}
-
-	/* 宽屏上放不下时换行；手机上一排横向滑动。 */
-	@media (min-width: 600px) {
-		.facets {
-			flex-wrap: wrap;
-			row-gap: 0.4rem;
-		}
 	}
 
 	@media (min-width: 1024px) {

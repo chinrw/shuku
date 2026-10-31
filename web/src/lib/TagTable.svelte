@@ -102,6 +102,13 @@
 		cursor: pointer;
 	}
 
+	/* 手指点的地方要大一些。 */
+	@media (pointer: coarse) {
+		.save {
+			padding: 0.25rem 0.3rem;
+		}
+	}
+
 	.save:hover,
 	.save.on {
 		color: var(--accent, #3b97ea);
