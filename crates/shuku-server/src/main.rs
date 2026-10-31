@@ -11,7 +11,7 @@ struct Cli {
         long,
         env = "SHUKU_CONTENT_DIR",
         global = true,
-        help = "归档内容目录（只读）"
+        help = "归档内容目录（只在删除书时写入，可以只读挂载）"
     )]
     content_dir: Option<PathBuf>,
     #[arg(

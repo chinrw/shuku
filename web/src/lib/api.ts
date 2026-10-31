@@ -59,6 +59,8 @@ export interface ArchiveDetail extends Omit<ArchiveItem, 'series'> {
 	path: string;
 	/** 文件已经不在内容目录里，记录可以删除。 */
 	missing: boolean;
+	/** 服务能写原文件所在的目录，可以连文件一起删除。书库只读挂载时为 false。 */
+	deletable: boolean;
 }
 
 export interface PageInfo {
@@ -365,7 +367,8 @@ export function editArchive(id: number, edit: ArchiveEdit): Promise<ArchiveDetai
 	});
 }
 
-/** 删除文件已经不在的记录。文件还在时服务端返回 409。 */
-export async function deleteArchive(id: number) {
-	await send(fetch, `/api/archives/${id}`, { method: 'DELETE' });
+/** 删除文件已经不在的记录，文件还在时服务端返回 409。`file` 为真时连原文件一起删除，
+ * 书库只读时服务端返回 409。 */
+export async function deleteArchive(id: number, { file = false } = {}) {
+	await send(fetch, `/api/archives/${id}${file ? '?file=true' : ''}`, { method: 'DELETE' });
 }

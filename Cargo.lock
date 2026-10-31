@@ -2591,6 +2591,7 @@ dependencies = [
  "httpdate",
  "image",
  "jxl-oxide",
+ "libc",
  "notify",
  "rayon",
  "regex",

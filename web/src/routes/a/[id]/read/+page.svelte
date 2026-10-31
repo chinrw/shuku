@@ -775,6 +775,7 @@
 							<a href="/a/{nextVolume}/read" data-sveltekit-reload>下一卷</a>
 						{/if}
 						<a href={downloadUrl(book.id)} download>下载</a>
+						<a href="/a/{book.id}?edit">编辑</a>
 					</div>
 					<CategoryPicker archive={book.id} bind:categories={categoryList} {members} />
 					<TagTable rows={tagRows(book)} saveable />

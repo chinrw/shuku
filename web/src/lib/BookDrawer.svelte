@@ -78,6 +78,7 @@
 		{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
 		<a href="/a/{book.id}/read?panel=detail">详情</a>
 		<a href={downloadUrl(book.id)} download>下载</a>
+		<a href="/a/{book.id}?edit">编辑</a>
 	</div>
 	<div class="tags">
 		<TagTable rows={tagRows(book)} saveable />

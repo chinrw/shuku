@@ -9,6 +9,7 @@ mod db;
 mod decode;
 mod download;
 mod edit;
+mod files;
 mod hash;
 mod hosts;
 mod images;

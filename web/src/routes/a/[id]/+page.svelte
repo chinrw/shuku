@@ -9,6 +9,7 @@
 	import { ApiError, deleteArchive, downloadUrl } from '#lib/api.ts';
 	import ArchiveEditor from '#lib/ArchiveEditor.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
+	import DeleteBook from '#lib/DeleteBook.svelte';
 	import { membersOf } from '#lib/membership.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
 	import MetadataFetcher from '#lib/MetadataFetcher.svelte';
@@ -59,9 +60,16 @@
 		}
 	}
 
+	// 连文件一起删除后回到书库。删除返回前已经去了别的页面时，不把人拽回书库。
+	async function deleted(target: number) {
+		if (mounted && book.id === target) await goto('/', { replaceState: true });
+	}
+
 	afterNavigate(({ from, to, type }) => {
 		// 换了书就结束这次编辑；不清掉的话，回到原书时编辑框会带着旧的保存回调重新出现。
 		if (from?.params?.id !== to?.params?.id) editing = null;
+		// 书库的详情抽屉和阅读器的详情面板用 `?edit` 直接打开编辑。
+		if (to?.url.searchParams.has('edit')) editing = { id: book.id };
 		if (from?.route.id === '/') libraryBehind = true;
 		else if (!(from?.route.id === '/a/[id]/read' && type === 'popstate')) libraryBehind = false;
 	});
@@ -118,6 +126,13 @@
 			<a href={downloadUrl(book.id)} download>下载</a>
 			{#if editing?.id !== book.id}
 				<button onclick={() => (editing = { id: book.id })}>编辑</button>
+			{/if}
+			<!-- 换书时重建，上一本的确认框和勾选不会带到这一本。 -->
+			{#if !book.missing}
+				{#key book.id}
+					{@const target = book.id}
+					<DeleteBook {book} ondeleted={() => deleted(target)} />
+				{/key}
 			{/if}
 		</div>
 	</section>

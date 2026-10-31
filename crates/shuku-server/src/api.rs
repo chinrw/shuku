@@ -678,20 +678,15 @@ pub(crate) fn detail_json(app: &App, id: i64) -> Result<Value> {
         })
     });
     let tags = tag_groups(&archive.tags);
-    let missing = matches!(
-        app.0
-            .config
-            .content_dir
-            .join(&archive.metadata.path)
-            .try_exists(),
-        Ok(false)
-    );
+    let path = app.0.config.content_dir.join(&archive.metadata.path);
+    let missing = matches!(path.try_exists(), Ok(false));
+    let deletable = crate::files::can_delete(&path);
     Ok(json!({
         "id": archive.id, "title": archive.metadata.title,
         "summary": archive.metadata.summary, "page_count": archive.page_count,
         "is_new": archive.metadata.is_new, "date_added": archive.metadata.date_added,
         "source_url": archive.metadata.source_url, "file_size": archive.metadata.file_size,
-        "path": archive.metadata.path, "missing": missing,
+        "path": archive.metadata.path, "missing": missing, "deletable": deletable,
         "progress": progress(archive.progress.as_ref()), "tags": tags,
         "categories": categories, "cover_url": cover_url(id, &archive.metadata.quick_hash),
         "series": series,

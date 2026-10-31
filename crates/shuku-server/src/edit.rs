@@ -1,16 +1,16 @@
-//! 改一本书的标题、简介和标签，标签改名合并，删除文件已经不在的记录。
+//! 改一本书的标题、简介和标签，标签改名合并，删除记录（可以连同原文件一起删除）。
 //! 网页端、以后的内置插件和 MCP 都经过 [`App::edit_archive`] 写元数据，校验只在这里做一次。
 //! M1 没有认证，这些写操作和进度上报一样只在局域网里用。
 //!
 //! 写入提交后只安排一次延迟的快照刷新：详情直接读库，马上是新的；搜索结果和列表最多
 //! 落后一个刷新延迟。插件一次改很多本时，这些改动合并成一次重建。
 
-use crate::{App, Error, Result};
+use crate::{App, Error, Result, files};
 use axum::{
     Json, Router,
     extract::{
-        Path, State,
-        rejection::{JsonRejection, PathRejection},
+        Path, Query, State,
+        rejection::{JsonRejection, PathRejection, QueryRejection},
     },
     http::StatusCode,
     routing::{get, post},
@@ -129,18 +129,9 @@ impl App {
     /// 记录可能正要被同内容的新文件认领，删掉会让那一批提交失败。持有扫描锁期间检查
     /// 文件和删除，中间不会有扫描插进来。
     pub(crate) fn delete_missing(&self, ids: &[i64]) -> Result<Vec<Deletion>> {
-        let _scan = match self.0.scan_lock.try_lock() {
-            Ok(guard) => guard,
-            Err(TryLockError::WouldBlock) => {
-                return Err(conflict("扫描正在进行，结束后再删除"));
-            }
-            Err(TryLockError::Poisoned(_)) => return Err(Error::Lock),
-        };
+        let _scan = self.scan_lock_for_delete()?;
+        self.content_mounted()?;
         let content = &self.0.config.content_dir;
-        // 内容目录在网络盘上、没挂载时看起来是空的，这时每本书都像是丢了。
-        if std::fs::read_dir(content)?.next().is_none() {
-            return Err(conflict("内容目录是空的，可能没有挂载，不删除记录"));
-        }
         let outcomes = {
             let reader = self.reader()?;
             ids.iter()
@@ -179,9 +170,54 @@ impl App {
         self.listing_changed();
         Ok(outcomes)
     }
+
+    /// 内容目录在网络盘上、没挂载时看起来是空的，这时每本书都像是丢了。
+    fn content_mounted(&self) -> Result<()> {
+        if std::fs::read_dir(&self.0.config.content_dir)?
+            .next()
+            .is_none()
+        {
+            return Err(conflict("内容目录是空的，可能没有挂载，不删除记录"));
+        }
+        Ok(())
+    }
+
+    fn scan_lock_for_delete(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
+        match self.0.scan_lock.try_lock() {
+            Ok(guard) => Ok(guard),
+            Err(TryLockError::WouldBlock) => Err(conflict("扫描正在进行，结束后再删除")),
+            Err(TryLockError::Poisoned(_)) => Err(Error::Lock),
+        }
+    }
+
+    /// 从磁盘上删除原文件，再删记录，阻塞调用。文件已经不在时只删记录。先删文件：
+    /// 删完文件后记录没删掉时，它照样作为失踪记录出现在问题页上，还能再删；反过来的话，
+    /// 留下的文件下次扫描会作为新书重新入库。持有扫描锁，理由同 [`App::delete_missing`]。
+    pub(crate) fn delete_with_file(&self, id: i64) -> Result<Deletion> {
+        let _scan = self.scan_lock_for_delete()?;
+        let Some((archive, pages)) = self.reader()?.archive_with_pages(id)? else {
+            return Ok(Deletion::NotFound);
+        };
+        let content = &self.0.config.content_dir;
+        let path = content.join(&archive.metadata.path);
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => files::remove_book(content, &path, &archive.metadata, &pages)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => self.content_mounted()?,
+            Err(error) => return Err(error.into()),
+        }
+        self.write(|writer| Ok(writer.delete_archive(id)?))?;
+        tracing::info!(id, path = %archive.metadata.path, "删除了原文件和记录");
+        self.tasks(|tasks| tasks.scan.issues.missing.remove(&[id]));
+        // 很少删书，删完立即重建快照，回到书库时这本已经不在列表里。
+        if let Err(error) = self.refresh_blocking() {
+            tracing::error!(%error, "删除后重建快照失败，稍后重试");
+            self.listing_changed();
+        }
+        Ok(Deletion::Deleted)
+    }
 }
 
-fn conflict(message: &str) -> Error {
+pub(crate) fn conflict(message: &str) -> Error {
     Error::Http {
         status: StatusCode::CONFLICT,
         message: message.into(),
@@ -325,11 +361,29 @@ async fn edit(
     .await
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteQuery {
+    /// 连同原文件一起删除。不给时只删文件已经不在的记录。
+    #[serde(default)]
+    file: bool,
+}
+
 async fn delete(
     State(app): State<App>,
     id: std::result::Result<Path<i64>, PathRejection>,
+    query: std::result::Result<Query<DeleteQuery>, QueryRejection>,
 ) -> Result<StatusCode> {
     let Path(id) = id.map_err(Error::bad_request)?;
+    let Query(query) = query.map_err(Error::bad_request)?;
+    if query.file {
+        return app
+            .blocking(move |app| match app.delete_with_file(id)? {
+                Deletion::NotFound => Err(Error::not_found()),
+                _ => Ok(StatusCode::NO_CONTENT),
+            })
+            .await;
+    }
     app.blocking(move |app| match app.delete_missing(&[id])?[..] {
         [Deletion::Deleted] => Ok(StatusCode::NO_CONTENT),
         [Deletion::NotFound] => Err(Error::not_found()),
