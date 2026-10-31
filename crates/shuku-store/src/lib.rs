@@ -49,6 +49,7 @@ const MIGRATIONS: &[Migration] = &[
     (include_str!("migrations/009_series.sql"), None),
     (include_str!("migrations/010_metadata_sources.sql"), None),
     (include_str!("migrations/011_device_tokens.sql"), None),
+    (include_str!("migrations/012_progress_finished.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]

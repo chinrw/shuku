@@ -219,6 +219,8 @@ pub struct Progress {
     pub client_time: i64,
     /// 服务端接受上报的时间，单位为 Unix 毫秒。
     pub updated_at: i64,
+    /// 读到过最后一页。之后重读到前面也保持为真，见迁移 012。
+    pub finished: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

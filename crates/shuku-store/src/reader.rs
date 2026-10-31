@@ -457,7 +457,7 @@ fn read_pages(connection: &Connection, id: i64) -> Result<Vec<Page>> {
 
 fn read_all_progress(connection: &Connection) -> Result<HashMap<i64, Progress>> {
     Ok(connection
-        .prepare("SELECT archive_id, page, client_time, updated_at FROM progress")?
+        .prepare("SELECT archive_id, page, client_time, updated_at, finished FROM progress")?
         .query_map([], |row| Ok((row.get(0)?, read_progress(row)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
@@ -467,6 +467,7 @@ fn read_progress(row: &rusqlite::Row<'_>) -> rusqlite::Result<Progress> {
         page: row.get("page")?,
         client_time: row.get("client_time")?,
         updated_at: row.get("updated_at")?,
+        finished: row.get("finished")?,
     })
 }
 
@@ -505,7 +506,7 @@ pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Ar
         .collect::<rusqlite::Result<_>>()?;
     archive.progress = connection
         .query_row(
-            "SELECT page, client_time, updated_at FROM progress WHERE archive_id = ?1",
+            "SELECT page, client_time, updated_at, finished FROM progress WHERE archive_id = ?1",
             [id],
             read_progress,
         )

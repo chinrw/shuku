@@ -328,11 +328,11 @@ pub(crate) enum Filter {
     New,
     Untagged,
     Unread,
-    /// 有进度、还没读到最后一页。
+    /// 有进度、现在停在最后一页之前，包括读完以后又从头重看的。
     Reading,
-    /// 读到了最后一页。
+    /// 读到过最后一页，之后重读到前面也算。
     Finished,
-    /// 没读到最后一页，包括没读过的。书库页的“隐藏读完的”开关。
+    /// 从没读到过最后一页，包括没读过的。书库页的“隐藏读完的”开关。
     Unfinished,
 }
 
@@ -413,30 +413,36 @@ fn restrict_by_filter(
     filter: Filter,
 ) {
     use shuku_index::Term;
-    let read_ids = |finished: Option<bool>| -> Vec<i64> {
+    let ids = |keep: &dyn Fn(i64, &shuku_store::Progress) -> bool| -> Vec<i64> {
         snapshot
             .progress()
             .iter()
-            .filter(|(id, progress)| {
-                finished.is_none_or(|finished| {
-                    snapshot.item(**id).is_some_and(|item| {
-                        (progress.page + 1 >= item.archive.page_count) == finished
-                    })
-                })
-            })
+            .filter(|(id, progress)| keep(**id, progress))
             .map(|(id, _)| *id)
             .collect()
+    };
+    let read = || ids(&|_, _| true);
+    // “读完”看有没有读到过最后一页（迁移 012 的 finished），不看现在停在哪页：
+    // 读完的书重看几页也还算读完。
+    let finished = || ids(&|_, progress| progress.finished);
+    // “读了一半”看现在的位置：停在中间的，包括读完以后又从头重看的。
+    let reading = || {
+        ids(&|id, progress| {
+            snapshot
+                .item(id)
+                .is_some_and(|item| progress.page + 1 < item.archive.page_count)
+        })
     };
     match filter {
         Filter::New => {
             query.include.push(Term::New);
-            query.exclude.push(Term::Archives(read_ids(None)));
+            query.exclude.push(Term::Archives(read()));
         }
         Filter::Untagged => query.include.push(Term::Untagged),
-        Filter::Unread => query.exclude.push(Term::Archives(read_ids(None))),
-        Filter::Reading => query.include.push(Term::Archives(read_ids(Some(false)))),
-        Filter::Finished => query.include.push(Term::Archives(read_ids(Some(true)))),
-        Filter::Unfinished => query.exclude.push(Term::Archives(read_ids(Some(true)))),
+        Filter::Unread => query.exclude.push(Term::Archives(read())),
+        Filter::Reading => query.include.push(Term::Archives(reading())),
+        Filter::Finished => query.include.push(Term::Archives(finished())),
+        Filter::Unfinished => query.exclude.push(Term::Archives(finished())),
     }
 }
 

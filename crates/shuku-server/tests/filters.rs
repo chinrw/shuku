@@ -84,6 +84,29 @@ async fn pages_and_read_conditions_filter_search_results() {
 }
 
 #[tokio::test]
+async fn finished_books_stay_finished_when_reread() {
+    let (fixture, _) = library().await;
+    // a 读完了，再从第 1 页重看：仍算读完，“隐藏读完的”照样藏起它，同时它也在“读了一半”里。
+    let mut store = Store::open(fixture.database()).unwrap();
+    let a = store.find_by_path("a.cbz").unwrap().unwrap();
+    store.write_progress(a, 0, 2_000).unwrap();
+    drop(store);
+    // 直接写库绕过了服务端的快照，重新打开服务让它从库里读。
+    let router_after = fixture.app().await.router();
+    for (filter, expected) in [
+        ("finished", vec!["a"]),
+        ("unfinished", vec!["b", "c"]),
+        ("reading", vec!["a", "b"]),
+    ] {
+        assert_eq!(
+            ids(&router_after, &format!("/api/search?filter={filter}")).await,
+            expected,
+            "{filter}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn quick_filters_combine_with_each_other_and_the_query() {
     let (_fixture, router) = library().await;
     let cases = [

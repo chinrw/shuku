@@ -8,7 +8,7 @@ use shuku_store::{Error, Store, open_connection};
 fn rejects_newer_schema_versions_without_changing_them() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    for version in [12, 14] {
+    for version in [13, 15] {
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "user_version", version)
@@ -60,7 +60,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(pragma("user_version"), 11);
+    assert_eq!(pragma("user_version"), 12);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
     assert_eq!(pragma("mmap_size"), 0x7fff_0000);
@@ -304,4 +304,47 @@ fn device_tokens_are_found_by_hash_touched_and_revoked() {
         .map(|t| t.id)
         .collect();
     assert_eq!(ids, [second]);
+}
+
+#[test]
+fn migration_marks_progress_at_the_last_page_as_finished() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shuku.sqlite");
+    // 先建到迁移 011 为止的库，再放三本书的进度：停在最后一页、停在中间、页数为 0。
+    drop(open_connection(&path).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "ALTER TABLE progress DROP COLUMN finished;
+             PRAGMA user_version = 11;
+             INSERT INTO archive (id, path, title, summary, page_count, file_size, mtime,
+                 quick_hash, content_hash, is_new, date_added, source_url)
+                 VALUES (1, 'a.cbz', 'A', '', 3, 1, 0, 'h', NULL, 0, 0, NULL),
+                        (2, 'b.cbz', 'B', '', 3, 1, 0, 'h', NULL, 0, 0, NULL);
+             INSERT INTO progress (archive_id, page, client_time, updated_at)
+                 VALUES (1, 2, 1, 1), (2, 1, 1, 1);",
+        )
+        .unwrap();
+    drop(connection);
+
+    let mut store = Store::open(&path).unwrap();
+    let finished = |store: &Store, id: i64| {
+        store
+            .archive(id)
+            .unwrap()
+            .unwrap()
+            .progress
+            .unwrap()
+            .finished
+    };
+    assert!(finished(&store, 1));
+    assert!(!finished(&store, 2));
+    // 读完的书翻回前面，仍然算读完；读到最后一页时补记。
+    assert!(store.write_progress(1, 0, 2).unwrap());
+    assert!(finished(&store, 1));
+    assert!(store.write_progress(2, 2, 2).unwrap());
+    assert!(finished(&store, 2));
+    // 被拒绝的旧上报不改任何东西。
+    assert!(!store.write_progress(2, 0, 1).unwrap());
+    assert!(finished(&store, 2));
 }

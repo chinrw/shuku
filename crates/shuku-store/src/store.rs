@@ -681,11 +681,14 @@ impl Writer<'_> {
     pub fn write_progress(&mut self, id: i64, page: u32, client_time: i64) -> Result<bool> {
         let transaction = self.connection;
         require_archive(transaction, id)?;
+        // 读到最后一页时记下 finished，之后翻回前面也不清掉。
         let accepted = transaction.execute(
-            "INSERT INTO progress (archive_id, page, client_time, updated_at)
-             VALUES (?1, ?2, ?3, CAST(unixepoch('subsec') * 1000 AS INTEGER))
+            "INSERT INTO progress (archive_id, page, client_time, updated_at, finished)
+             VALUES (?1, ?2, ?3, CAST(unixepoch('subsec') * 1000 AS INTEGER),
+                ?2 + 1 >= (SELECT page_count FROM archive WHERE id = ?1))
              ON CONFLICT(archive_id) DO UPDATE SET page = excluded.page,
-                client_time = excluded.client_time, updated_at = excluded.updated_at
+                client_time = excluded.client_time, updated_at = excluded.updated_at,
+                finished = progress.finished OR excluded.finished
              WHERE excluded.client_time > progress.client_time",
             params![id, page, client_time],
         )? > 0;
