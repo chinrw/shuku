@@ -149,3 +149,58 @@ async fn scans_nested_zip_by_magic_and_preserves_identity_on_moves_and_changes()
     let reopened = fixture.app().await;
     assert_eq!(reopened.index().search(&Query::default()).unwrap().total, 2);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn skips_unreadable_subdirectories_without_treating_their_records_as_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 80, 120);
+    fixture.archive("private/hidden.cbz", 90, 130);
+    let app = fixture.app().await;
+    assert_eq!(app.scan().await.unwrap().added, 2);
+    let private = fixture.config.content_dir.join("private");
+    let copy = fixture.root.path().join("copy.cbz");
+    std::fs::copy(private.join("hidden.cbz"), &copy).unwrap();
+    // 目录内改名后旧路径确实不存在，但目录只能进不能列，扫描看不到新路径。
+    std::fs::rename(private.join("hidden.cbz"), private.join("renamed.cbz")).unwrap();
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o111)).unwrap();
+    // root 不受权限位限制，这时测不出跳过的行为。
+    if std::fs::read_dir(&private).is_ok() {
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    // 同内容的副本不能顶替读不到的那条记录。
+    std::fs::rename(&copy, fixture.config.content_dir.join("copy.cbz")).unwrap();
+    let report = app.scan().await;
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let report = report.unwrap();
+    assert_eq!(
+        (report.added, report.moved, report.unchanged, report.failed),
+        (1, 0, 1, 1)
+    );
+    assert_eq!(app.index().search(&Query::default()).unwrap().total, 3);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reports_unchecked_records_and_fails_on_unreadable_content_root() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 80, 120);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let book = fixture.config.content_dir.join("book.cbz");
+    std::fs::remove_file(&book).unwrap();
+    std::os::unix::fs::symlink(&book, &book).unwrap();
+    assert_eq!(app.scan().await.unwrap().failed, 1);
+    let content = &fixture.config.content_dir;
+    std::fs::set_permissions(content, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(content).is_ok() {
+        std::fs::set_permissions(content, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let result = app.scan().await;
+    std::fs::set_permissions(content, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(result.is_err());
+}

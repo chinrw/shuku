@@ -35,29 +35,51 @@ impl App {
         let _scan = self.0.scan_lock.lock().map_err(|_| Error::Lock)?;
         let content = &self.0.config.content_dir;
         let entries = self.reader()?.scan_entries()?;
+        // 不跟随符号链接，避免循环和越出内容目录。
+        let mut files = Vec::new();
+        let mut unreadable = Vec::new();
+        let mut report = ScanReport::default();
+        for entry in walkdir::WalkDir::new(content) {
+            match entry {
+                Ok(entry) if entry.file_type().is_file() => files.push(entry.into_path()),
+                Ok(_) => {}
+                // 内容目录里可能有别的程序建的、只有它自己能读的子目录，跳过它们继续扫描。
+                // 内容目录本身读不了说明配置有误，整次扫描失败。目录读到一半出错时
+                // walkdir 不给路径，无法确定受影响的范围，同样整次失败。
+                Err(error) => match error.path() {
+                    Some(path) if error.depth() > 0 => {
+                        tracing::warn!(%error, "无法读取内容目录中的条目");
+                        unreadable.push(path.to_path_buf());
+                        report.failed += 1;
+                    }
+                    _ => return Err(error.into()),
+                },
+            }
+        }
         let mut missing: HashMap<String, VecDeque<i64>> = HashMap::new();
         for entry in &entries {
-            if !content.join(&entry.path).try_exists()? {
-                missing
+            let path = content.join(&entry.path);
+            // 读不了的目录里的记录无法判断还在不在，不当作失踪，免得被同内容的新文件顶替。
+            if unreadable.iter().any(|dir| path.starts_with(dir)) {
+                continue;
+            }
+            match path.try_exists() {
+                Ok(true) => {}
+                Ok(false) => missing
                     .entry(entry.quick_hash.clone())
                     .or_default()
-                    .push_back(entry.id);
+                    .push_back(entry.id),
+                Err(error) => {
+                    tracing::warn!(path = %path.display(), %error, "无法确认已入库的文件是否存在");
+                    report.failed += 1;
+                }
             }
         }
         let existing: HashMap<_, _> = entries
             .into_iter()
             .map(|entry| (entry.path.clone(), entry))
             .collect();
-        // 不跟随符号链接，避免循环和越出内容目录。
-        let mut files = Vec::new();
-        for entry in walkdir::WalkDir::new(content) {
-            let entry = entry?;
-            if entry.file_type().is_file() {
-                files.push(entry.into_path());
-            }
-        }
         files.sort();
-        let mut report = ScanReport::default();
         // 每批限制待提交页面清单的数量；图片解析和指纹计算并行，SQLite 提交串行。
         for batch in files.chunks(64) {
             let prepared: Vec<_> = batch
