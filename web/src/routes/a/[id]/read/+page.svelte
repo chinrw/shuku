@@ -190,13 +190,58 @@
 		if (!scrollWithin(delta, 0.9)) step(delta);
 	}
 
-	// 预取前后的几屏，翻页时直接从 HTTP 缓存取图。
+	/**
+	 * 一张图加载完（或彻底失败）时兑现。原图解不了时 fallback() 在 error 事件里换成服务端的
+	 * JPEG，这时图片又变回“未完成”，接着等换上的那张。
+	 */
+	function settled(image: HTMLImageElement): Promise<void> {
+		return new Promise((resolve) => {
+			const check = () => {
+				if (image.complete) {
+					resolve();
+					return;
+				}
+				const wait = new AbortController();
+				const next = () => {
+					wait.abort();
+					check();
+				};
+				image.addEventListener('load', next, { signal: wait.signal });
+				image.addEventListener('error', next, { signal: wait.signal });
+			};
+			check();
+		});
+	}
+
+	// 预取后两屏和前一屏，翻页时直接从 HTTP 缓存取图。原图可能有二十几 MB，一起下载会和
+	// 当前这屏抢带宽，所以等当前这屏加载完，再一张一张地取；下一屏顺便解码好，翻过去马上能显示，
+	// 其余的只下载不解码，免得手机上同时占着几张大图解码后的内存。翻走时取消还没取完的。
 	$effect(() => {
 		if (mode !== 'paged') return;
-		for (const offset of [1, 2, -1]) {
-			const spread = spreads[spreadIndex + offset];
-			for (const index of spread ?? []) new Image().src = src(index);
-		}
+		const next = spreads[spreadIndex + 1] ?? [];
+		const queue = [
+			...next.map((index) => ({ index, decode: true })),
+			...(spreads[spreadIndex + 2] ?? []).map((index) => ({ index, decode: false })),
+			...(spreads[spreadIndex - 1] ?? []).map((index) => ({ index, decode: false }))
+		];
+		let cancelled = false;
+		const started: HTMLImageElement[] = [];
+		(async () => {
+			const shown = [...(pagedView?.querySelectorAll('img') ?? [])];
+			await Promise.all(shown.map(settled));
+			for (const { index, decode } of queue) {
+				if (cancelled) return;
+				const image = new Image();
+				started.push(image);
+				image.src = src(index);
+				await (decode ? image.decode().catch(() => {}) : settled(image));
+			}
+		})();
+		return () => {
+			cancelled = true;
+			// 清掉 src 让浏览器停止还没下载完的请求。
+			for (const image of started) if (!image.complete) image.src = '';
+		};
 	});
 
 	$effect(() => {
@@ -486,10 +531,13 @@
 				ontouchend={touchEnd}
 			>
 				{#each visible as index (index)}
+					<!-- 原图下载完之前先用缩略图垫底，大图在手机上要等一会儿。 -->
 					<img
 						class="page"
 						class:half={visible.length === 2}
 						src={src(index)}
+						style:background-image="url({pages[index].thumbnail_url})"
+						onload={(event) => event.currentTarget.classList.add('loaded')}
 						onerror={(event) => fallback(event, index)}
 						width={pages[index].width}
 						height={pages[index].height}
@@ -800,6 +848,16 @@
 		width: auto;
 		height: auto;
 		object-fit: contain;
+	}
+
+	.page:not(:global(.loaded)) {
+		background-position: center;
+		background-repeat: no-repeat;
+		background-size: contain;
+	}
+
+	.page:global(.loaded) {
+		background-image: none !important;
 	}
 
 	.page.half {
