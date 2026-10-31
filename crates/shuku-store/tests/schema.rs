@@ -60,6 +60,8 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
     assert_eq!(pragma("user_version"), 2);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
+    assert_eq!(pragma("mmap_size"), 0x7fff_0000);
+    assert_eq!(pragma("cache_size"), -65536);
     assert_eq!(
         connection
             .pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
