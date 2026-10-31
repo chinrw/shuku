@@ -98,7 +98,7 @@ async fn triggered_scan_runs_in_the_background_then_hashes() {
 }
 
 #[tokio::test]
-async fn issues_list_failed_skipped_and_missing_files() {
+async fn issues_list_failed_and_missing_files_and_count_other_files() {
     capture_logs();
     let fixture = Fixture::new();
     fixture.archive("kept.cbz", 10, 20);
@@ -124,10 +124,8 @@ async fn issues_list_failed_skipped_and_missing_files() {
     assert_eq!(issues["failed"]["total"], 1);
     assert_eq!(issues["failed"]["items"][0]["path"], "broken.cbz");
     assert!(issues["failed"]["items"][0]["error"].is_string());
-    assert_eq!(
-        issues["skipped"]["items"],
-        serde_json::json!([{"path": "notes.txt"}])
-    );
+    // 不认得的文件只计数，不列进问题页。
+    assert!(issues.get("skipped").is_none());
     assert_eq!(issues["unreadable"]["total"], 0);
     assert_eq!(
         issues["missing"]["items"],

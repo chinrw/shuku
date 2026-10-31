@@ -88,7 +88,7 @@
 				<dt>更新</dt><dd>{count(scanTask.report.updated)}</dd>
 				<dt>移动</dt><dd>{count(scanTask.report.moved)}</dd>
 				<dt>未变</dt><dd>{count(scanTask.report.unchanged)}</dd>
-				<dt>跳过</dt><dd>{count(scanTask.report.skipped)}</dd>
+				<dt>其他文件</dt><dd>{count(scanTask.report.skipped)}</dd>
 				<dt>失败</dt><dd class:error={scanTask.report.failed > 0}>{count(scanTask.report.failed)}</dd>
 			</dl>
 			<div class="adm-actions">

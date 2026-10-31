@@ -2,7 +2,7 @@
 //!
 //! 没有认证时，任意网页都可以把自己的域名解析到局域网里的服务端地址，浏览器把这当成
 //! 同源请求，于是那个网页能读书库、触发控制台的任务。这类请求的 Host 是攻击者的域名，
-//! 所以只接受 IP 地址、localhost、不带点的局域网主机名，以及 `--allowed-host` 列出的名字。
+//! 所以只接受 IP 地址、localhost、不带点的局域网主机名，以及控制台设置里允许的名字。
 
 use crate::{App, Error};
 use axum::{
@@ -19,12 +19,12 @@ pub(crate) async fn check_host(State(app): State<App>, request: Request, next: N
         None => true,
         Some(value) => value
             .to_str()
-            .is_ok_and(|host| host_allowed(host, &app.0.config.allowed_hosts)),
+            .is_ok_and(|host| host_allowed(host, &app.settings().server.allowed_hosts)),
     };
     if !allowed {
         return Error::Http {
             status: StatusCode::MISDIRECTED_REQUEST,
-            message: "这个主机名不在允许列表里，用 --allowed-host 加上它".into(),
+            message: "这个主机名不在允许列表里，用 IP 打开控制台的设置页加上它".into(),
         }
         .into_response();
     }

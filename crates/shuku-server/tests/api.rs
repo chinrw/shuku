@@ -596,14 +596,23 @@ async fn categories_are_listed_pinned_first_and_filter_search() {
 
 #[tokio::test]
 async fn page_list_flags_webtoons_unless_detection_is_off() {
-    let mut fixture = Fixture::new();
+    let fixture = Fixture::new();
     fixture.archive("strip.cbz", 80, 400);
     fixture.archive("manga.cbz", 80, 120);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    // 默认判断；在控制台关掉后立即生效，不用重启。
     for (detect, expected) in [(true, [true, false]), (false, [false, false])] {
-        fixture.config.detect_webtoons = detect;
-        let app = fixture.app().await;
-        app.scan().await.unwrap();
-        let router = app.router();
+        let (status, _, _) = request(
+            &router,
+            "PUT",
+            "/api/admin/settings/server",
+            Some(value!({ "detect_webtoons": detect })),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
         let items = json(&router, "/api/search").await["items"].clone();
         let flags: Vec<_> = webtoon_flags(&router, &items).await;
         assert_eq!(flags, expected, "detect_webtoons = {detect}");
@@ -628,9 +637,21 @@ async fn webtoon_flags(router: &axum::Router, items: &Value) -> Vec<bool> {
 
 #[tokio::test]
 async fn requests_for_unknown_domain_names_are_rejected() {
-    let mut fixture = Fixture::new();
-    fixture.config.allowed_hosts = vec!["books.example.ts.net".into()];
+    let fixture = Fixture::new();
     let router = fixture.app().await.router();
+    let (status, _, body) = request(
+        &router,
+        "PUT",
+        "/api/admin/settings/server",
+        Some(value!({ "allowed_hosts": ["books.example.ts.net"] })),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap(),
+        value!({ "detect_webtoons": true, "allowed_hosts": ["books.example.ts.net"] })
+    );
     for host in ["evil.example", "evil.example:3002"] {
         for uri in ["/api/search", "/", "/api/admin/status"] {
             let (status, _, body) = request(&router, "GET", uri, None, &[("host", host)]).await;

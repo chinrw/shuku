@@ -29,7 +29,7 @@ export interface ScanTask extends Task {
 	processed: number;
 	report: ScanReport;
 	/** `broken` 是有坏页的本数，存在库里，不随扫描清空。 */
-	issues: { failed: number; skipped: number; unreadable: number; missing: number; broken: number };
+	issues: { failed: number; unreadable: number; missing: number; broken: number };
 }
 
 export interface HashTask extends Task {
@@ -44,8 +44,6 @@ export interface Status {
 		data_dir: string;
 		web_dir: string;
 		listen: string;
-		detect_webtoons: boolean;
-		allowed_hosts: string[];
 	};
 	library: {
 		archives: number;
@@ -76,7 +74,6 @@ export interface Issues {
 	scanning: boolean;
 	finished_at: number | null;
 	failed: Listed<{ path: string; error: string }>;
-	skipped: Listed<{ path: string }>;
 	unreadable: Listed<{ path: string; error: string }>;
 	missing: Listed<{ id: number; path: string; title: string | null }>;
 	broken: Listed<{ id: number; path: string; title: string; pages: string[] }>;
@@ -113,21 +110,36 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 	return response.json();
 }
 
-/** 在控制台里改、存在服务端数据库里的设置。 */
-export interface ServerSettings {
+/** 扫描设置，存在服务端数据库里，所有设备共用。 */
+export interface ScanSettings {
 	scan_hidden: boolean;
 	/** 0 表示不定时扫描。 */
 	scan_interval_hours: number;
+	/** 额外跳过的目录或文件名，可以用 `*`。 */
+	extra_skip: string[];
 }
 
-export const status = () => call<Status>('/api/admin/status');
-export const serverSettings = () => call<ServerSettings>('/api/admin/settings/scan');
-export const updateServerSettings = (patch: Partial<ServerSettings>) =>
-	call<ServerSettings>('/api/admin/settings/scan', {
+/** 条漫判断和允许的主机名。 */
+export interface ServerSettings {
+	detect_webtoons: boolean;
+	allowed_hosts: string[];
+}
+
+function put<T>(path: string, patch: Partial<T>) {
+	return call<T>(path, {
 		method: 'PUT',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(patch)
 	});
+}
+
+export const status = () => call<Status>('/api/admin/status');
+export const scanSettings = () => call<ScanSettings>('/api/admin/settings/scan');
+export const updateScanSettings = (patch: Partial<ScanSettings>) =>
+	put<ScanSettings>('/api/admin/settings/scan', patch);
+export const serverSettings = () => call<ServerSettings>('/api/admin/settings/server');
+export const updateServerSettings = (patch: Partial<ServerSettings>) =>
+	put<ServerSettings>('/api/admin/settings/server', patch);
 export const issues = () => call<Issues>('/api/admin/issues');
 export const duplicates = (limit = 100) =>
 	call<{ total: number; groups: { files: DuplicateFile[] }[] }>(

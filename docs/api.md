@@ -1,6 +1,6 @@
 # HTTP API（M1）
 
-服务端和网页客户端共同遵守本文件定义的接口。所有接口都在 `/api` 下，请求和响应都是 JSON（图片接口除外）。出错时返回合适的状态码和 `{"error": "说明"}`。M1 没有认证；Host 不是 IP、`localhost`、不带点的主机名或 `--allowed-host` 里的名字时，所有路径都返回 421（防 DNS rebinding）。
+服务端和网页客户端共同遵守本文件定义的接口。所有接口都在 `/api` 下，请求和响应都是 JSON（图片接口除外）。出错时返回合适的状态码和 `{"error": "说明"}`。M1 没有认证；Host 不是 IP、`localhost`、不带点的主机名或控制台设置里允许的域名时，所有路径都返回 421（防 DNS rebinding）。
 
 ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Unix 毫秒，只有 `date_added` 是 Unix 秒（沿用 LRR 的数据）。
 
@@ -213,7 +213,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 `thumbnail_url` 是这一页的缩略图，详情页的页面总览用。
 
-响应另有 `"webtoon": true/false`：页面高宽比的中位数达到 2 时为 `true`，网页端据此把这本当条漫，用上下连续滚动阅读。服务端用 `--no-webtoon-detection` 启动时总是 `false`。阅读器里的手动开关存在浏览器里，优先于这个值。
+响应另有 `"webtoon": true/false`：页面高宽比的中位数达到 2 时为 `true`，网页端据此把这本当条漫，用上下连续滚动阅读。控制台设置里关掉条漫判断时总是 `false`。阅读器里的手动开关存在浏览器里，优先于这个值。
 
 `broken` 为 `true` 的是读不出尺寸的坏页（全是 0 的图、0 字节的文件、改了扩展名的别的文件），这时 `width` 和 `height` 是 1000×1414 的占位值，请求它的图片通常返回 422。和 LRR 一样，有坏页的书照样入库。
 
@@ -343,7 +343,7 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
             "total": 137012, "processed": 61880,
             "report": { "added": 3124, "updated": 0, "moved": 0, "unchanged": 58704, "skipped": 12, "failed": 40 },
             "error": null,
-            "issues": { "failed": 37, "skipped": 12, "unreadable": 3, "missing": 0 } },
+            "issues": { "failed": 37, "unreadable": 3, "missing": 0, "broken": 2 } },
   "hash": { "running": false, "started_at": null, "finished_at": null, "total": 0,
             "report": { "hashed": 0, "skipped": 0, "failed": 0 }, "error": null }
 }
@@ -351,7 +351,7 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 
 - `library.tags` 和 `namespaces` 只数至少被一本用到的标签；`read_last_week` 是翻页时间在最近 7 天内的本数。
 - `storage.cache_*` 是 `数据目录/cache/images` 里的文件，每分钟最多统计一次。
-- `scan` 是正在进行或服务启动以来最近一次的扫描。`total` 在遍历完内容目录后才有值；`issues` 是各类问题的数量，明细见下面的接口。`hash` 同理，`total` 是这轮开始时还没有完整指纹的本数。服务重启后两者都从空开始。
+- `scan` 是正在进行或服务启动以来最近一次的扫描，`report.skipped` 是不认得、只计数的其他文件。`total` 在遍历完内容目录后才有值；`issues` 是各类问题的数量，明细见下面的接口。`hash` 同理，`total` 是这轮开始时还没有完整指纹的本数。服务重启后两者都从空开始。
 
 `GET /api/admin/issues`
 
@@ -361,7 +361,6 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 {
   "scanning": false, "finished_at": 1761800000000,
   "failed": { "total": 1, "items": [{ "path": "a/broken.zip", "error": "zip 结构损坏" }] },
-  "skipped": { "total": 1, "items": [{ "path": "b/book.rar" }] },
   "unreadable": { "total": 0, "items": [] },
   "missing": { "total": 1, "items": [{ "id": 42, "path": "c/gone.zip", "title": "已删除的书" }] },
   "broken": { "total": 1, "items": [{ "id": 7, "path": "d/book.zip", "title": "标题", "pages": ["01.jpg"] }] }
@@ -397,15 +396,18 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 
 `seq` 每次启动从 1 开始；`started_at` 标识服务端进程，和上次不同时说明服务重启过，客户端要丢掉旧的 `after` 从头取。
 
-`GET /api/admin/settings/scan`、`PUT /api/admin/settings/scan`
+`GET`、`PUT /api/admin/settings/scan` 和 `/api/admin/settings/server`
 
-控制台设置页改的扫描设置，存在数据库的 `setting` 表里（键 `scan`），所有设备共用：
+控制台设置页改的设置，存在数据库的 `setting` 表里（键 `scan` 和 `server`），所有设备共用、立即生效：
 
 ```json
-{ "scan_hidden": false, "scan_interval_hours": 24 }
+{ "scan_hidden": false, "scan_interval_hours": 0, "extra_skip": ["@eaDir", "*.part"] }
+{ "detect_webtoons": true, "allowed_hosts": ["nas.example.ts.net"] }
 ```
 
-`scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0 表示不定时，最大 720。PUT 只需带要改的项，未知字段或超出范围返回 400，响应是改后的全部设置。
+- `scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0（默认）表示不定时，最大 720。`extra_skip` 是额外跳过的目录或文件名，`*` 通配、不分大小写，不能带路径分隔符。
+- `detect_webtoons` 见页面清单的 `webtoon`。`allowed_hosts` 是除 IP、`localhost`、不带点的主机名以外允许的 Host，不带端口和通配。
+- PUT 只需带要改的项，列表整体替换（去掉空白和重复项，最多 100 项）；未知字段或无效值返回 400，响应是改后的这一组设置。
 
 `POST /api/admin/scan`、`POST /api/admin/hash`
 

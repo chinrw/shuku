@@ -535,7 +535,7 @@ async fn pages(
             .archive_with_pages(id)?
             .ok_or_else(Error::not_found)?;
         let hash = &archive.metadata.quick_hash;
-        let webtoon = app.0.config.detect_webtoons
+        let webtoon = app.settings().server.detect_webtoons
             && crate::webtoon::looks_like_webtoon(
                 pages.iter().map(|page| (page.width, page.height)),
             );

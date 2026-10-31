@@ -39,21 +39,6 @@ struct Cli {
     listen: SocketAddr,
     #[arg(
         long,
-        env = "SHUKU_NO_WEBTOON_DETECTION",
-        global = true,
-        help = "不按页面宽高比自动判断条漫（默认判断）"
-    )]
-    no_webtoon_detection: bool,
-    #[arg(
-        long = "allowed-host",
-        env = "SHUKU_ALLOWED_HOSTS",
-        value_delimiter = ',',
-        global = true,
-        help = "额外允许的主机名，可重复或用逗号分隔；IP、localhost 和不带点的主机名总是允许"
-    )]
-    allowed_hosts: Vec<String>,
-    #[arg(
-        long,
         env = "SHUKU_NO_WATCH",
         global = true,
         help = "不监视内容目录的变化（默认监视，有变化时自动扫描）"
@@ -92,8 +77,6 @@ async fn main() -> Result<()> {
             .context("请设置 --data-dir 或 SHUKU_DATA_DIR")?,
         web_dir: cli.web_dir,
         listen: cli.listen,
-        detect_webtoons: !cli.no_webtoon_detection,
-        allowed_hosts: cli.allowed_hosts,
     };
     let app = App::open(config).await?;
     if matches!(cli.command, Some(Command::Scan)) {

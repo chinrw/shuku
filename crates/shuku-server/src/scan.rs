@@ -13,6 +13,7 @@ pub struct ScanReport {
     pub updated: usize,
     pub moved: usize,
     pub unchanged: usize,
+    /// 其他文件：不是 zip、cbz，也不是图片文件夹里的图片。只计数，不算问题。
     pub skipped: usize,
     pub failed: usize,
 }
@@ -60,26 +61,23 @@ impl App {
         let mut folders = std::collections::BTreeSet::new();
         let mut unreadable = Vec::new();
         let mut report = ScanReport::default();
-        let scan_hidden = self.settings().scan_hidden;
+        let settings = self.settings().scan;
         let walk = walkdir::WalkDir::new(content)
             .into_iter()
-            .filter_entry(|entry| scan_hidden || entry.depth() == 0 || !is_hidden(entry));
+            .filter_entry(|entry| entry.depth() == 0 || !excluded(&settings, entry.file_name()));
         for entry in walk {
             match entry {
-                Ok(entry) if entry.file_type().is_file() => {
-                    // 文件夹的页面不含以 `.` 开头的文件，它们不让所在目录成书。改成图片扩展名的
-                    // ZIP 仍按魔数当归档扫描，读不了魔数的交给后面的扫描报错。
-                    let image = entry.file_name().to_str().is_some_and(|name| {
-                        !name.starts_with('.') && shuku_archive::is_image(name)
-                    }) && !shuku_archive::has_zip_magic(entry.path()).unwrap_or(true);
-                    // 内容目录本身直接放着的图片不成书，照旧当作不支持的文件。
-                    match entry.path().parent() {
-                        Some(parent) if image && entry.depth() > 1 => {
+                // 只扫认得的格式，其他文件只计数，不列进问题页。
+                Ok(entry) if entry.file_type().is_file() => match classify(&entry) {
+                    Kind::Archive => files.push(entry.into_path()),
+                    // 内容目录本身直接放着的图片不成书，算其他文件。
+                    Kind::Image if entry.depth() > 1 => {
+                        if let Some(parent) = entry.path().parent() {
                             folders.insert(parent.to_path_buf());
                         }
-                        _ => files.push(entry.into_path()),
                     }
-                }
+                    Kind::Image | Kind::Other => report.skipped += 1,
+                },
                 Ok(_) => {}
                 // 内容目录里可能有别的程序建的、只有它自己能读的子目录，跳过它们继续扫描。
                 // 内容目录本身读不了说明配置有误，整次扫描失败。目录读到一半出错时
@@ -108,8 +106,11 @@ impl App {
             if unreadable.iter().any(|dir| path.starts_with(dir)) {
                 continue;
             }
-            // 按设置跳过的隐藏目录里的记录也无法判断，同样不动。
-            if !scan_hidden && has_hidden_component(&entry.path) {
+            // 按设置跳过的路径（隐藏条目、额外跳过的名字）里的记录也无法判断，同样不动。
+            if Path::new(&entry.path)
+                .components()
+                .any(|component| excluded(&settings, component.as_os_str()))
+            {
                 continue;
             }
             // 文件夹里的图片都删了、只剩空目录时也算失踪。
@@ -154,11 +155,6 @@ impl App {
                 match prepared {
                     Ok(Some(prepared)) => saves.push(prepared),
                     Ok(None) => report.unchanged += 1,
-                    Err(Error::Archive(shuku_archive::Error::UnsupportedFormat)) => {
-                        tracing::info!(path = %path.display(), "跳过不支持的格式");
-                        self.tasks(|tasks| tasks.scan.issues.skipped.push(relative(content, path)));
-                        report.skipped += 1;
-                    }
                     Err(error) => {
                         tracing::warn!(path = %path.display(), %error, "扫描文件失败");
                         self.tasks(|tasks| {
@@ -270,15 +266,40 @@ impl App {
     }
 }
 
-fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry.file_name().as_encoded_bytes().starts_with(b".")
+/// 按设置不扫的名字：以 `.` 开头的隐藏条目（除非打开了扫描隐藏条目），以及“额外跳过”命中的名字。
+fn excluded(settings: &crate::settings::ScanSettings, name: &std::ffi::OsStr) -> bool {
+    let hidden = name.as_encoded_bytes().starts_with(b".");
+    (hidden && !settings.scan_hidden) || name.to_str().is_some_and(|name| settings.skips(name))
 }
 
-/// 相对内容目录的路径里有没有以 `.` 开头的一段，也就是扫描时会被跳过。
-fn has_hidden_component(relative: &str) -> bool {
-    Path::new(relative)
-        .components()
-        .any(|component| component.as_os_str().as_encoded_bytes().starts_with(b"."))
+enum Kind {
+    /// zip、cbz，或者改成图片扩展名的 ZIP（按魔数认出）。
+    Archive,
+    /// 图片，所在的目录是一本书。
+    Image,
+    Other,
+}
+
+/// 扫描只认 zip、cbz 和散放的图片；7z、RAR、PDF 以后再加。以 `.` 开头的图片不是页面。
+fn classify(entry: &walkdir::DirEntry) -> Kind {
+    let Some(name) = entry.file_name().to_str() else {
+        return Kind::Other;
+    };
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
+    if matches!(extension.as_deref(), Some("zip" | "cbz")) {
+        return Kind::Archive;
+    }
+    if name.starts_with('.') || !shuku_archive::is_image(name) {
+        return Kind::Other;
+    }
+    // 读不了魔数时当归档，交给后面的扫描报错，不悄悄算成图片。
+    if shuku_archive::has_zip_magic(entry.path()).unwrap_or(true) {
+        Kind::Archive
+    } else {
+        Kind::Image
+    }
 }
 
 /// 问题列表里显示相对内容目录的路径，和数据库里一致。
@@ -429,8 +450,6 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            detect_webtoons: true,
-            allowed_hosts: Vec::new(),
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         // 每批 64 个文件，65 个文件分成两批。

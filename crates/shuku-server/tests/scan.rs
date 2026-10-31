@@ -74,9 +74,9 @@ async fn ignores_symlinks_in_content_and_keeps_missing_records_for_future_moves(
 }
 
 #[tokio::test]
-async fn scans_nested_zip_by_magic_and_preserves_identity_on_moves_and_changes() {
+async fn scans_nested_zips_and_preserves_identity_on_moves_and_changes() {
     let fixture = Fixture::new();
-    fixture.archive("nested/漫画 2.bin", 800, 1200);
+    fixture.archive("nested/漫画 2.cbz", 800, 1200);
     std::fs::write(
         fixture.config.content_dir.join("unsupported.rar"),
         b"Rar!test",
@@ -122,7 +122,7 @@ async fn scans_nested_zip_by_magic_and_preserves_identity_on_moves_and_changes()
         (0, 0, 1)
     );
     std::fs::rename(
-        fixture.config.content_dir.join("nested/漫画 2.bin"),
+        fixture.config.content_dir.join("nested/漫画 2.cbz"),
         fixture.config.content_dir.join("renamed.cbz"),
     )
     .unwrap();
@@ -286,7 +286,7 @@ async fn hidden_entries_are_skipped_unless_enabled() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-        serde_json::json!({"scan_hidden": true, "scan_interval_hours": 0})
+        serde_json::json!({"scan_hidden": true, "scan_interval_hours": 0, "extra_skip": []})
     );
     let report = app.scan().await.unwrap();
     assert_eq!((report.added, report.unchanged), (3, 1));
@@ -325,7 +325,7 @@ async fn hidden_entries_are_skipped_unless_enabled() {
     let settings = common::json(&reopened.router(), "/api/admin/settings/scan").await;
     assert_eq!(
         settings,
-        serde_json::json!({"scan_hidden": false, "scan_interval_hours": 24})
+        serde_json::json!({"scan_hidden": false, "scan_interval_hours": 24, "extra_skip": []})
     );
 }
 
@@ -460,4 +460,49 @@ async fn zips_named_like_images_are_still_archives_and_hidden_images_are_not_pag
     assert_eq!(store.archive(zip).unwrap().unwrap().page_count, 2);
     assert!(store.find_by_path("sub").unwrap().is_none());
     assert!(store.find_by_path("only-hidden").unwrap().is_none());
+}
+
+#[tokio::test]
+async fn only_known_formats_are_scanned_and_extra_skip_names_are_left_alone() {
+    let fixture = Fixture::new();
+    let png = fixture.archive("keep.cbz", 30, 40);
+    fixture.archive("@eaDir/thumb.cbz", 30, 40);
+    fixture.archive("downloads/book.zip.part", 30, 40);
+    let content = &fixture.config.content_dir;
+    std::fs::write(content.join("readme.txt"), "说明").unwrap();
+    std::fs::write(content.join("movie.mp4"), "视频").unwrap();
+    // 按魔数是 ZIP，但扩展名不认得：只算其他文件。
+    std::fs::copy(content.join("keep.cbz"), content.join("renamed.bin")).unwrap();
+    let pictures = content.join("pictures");
+    std::fs::create_dir(&pictures).unwrap();
+    std::fs::write(pictures.join("1.png"), &png).unwrap();
+    let app = fixture.app().await;
+    let router = app.router();
+    let (status, _, _) = common::request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"extra_skip": ["@eadir", "*.part"]})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let report = app.scan().await.unwrap();
+    // keep.cbz 和 pictures 入库；readme、mp4、renamed.bin 算其他文件；额外跳过的不计数。
+    assert_eq!((report.added, report.skipped, report.failed), (2, 3, 0));
+    let issues = common::json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["failed"]["total"], 0);
+
+    // 已经入库的书被加进额外跳过后不算失踪。
+    common::request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"extra_skip": ["pictures"]})),
+        &[],
+    )
+    .await;
+    app.scan().await.unwrap();
+    let issues = common::json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["missing"]["total"], 0);
 }

@@ -113,7 +113,7 @@ impl App {
                             .unwrap_or_else(PoisonError::into_inner)
                             .extend(dirs);
                     }
-                    let scan_hidden = app.settings().scan_hidden;
+                    let scan_hidden = app.settings().scan.scan_hidden;
                     if event.need_rescan() || is_change(&event, &content, scan_hidden) {
                         recorder.record();
                     }
@@ -133,7 +133,7 @@ impl App {
         watcher
             .watch(content, RecursiveMode::NonRecursive)
             .map_err(watch_error)?;
-        let scan_hidden = self.settings().scan_hidden;
+        let scan_hidden = self.settings().scan.scan_hidden;
         watch_tree(&mut watcher, content, content, scan_hidden);
         let watcher = Arc::new(Mutex::new(watcher));
         tokio::spawn(self.clone().watch_loop(
@@ -180,7 +180,7 @@ impl App {
                 tokio::time::sleep(wait).await;
             }
             // 控制台里改了是否扫描隐藏条目，要监视的目录也跟着变。
-            let scan_hidden = self.settings().scan_hidden;
+            let scan_hidden = self.settings().scan.scan_hidden;
             if scan_hidden != watched_hidden {
                 changes.rewatch.store(true, Ordering::Release);
                 watched_hidden = scan_hidden;
@@ -372,8 +372,6 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            detect_webtoons: true,
-            allowed_hosts: Vec::new(),
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         let app = App::open(config.clone()).await.unwrap();

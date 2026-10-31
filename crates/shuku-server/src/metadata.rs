@@ -809,8 +809,6 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            detect_webtoons: true,
-            allowed_hosts: Vec::new(),
         };
         let folder = config.content_dir.join("Vol.1");
         std::fs::create_dir_all(&folder).unwrap();

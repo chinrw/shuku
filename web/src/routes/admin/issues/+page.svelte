@@ -8,7 +8,7 @@
 	} from '#lib/admin.ts';
 	import { bytes, clock, count } from '#lib/format.ts';
 
-	type Tab = 'failed' | 'broken' | 'unreadable' | 'skipped' | 'missing' | 'duplicates';
+	type Tab = 'failed' | 'broken' | 'unreadable' | 'missing' | 'duplicates';
 
 	let data = $state<Issues | null>(null);
 	let groups = $state<{ total: number; groups: { files: DuplicateFile[] }[] } | null>(null);
@@ -63,7 +63,6 @@
 		failed: '最近一次扫描读不了的文件和原因。修好文件后在任务页点“立即扫描”重试。',
 		broken: '和 LRR 一样照样入库、但有几页读不出来的书（全是 0 的图、0 字节的文件、改了扩展名的别的文件）。坏页在阅读器里显示不出来。',
 		unreadable: '没有读权限的子目录。里面已入库的记录不当作丢失。',
-		skipped: '7z、RAR、PDF 等 M1 还不读的格式，以后支持后再扫描。',
 		missing:
 			'库里有记录、内容目录里已经找不到的文件。改名或移动的文件扫描时会自动认回；确实删掉了的，可以在这里删除记录。',
 		duplicates: '完整指纹相同的文件，每组列出全部路径。只统计已经算好指纹的书。'
@@ -73,7 +72,6 @@
 		{ key: 'failed', label: '扫描失败', total: data?.failed.total ?? null },
 		{ key: 'broken', label: '有坏页的书', total: data?.broken.total ?? null },
 		{ key: 'unreadable', label: '读不了的目录', total: data?.unreadable.total ?? null },
-		{ key: 'skipped', label: '不支持的格式', total: data?.skipped.total ?? null },
 		{ key: 'missing', label: '文件丢失', total: data?.missing.total ?? null },
 		{ key: 'duplicates', label: '重复文件', total: groups?.total ?? null }
 	]);
@@ -152,17 +150,6 @@
 				</table>
 				{#if data.broken.items.length === 0}<p class="adm-empty">没有。</p>{/if}
 				{#if shown(data.broken)}<p class="adm-empty">{shown(data.broken)}</p>{/if}
-			{:else if tab === 'skipped'}
-				<table class="adm-table">
-					<thead><tr><th>路径</th></tr></thead>
-					<tbody>
-						{#each data.skipped.items as item (item.path)}
-							<tr><td class="adm-mono">{item.path}</td></tr>
-						{/each}
-					</tbody>
-				</table>
-				{#if data.skipped.items.length === 0}<p class="adm-empty">没有。</p>{/if}
-				{#if shown(data.skipped)}<p class="adm-empty">{shown(data.skipped)}</p>{/if}
 			{:else if tab === 'missing'}
 				<table class="adm-table">
 					<thead><tr><th>标题</th><th>原路径</th><th></th></tr></thead>

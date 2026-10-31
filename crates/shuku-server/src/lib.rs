@@ -44,11 +44,6 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub web_dir: PathBuf,
     pub listen: SocketAddr,
-    /// 按页面宽高比判断条漫，让网页端自动改用上下连续滚动。判断错得多时可以关掉，
-    /// 关掉后只认阅读器里手动打开的条漫开关。
-    pub detect_webtoons: bool,
-    /// 除 IP、localhost 和不带点的主机名以外，还接受这些 Host（例如 Tailscale 的完整域名）。
-    pub allowed_hosts: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -161,7 +156,7 @@ impl App {
             std::fs::create_dir_all(&config.data_dir)?;
             let database = Arc::new(db::Database::open(&config.data_dir.join("shuku.sqlite"))?);
             let snapshot = snapshot::Snapshot::load(&*database.reader()?)?;
-            let settings = settings::Settings::load(database.reader()?.setting(settings::KEY));
+            let settings = settings::Settings::load(&*database.reader()?);
             let metadata = metadata::MetadataState::load(&*database.reader()?)?;
             let changed = Arc::new(Notify::new());
             let writes = db::spawn_writer(database.clone(), changed.clone())?;

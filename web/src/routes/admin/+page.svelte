@@ -108,7 +108,7 @@
 				</div>
 				{#if scan.error}<p class="error">扫描出错：{scan.error}</p>{/if}
 				<div class="counts">
-					{#each [['新增', scan.report.added], ['更新', scan.report.updated], ['移动', scan.report.moved], ['未变', scan.report.unchanged], ['跳过', scan.report.skipped], ['失败', scan.report.failed]] as [label, value] (label)}
+					{#each [['新增', scan.report.added], ['更新', scan.report.updated], ['移动', scan.report.moved], ['未变', scan.report.unchanged], ['其他文件', scan.report.skipped], ['失败', scan.report.failed]] as [label, value] (label)}
 						<div class:bad={label === '失败' && Number(value) > 0}>
 							<span class="adm-label">{label}</span>
 							<strong>{count(Number(value))}</strong>

@@ -58,7 +58,6 @@ pub(crate) struct HashTask {
 #[derive(Default)]
 pub(crate) struct ScanIssues {
     pub(crate) failed: Capped<FileIssue>,
-    pub(crate) skipped: Capped<String>,
     pub(crate) unreadable: Capped<FileIssue>,
     pub(crate) missing: Capped<MissingArchive>,
 }
@@ -238,7 +237,11 @@ impl App {
             .route("/api/admin/logs", get(logs))
             .route(
                 "/api/admin/settings/scan",
-                get(read_settings).put(write_settings),
+                get(read_scan_settings).put(write_scan_settings),
+            )
+            .route(
+                "/api/admin/settings/server",
+                get(read_server_settings).put(write_server_settings),
             )
             .route("/api/admin/scan", post(start_scan))
             .route("/api/admin/hash", post(start_hash))
@@ -368,8 +371,6 @@ async fn status(State(app): State<App>) -> Result<Json<Value>> {
                 "started_at": unix_ms(app.0.started_at),
                 "content_dir": config.content_dir, "data_dir": config.data_dir,
                 "web_dir": config.web_dir, "listen": config.listen.to_string(),
-                "detect_webtoons": config.detect_webtoons,
-                "allowed_hosts": config.allowed_hosts,
             },
             "library": {
                 "archives": stats.archives, "pages": stats.pages, "bytes": stats.bytes,
@@ -398,7 +399,7 @@ fn scan_json(task: &ScanTask) -> Value {
         "finished_at": task.finished_at, "total": task.total, "processed": task.processed,
         "report": task.report, "error": task.error,
         "issues": {
-            "failed": task.issues.failed.total, "skipped": task.issues.skipped.total,
+            "failed": task.issues.failed.total,
             "unreadable": task.issues.unreadable.total, "missing": task.issues.missing.total,
         },
     })
@@ -436,16 +437,9 @@ async fn issues(State(app): State<App>) -> Result<Json<Value>> {
                     json!({"id": archive.id, "path": archive.path, "title": title})
                 })
                 .collect();
-            let skipped: Vec<_> = issues
-                .skipped
-                .items
-                .iter()
-                .map(|path| json!({"path": path}))
-                .collect();
             json!({
                 "scanning": tasks.scan.running, "finished_at": tasks.scan.finished_at,
                 "failed": {"total": issues.failed.total, "items": issues.failed.items},
-                "skipped": {"total": issues.skipped.total, "items": skipped},
                 "unreadable": {"total": issues.unreadable.total, "items": issues.unreadable.items},
                 "missing": {"total": issues.missing.total, "items": missing},
                 "broken": {"total": broken_total, "items": broken},
@@ -583,19 +577,35 @@ async fn start_scan(State(app): State<App>) -> Result<(StatusCode, Json<Value>)>
     Ok((StatusCode::ACCEPTED, Json(json!({"started": true}))))
 }
 
-async fn read_settings(State(app): State<App>) -> Json<crate::settings::Settings> {
-    Json(app.settings())
+async fn read_scan_settings(State(app): State<App>) -> Json<crate::settings::ScanSettings> {
+    Json(app.settings().scan)
 }
 
-async fn write_settings(
+async fn write_scan_settings(
     State(app): State<App>,
     body: std::result::Result<
-        Json<crate::settings::SettingsPatch>,
+        Json<crate::settings::ScanPatch>,
         axum::extract::rejection::JsonRejection,
     >,
-) -> Result<Json<crate::settings::Settings>> {
+) -> Result<Json<crate::settings::ScanSettings>> {
     let Json(patch) = body.map_err(Error::bad_request)?;
-    app.blocking(move |app| Ok(Json(app.update_settings(&patch)?)))
+    app.blocking(move |app| Ok(Json(app.update_settings(patch, |all| &mut all.scan)?)))
+        .await
+}
+
+async fn read_server_settings(State(app): State<App>) -> Json<crate::settings::ServerSettings> {
+    Json(app.settings().server)
+}
+
+async fn write_server_settings(
+    State(app): State<App>,
+    body: std::result::Result<
+        Json<crate::settings::ServerPatch>,
+        axum::extract::rejection::JsonRejection,
+    >,
+) -> Result<Json<crate::settings::ServerSettings>> {
+    let Json(patch) = body.map_err(Error::bad_request)?;
+    app.blocking(move |app| Ok(Json(app.update_settings(patch, |all| &mut all.server)?)))
         .await
 }
 
@@ -664,8 +674,6 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            detect_webtoons: true,
-            allowed_hosts: Vec::new(),
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         let app = App::open(config).await.unwrap();
