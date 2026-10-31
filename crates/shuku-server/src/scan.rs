@@ -128,6 +128,7 @@ impl App {
                 }
                 Ok(())
             })?;
+            self.listing_changed();
         }
         // 从只读连接构建，期间进度上报照常写入。
         self.refresh_blocking()?;

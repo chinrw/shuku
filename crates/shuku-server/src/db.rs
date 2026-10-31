@@ -120,15 +120,15 @@ pub(crate) struct HashRequest {
 }
 
 /// 启动写队列线程。所有发送端都丢掉后，线程提交剩下的请求后退出。
-/// 提交了被接受的进度时通知 `progress_changed`。
+/// 提交了被接受的进度时通知 `changed`，快照随后刷新进度。
 pub(crate) fn spawn_writer(
     database: Arc<Database>,
-    progress_changed: Arc<Notify>,
+    changed: Arc<Notify>,
 ) -> Result<SyncSender<Request>> {
     let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
     std::thread::Builder::new()
         .name("shuku-writer".into())
-        .spawn(move || run_writer(&database, &receiver, &progress_changed))?;
+        .spawn(move || run_writer(&database, &receiver, &changed))?;
     Ok(sender)
 }
 
@@ -136,7 +136,7 @@ pub(crate) fn queue_stopped() -> Error {
     Error::Write("写队列已停止".into())
 }
 
-fn run_writer(database: &Database, receiver: &Receiver<Request>, progress_changed: &Notify) {
+fn run_writer(database: &Database, receiver: &Receiver<Request>, changed: &Notify) {
     let mut pending = Vec::new();
     let mut last_commit: Option<Instant> = None;
     loop {
@@ -148,13 +148,13 @@ fn run_writer(database: &Database, receiver: &Receiver<Request>, progress_change
             Ok(request) => pending.push(request),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
-                commit(database, std::mem::take(&mut pending), progress_changed);
+                commit(database, std::mem::take(&mut pending), changed);
                 return;
             }
         }
         pending.extend(receiver.try_iter());
         if !pending.is_empty() && last_commit.is_none_or(|last| last.elapsed() >= COMMIT_INTERVAL) {
-            commit(database, std::mem::take(&mut pending), progress_changed);
+            commit(database, std::mem::take(&mut pending), changed);
             last_commit = Some(Instant::now());
         }
         if let Err(error) = database.checkpoint_if_due() {
@@ -164,7 +164,7 @@ fn run_writer(database: &Database, receiver: &Receiver<Request>, progress_change
 }
 
 /// 一批请求在一个事务里提交，每条请求各占一个保存点，单条出错不影响其他请求。
-fn commit(database: &Database, requests: Vec<Request>, progress_changed: &Notify) {
+fn commit(database: &Database, requests: Vec<Request>, changed: &Notify) {
     if requests.is_empty() {
         return;
     }
@@ -211,7 +211,7 @@ fn commit(database: &Database, requests: Vec<Request>, progress_changed: &Notify
         .iter()
         .any(|outcome| outcome.as_ref().is_ok_and(|reply| reply.accepted))
     {
-        progress_changed.notify_one();
+        changed.notify_one();
     }
     // 请求方已经不等了（例如 HTTP 连接断开）时发送失败，写入照样有效。
     for (request, outcome) in progress.into_iter().zip(progress_outcomes) {

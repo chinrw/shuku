@@ -94,8 +94,10 @@ struct Inner {
     snapshot: ArcSwap<snapshot::Snapshot>,
     /// 让快照的刷新一个接一个进行。
     refresh_lock: Mutex<()>,
-    /// 写队列提交了被接受的进度时通知，由后台任务延迟刷新快照里的进度。
-    progress_changed: Arc<Notify>,
+    /// 写入了快照里的数据时通知，由后台任务延迟刷新快照。
+    changed: Arc<Notify>,
+    /// 置位表示列表元数据或标签变了，下次刷新要重建整个快照；否则只刷新进度。
+    listing_changed: AtomicBool,
     scan_lock: Mutex<()>,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
     stopping: AtomicBool,
@@ -122,15 +124,16 @@ impl App {
             std::fs::create_dir_all(&config.data_dir)?;
             let database = Arc::new(db::Database::open(&config.data_dir.join("shuku.sqlite"))?);
             let snapshot = snapshot::Snapshot::load(&*database.reader()?)?;
-            let progress_changed = Arc::new(Notify::new());
-            let writes = db::spawn_writer(database.clone(), progress_changed.clone())?;
+            let changed = Arc::new(Notify::new());
+            let writes = db::spawn_writer(database.clone(), changed.clone())?;
             Ok(Self(Arc::new(Inner {
                 config,
                 database,
                 writes,
                 snapshot: ArcSwap::from_pointee(snapshot),
                 refresh_lock: Mutex::new(()),
-                progress_changed,
+                changed,
+                listing_changed: AtomicBool::new(false),
                 scan_lock: Mutex::new(()),
                 stopping: AtomicBool::new(false),
             })))

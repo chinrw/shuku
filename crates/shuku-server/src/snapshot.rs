@@ -6,11 +6,11 @@ use shuku_index::Index;
 use shuku_store::{LibraryArchive, LibraryTag, Progress, Reader, Tag};
 use std::{
     collections::HashMap,
-    sync::{Arc, PoisonError},
+    sync::{Arc, PoisonError, atomic::Ordering},
     time::{Duration, Instant},
 };
 
-/// 进度上报后等这么久再刷新快照，期间的上报合并成一次刷新。读可以滞后 10 到 20 秒。
+/// 数据变化后等这么久再刷新快照，期间的变化合并成一次刷新。读可以滞后 10 到 20 秒。
 const REFRESH_DELAY: Duration = Duration::from_secs(10);
 
 pub(crate) struct Snapshot {
@@ -83,10 +83,17 @@ impl App {
         self.0.snapshot.load_full()
     }
 
-    /// 立即按数据库重建整个快照，不等进度刷新的延迟。扫描结束时调用；
+    /// 立即按数据库重建整个快照，不等刷新延迟。扫描结束时调用；
     /// 测试用它在写入后马上检查搜索结果。
     pub async fn refresh(&self) -> Result<()> {
         self.blocking(|app| app.refresh_blocking()).await
+    }
+
+    /// 列表元数据或标签已经提交了变化：安排一次延迟的整体重建。
+    /// 扫描每提交一批就调用，扫得再久，搜索结果里的封面 URL 也最多落后一个刷新延迟。
+    pub(crate) fn listing_changed(&self) {
+        self.0.listing_changed.store(true, Ordering::Release);
+        self.0.changed.notify_one();
     }
 
     pub(crate) fn refresh_blocking(&self) -> Result<()> {
@@ -96,9 +103,19 @@ impl App {
             .refresh_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        // 先清标志再读库：读库之后才提交的变化会重新置位，不会漏掉。
+        self.0.listing_changed.store(false, Ordering::Release);
         let snapshot = Snapshot::load(&*self.reader()?)?;
         self.0.snapshot.store(Arc::new(snapshot));
         Ok(())
+    }
+
+    fn refresh_pending(&self) -> Result<()> {
+        if self.0.listing_changed.load(Ordering::Acquire) {
+            self.refresh_blocking()
+        } else {
+            self.refresh_progress()
+        }
     }
 
     fn refresh_progress(&self) -> Result<()> {
@@ -117,18 +134,18 @@ impl App {
         Ok(())
     }
 
-    /// 写队列每次提交了被接受的进度就通知一次；这里等 [`REFRESH_DELAY`] 再刷新，
+    /// 每次提交了快照里的数据就通知一次；这里等 [`REFRESH_DELAY`] 再刷新，
     /// 等待期间的通知合并成一次。任务只持有弱引用，不会让 `App` 一直活着。
     pub(crate) fn spawn_progress_refresher(&self) {
         let app = Arc::downgrade(&self.0);
-        let changed = self.0.progress_changed.clone();
+        let changed = self.0.changed.clone();
         tokio::spawn(async move {
             loop {
                 changed.notified().await;
                 tokio::time::sleep(REFRESH_DELAY).await;
                 let Some(inner) = app.upgrade() else { return };
-                if let Err(error) = App(inner).blocking(|app| app.refresh_progress()).await {
-                    tracing::error!(%error, "刷新阅读进度失败");
+                if let Err(error) = App(inner).blocking(|app| app.refresh_pending()).await {
+                    tracing::error!(%error, "刷新快照失败");
                 }
             }
         });
