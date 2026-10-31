@@ -181,8 +181,7 @@ fn suggestions_match_full_names_or_values_most_common_first() {
     ])
     .unwrap();
 
-    // 冒号后的值以 al 开头的标签和没有命名空间的 alps 都算，同数时按标签名排；
-    // 值里只是包含 pha 的 alpha 不算。
+    // 冒号后的值以 al 开头的标签和没有命名空间的 alps 都算，同数时按标签名排。
     assert_eq!(
         index.suggest_tags("AL", 10),
         counts(&[
@@ -201,7 +200,22 @@ fn suggestions_match_full_names_or_values_most_common_first() {
         counts(&[("artist:albert", 1)])
     );
     assert_eq!(index.suggest_tags("al", 1), counts(&[("artist:alpha", 3)]));
-    assert!(index.suggest_tags("pha", 10).is_empty());
+    // 值的中间含有输入的也提示，排在开头就匹配的后面。
+    assert_eq!(
+        index.suggest_tags("pha", 10),
+        counts(&[("artist:alpha", 3)])
+    );
+    assert_eq!(
+        index.suggest_tags("l", 10),
+        counts(&[
+            ("artist:alpha", 3),
+            ("group:alpine", 2),
+            ("alps", 1),
+            ("artist:albert", 1),
+            ("female:glasses", 1),
+        ])
+    );
+    assert!(index.suggest_tags("zzz", 10).is_empty());
     assert!(index.suggest_tags("  ", 10).is_empty());
     assert!(index.suggest_tags("al", 0).is_empty());
 }

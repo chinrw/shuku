@@ -399,9 +399,9 @@ impl Index {
             .collect()
     }
 
-    /// 搜索框补全用：返回完整名或冒号后的值以 `prefix` 开头的标签，按全库
-    /// 归档数从多到少、同数时按标签名排列，最多 `limit` 个。前缀按小写匹配，
-    /// 为空时不返回任何标签。
+    /// 搜索框补全用：先列完整名或冒号后的值以 `prefix` 开头的标签，不够 `limit` 个
+    /// 时再列值的中间含有 `prefix` 的标签；两组各自按全库归档数从多到少、同数时按
+    /// 标签名排列。按小写匹配，`prefix` 为空时不返回任何标签。
     pub fn suggest_tags(&self, prefix: &str, limit: usize) -> Vec<TagCount> {
         let prefix = normalize_tag(prefix);
         if prefix.is_empty() {
@@ -409,17 +409,35 @@ impl Index {
         }
         // tags_by_size 已按归档数从多到少、同数按名字排好，前 limit 个命中的就是答案。
         // 前缀很常见时很快凑满；很少见时要比较全部标签名，在 30 万本的合成数据上约 1.5 ms。
-        self.tags_by_size
+        let value = |tag: usize| {
+            let name = &self.tag_names[tag];
+            name.split_once(':')
+                .map_or(name.as_str(), |(_, value)| value)
+        };
+        let starts = |tag: usize| {
+            self.tag_names[tag].starts_with(&prefix) || value(tag).starts_with(&prefix)
+        };
+        let mut found: Vec<usize> = self
+            .tags_by_size
             .iter()
             .map(|&tag| tag as usize)
-            .filter(|&tag| {
-                let name = &self.tag_names[tag];
-                let value = name
-                    .split_once(':')
-                    .map_or(name.as_str(), |(_, value)| value);
-                name.starts_with(&prefix) || value.starts_with(&prefix)
-            })
+            .filter(|&tag| starts(tag))
             .take(limit)
+            .collect();
+        // 和 LRR 一样，值的中间含有输入的标签也提示（“hair”能找到“long hair”），
+        // 排在开头就匹配的后面，免得常见的长标签把想要的挤掉。
+        if found.len() < limit {
+            let rest = limit - found.len();
+            found.extend(
+                self.tags_by_size
+                    .iter()
+                    .map(|&tag| tag as usize)
+                    .filter(|&tag| !starts(tag) && value(tag).contains(prefix.as_str()))
+                    .take(rest),
+            );
+        }
+        found
+            .into_iter()
             .map(|tag| TagCount {
                 tag: self.tag_names[tag].clone(),
                 count: self.tag_docs[tag].len(),
