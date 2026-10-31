@@ -138,20 +138,7 @@ impl Reader {
 
     /// 一组设置。每个功能一个键（例如 `scan`），值是那组设置的 JSON；没存过时返回 `None`。
     pub fn setting<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        let value: Option<String> = self
-            .connection
-            .query_row("SELECT value FROM setting WHERE key = ?1", [key], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        value
-            .map(|value| {
-                serde_json::from_str(&value).map_err(|source| Error::Setting {
-                    key: key.into(),
-                    source,
-                })
-            })
-            .transpose()
+        read_setting(&self.connection, key)
     }
 
     /// 暂存着、等扫描到时套用的 LRR 记录数。
@@ -561,4 +548,24 @@ fn device_token(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceToken> {
         created_at: row.get(2)?,
         last_used_at: row.get(3)?,
     })
+}
+
+/// 读一组设置，只读连接和写事务共用。
+pub(crate) fn read_setting<T: serde::de::DeserializeOwned>(
+    connection: &rusqlite::Connection,
+    key: &str,
+) -> Result<Option<T>> {
+    let value: Option<String> = connection
+        .query_row("SELECT value FROM setting WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    value
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|source| Error::Setting {
+                key: key.into(),
+                source,
+            })
+        })
+        .transpose()
 }

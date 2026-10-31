@@ -9,6 +9,7 @@
 	import { ApiError, deleteArchive, downloadUrl } from '#lib/api.ts';
 	import ArchiveEditor from '#lib/ArchiveEditor.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
+	import { membersOf } from '#lib/membership.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
 	import MetadataFetcher from '#lib/MetadataFetcher.svelte';
 	import PageGrid from '#lib/PageGrid.svelte';
@@ -20,11 +21,13 @@
 	let { data } = $props();
 	let book = $derived(data.archive);
 	let resumePage = $derived(book.progress?.page ?? 0);
-	// 勾选分类时就地改写，换到另一本书时跟着数据重置。
+	// 页面加载时这本书所在的分类，换到另一本书时跟着数据重置。
 	let members = $derived(book.categories);
+	// 抽屉、阅读器里改过的分类以 membership.svelte.ts 里记下的为准。
+	let currentMembers = $derived(membersOf(book.id, members));
 	let categoryList = $derived(data.categories);
 	let memberCategories = $derived(
-		categoryList.filter((category) => members.includes(category.id))
+		categoryList.filter((category) => currentMembers.includes(category.id))
 	);
 
 	// 每次点开编辑是一个新对象，换到另一本书时编辑框自动收起。保存返回前可能已经
@@ -129,7 +132,7 @@
 	{/if}
 
 	<div class="categories">
-		<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
+		<CategoryPicker archive={book.id} bind:categories={categoryList} {members} />
 		<!-- 换书时重建，上一本填的画廊地址不会带到这一本。 -->
 		{#key book.id}<MetadataFetcher archive={book.id} />{/key}
 	</div>

@@ -71,9 +71,12 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
     { "namespace": "", "values": ["独立标签"] },
     { "namespace": "artist", "values": ["某某"] }
   ],
+  "categories": [2],
   "series": { "id": 3, "name": "作品名", "volume": 1, "volumes": 12 }
 }
 ```
+
+`categories` 和归档详情里的一样，是这本书所在的静态分类，书库列表视图每行的书签按钮靠它判断收藏了没有。
 
 `series` 是这本书所属的系列（按卷出版的作品）、它的卷号和这个系列一共几卷，不属于系列时为 `null`。只有一卷的系列不算系列，这时也是 `null`。系列由扫描按路径认出，规则见 [docs/server.md](server.md#系列和卷)。
 

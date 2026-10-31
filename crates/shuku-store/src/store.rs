@@ -520,6 +520,11 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 在写事务里读一组设置，读、改、写在同一个事务里，两个请求同时改不会丢掉一个。
+    pub fn setting<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        crate::reader::read_setting(self.connection, key)
+    }
+
     /// 整组写入一组设置，存成 JSON。
     pub fn set_setting<T: serde::Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
         let value = serde_json::to_string(value).map_err(|source| Error::Setting {

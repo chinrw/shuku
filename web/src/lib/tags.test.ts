@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { namespaceClass, parseTagText, tagLine, tagRows, tagText } from './tags';
+import { byline, namespaceClass, parseTagText, rowTags, tagLine, tagRows, tagText } from './tags';
 
 const item = {
 	date_added: 1_700_000_000,
@@ -100,5 +100,25 @@ describe('tag text', () => {
 		expect(parseTagText('  ')).toEqual([]);
 		// 换行不是分隔符，原样交给服务端，由它拒绝。
 		expect(parseTagText('artist:a\nb, c')).toEqual(['artist:a\nb', 'c']);
+	});
+});
+
+describe('byline and rowTags', () => {
+	const groups = [
+		{ namespace: 'group', values: ['サークル桜'] },
+		{ namespace: '', values: ['独立'] },
+		{ namespace: 'artist', values: ['三日月', '鈴木'] },
+		{ namespace: 'parody', values: ['original'] },
+		{ namespace: 'date_added', values: ['1700000000'] }
+	];
+
+	it('puts artists before groups', () => {
+		expect(byline(groups)).toBe('三日月 · 鈴木 · サークル桜');
+		expect(byline([])).toBe('');
+	});
+
+	it('leaves artists, groups and dates out of the tag column', () => {
+		expect(rowTags(groups, 5).map((tag) => tag.text)).toEqual(['独立', 'original']);
+		expect(rowTags(groups, 1)).toHaveLength(1);
 	});
 });

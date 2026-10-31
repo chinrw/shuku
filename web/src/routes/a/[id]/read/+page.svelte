@@ -21,7 +21,7 @@
 	const book = untrack(() => data.archive);
 	const pages = untrack(() => data.pages);
 	let categoryList = $state(untrack(() => data.categories));
-	let members = $state(untrack(() => data.archive.categories));
+	const members = untrack(() => data.archive.categories);
 
 	let current = $state(untrack(() => data.start));
 	// 平时顶部有工具栏，和 LRR 一样；全屏时收起，点屏幕中间临时叫出底栏。
@@ -364,7 +364,7 @@
 					<Icon name="chevron-right" />
 				</button>
 			{/if}
-			<BookmarkButton archive={book.id} bind:members bind:categories={categoryList} bar />
+			<BookmarkButton archive={book.id} {members} bind:categories={categoryList} bar />
 			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
@@ -532,7 +532,7 @@
 				</div>
 			{:else}
 				<div class="actions">
-					<BookmarkButton archive={book.id} bind:members bind:categories={categoryList} />
+					<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
 					<a href="/a/{book.id}">相关作品</a>
 					{#if book.series}
 						<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>
@@ -542,7 +542,7 @@
 					{/if}
 					<a href={downloadUrl(book.id)} download>下载</a>
 				</div>
-				<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
+				<CategoryPicker archive={book.id} bind:categories={categoryList} {members} />
 				<TagTable rows={tagRows(book)} />
 				{#if book.summary}<p class="summary">{book.summary}</p>{/if}
 				<div class="overview-pages">

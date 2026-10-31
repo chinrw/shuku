@@ -20,7 +20,7 @@ export interface TagRow {
 /** LRR 把以 date 或 time 开头的命名空间当作 Unix 秒显示成日期。 */
 const TIME = /^(date|time)/;
 
-function formatDate(seconds: number): string {
+export function formatDate(seconds: number): string {
 	return new Date(seconds * 1000).toLocaleDateString();
 }
 
@@ -72,6 +72,24 @@ export function tagLine(groups: TagGroup[]): { text: string; namespace: string }
 		.filter((group) => !TIME.test(group.namespace))
 		.sort((a, b) => (groupKey(a.namespace) < groupKey(b.namespace) ? -1 : 1))
 		.flatMap((group) => group.values.map((text) => ({ text, namespace: group.namespace })));
+}
+
+// 列表视图标题下面那一行写作者和社团，标签列就不再重复它们。
+const BYLINE = ['artist', 'group', 'circle'];
+
+/** 列表视图标题下面的作者和社团，按作者在前、社团在后，用“ · ”连起来。 */
+export function byline(groups: TagGroup[]): string {
+	const values = (namespace: string) =>
+		groups.filter((group) => group.namespace.toLowerCase() === namespace).flatMap((group) => group.values);
+	return BYLINE.flatMap(values).join(' · ');
+}
+
+/** 列表视图标签列里的前几个标签：去掉作者和社团，其余和卡片底部那一行同样排序。 */
+export function rowTags(groups: TagGroup[], limit: number): { text: string; namespace: string }[] {
+	return tagLine(groups.filter((group) => !BYLINE.includes(group.namespace.toLowerCase()))).slice(
+		0,
+		limit
+	);
 }
 
 /** LRR 只给这几类命名空间着色：作者蓝、社团青绿、原作粉。 */

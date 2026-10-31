@@ -17,6 +17,8 @@ export interface ArchiveItem {
 	date_added: number;
 	source_url: string | null;
 	tags: TagGroup[];
+	/** 这本书所在的静态分类的 ID，书签按钮用。 */
+	categories: number[];
 	/** 所属系列，只有一卷的系列不算。 */
 	series: SeriesRef | null;
 }
@@ -57,8 +59,6 @@ export interface ArchiveDetail extends Omit<ArchiveItem, 'series'> {
 	path: string;
 	/** 文件已经不在内容目录里，记录可以删除。 */
 	missing: boolean;
-	/** 这本书所在的静态分类的 ID。 */
-	categories: number[];
 }
 
 export interface PageInfo {

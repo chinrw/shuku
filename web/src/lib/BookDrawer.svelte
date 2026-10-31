@@ -73,7 +73,7 @@
 	<div class="actions">
 		<a class="primary" href="/a/{book.id}/read">{book.progress ? '继续阅读' : '开始阅读'}</a>
 		{#if detail?.id === book.id}
-			<BookmarkButton archive={book.id} bind:members={detail.members} bind:categories />
+			<BookmarkButton archive={book.id} members={detail.members} bind:categories />
 		{/if}
 		{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
 		<a href="/a/{book.id}/read?panel=detail">详情</a>
@@ -83,7 +83,7 @@
 		<TagTable rows={tagRows(book)} />
 	</div>
 	{#if detail?.id === book.id}
-		<CategoryPicker archive={book.id} bind:categories bind:members={detail.members} />
+		<CategoryPicker archive={book.id} bind:categories members={detail.members} />
 		{#if detail.summary}<p class="summary">{detail.summary}</p>{/if}
 	{:else if detailError}
 		<p class="error">分类和简介没有加载出来：{detailError}</p>

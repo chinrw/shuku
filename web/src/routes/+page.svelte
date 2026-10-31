@@ -12,17 +12,18 @@
 	import { afterNavigate, invalidateAll } from '$app/navigation';
 	import BatchBar from '#lib/BatchBar.svelte';
 	import BookDrawer from '#lib/BookDrawer.svelte';
+	import BookmarkButton from '#lib/BookmarkButton.svelte';
+	import { forgetMembers } from '#lib/membership.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
-	import TagTable from '#lib/TagTable.svelte';
 	import { defaultOrder, filterLabel, libraryHref, SORTS, type UrlFilter } from '#lib/libraryUrl.ts';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { onDestroy, untrack } from 'svelte';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
-	import { namespaceClass, tagRows } from '#lib/tags.ts';
+	import { byline, formatDate, namespaceClass, rowTags } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
 
 	let { data } = $props();
@@ -122,6 +123,8 @@
 			if (regroup) invalidateAll();
 			return;
 		}
+		// 批量改过的书，书签和分类勾选以重新加载的数据为准。
+		forgetMembers();
 		invalidateAll();
 		// 只改了分类时不动已经排着的刷新，它可能是上一批改标签留下的。
 		if (tags) {
@@ -345,10 +348,6 @@
 		closeTags();
 		drawer = item;
 	}
-
-	function progressText(item: ArchiveItem) {
-		return item.progress ? `读到 ${item.progress.page + 1}` : item.is_new ? '新' : '';
-	}
 </script>
 
 <header>
@@ -545,35 +544,57 @@
 	</main>
 {:else}
 	<main class="list" onclickcapture={pickCard}>
+		<!-- 电脑上是一张表：封面、标题和作者、几个标签、页数、加入时间、进度、书签。 -->
+		<div class="list-head" aria-hidden="true">
+			<span></span><span>标题</span><span>标签</span><span class="num">页数</span><span
+				>加入时间</span
+			><span>进度</span><span></span>
+		</div>
 		{#each items as item (item.id)}
 			{@const series = seriesOf(item)}
 			{@const href = series ? `/s/${series.id}` : `/a/${item.id}/read`}
+			{@const read = item.progress ? item.progress.page + 1 : 0}
 			<article class="row" data-id={item.id} class:picked={selecting && (selectAll || selected.has(item.id))}>
-				<a class="thumb" {href}>
+				<a class="thumb" {href} aria-label="阅读 {series?.name ?? item.title}">
 					<img src={item.cover_url} alt="" loading="lazy" />
 				</a>
-				<div class="body">
+				<div class="main">
 					{#if series}
 						<a class="title" {href}>{series.name}</a>
 					{:else}
 						<button class="title" onclick={() => openDrawer(item)}>{item.title}</button>
 					{/if}
-					<div class="meta">
-						{#if series}
-							共 {series.volumes} 卷
-						{:else}
-							{item.page_count} 页
-							{#if progressText(item)}· <span class:fresh={item.is_new && !item.progress}>{progressText(item)}</span>{/if}
-						{/if}
-					</div>
-					<!-- 列表里每本都显示加入日期和来源太占地方，这两行只放在弹窗和详情页里。 -->
-					<TagTable
-						rows={tagRows(item).filter(
-							(row) => row.namespace !== 'date_added' && row.namespace !== 'source'
-						)}
-						compact
-					/>
+					{#if byline(item.tags)}<span class="byline">{byline(item.tags)}</span>{/if}
 				</div>
+				<div class="chips">
+					{#each rowTags(item.tags, 4) as tag, index (index)}
+						<span class="chip {namespaceClass(tag.namespace)}">{tag.text}</span>
+					{/each}
+				</div>
+				<span class="pages">{series ? `${series.volumes} 卷` : `${item.page_count} 页`}</span>
+				<span class="added">{formatDate(item.date_added)}</span>
+				<span class="reading">
+					{#if !series}
+						<span class="track"
+							><span
+								style:width="{item.page_count ? (read / item.page_count) * 100 : 0}%"
+							></span></span
+						>
+						{#if read}{read} / {item.page_count}{:else}<span class:fresh={item.is_new}
+								>{item.is_new ? '新' : '没读过'}</span
+							>{/if}
+					{/if}
+				</span>
+				<span class="mark">
+					{#if !series}
+						<BookmarkButton
+							archive={item.id}
+							members={item.categories}
+							bind:categories={categoryList}
+							bar
+						/>
+					{/if}
+				</span>
 			</article>
 		{/each}
 	</main>
@@ -996,18 +1017,166 @@
 	}
 
 	.list {
-		display: grid;
-		gap: 0.5rem;
-		max-width: 72rem;
-		margin: 0 auto;
-		padding: 0.75rem;
+		display: flex;
+		flex-direction: column;
+		margin: 0.75rem;
+		border: 1px solid var(--surface);
+		border-radius: 10px;
+		overflow: hidden;
 	}
 
-	@media (min-width: 1280px) {
-		.list {
-			grid-template-columns: 1fr 1fr;
-			max-width: none;
+	/* 手机上每行三块：封面、标题和标签、书签；页数、日期和进度挤在标签下面一行。 */
+	.row {
+		display: grid;
+		grid-template-columns: 48px minmax(0, 1fr) auto auto 2.5rem;
+		grid-template-areas:
+			'thumb main main main mark'
+			'thumb chips chips chips mark'
+			'thumb pages added reading mark';
+		gap: 0.25rem 0.6rem;
+		align-items: center;
+		min-width: 0;
+		padding: 0.5rem 0.6rem;
+		border-top: 1px solid var(--surface);
+	}
+
+	.list-head {
+		display: none;
+	}
+
+	/* 电脑上是一张表，和设计画布的列表视图一致。 */
+	@media (min-width: 900px) {
+		.list-head,
+		.row {
+			display: grid;
+			grid-template-columns: 56px minmax(0, 3fr) minmax(0, 2fr) 4.5rem 6.5rem 8rem 2.5rem;
+			grid-template-areas: 'thumb main chips pages added reading mark';
+			gap: 0.75rem;
+			align-items: center;
+			padding: 0.5rem 0.75rem;
 		}
+
+		.list-head {
+			background: var(--sunken);
+			color: var(--muted);
+			font-size: 0.75rem;
+		}
+
+		.list-head .num,
+		.pages {
+			text-align: right;
+		}
+	}
+
+	.list > .row:first-of-type {
+		border-top: none;
+	}
+
+	.thumb {
+		grid-area: thumb;
+		align-self: start;
+	}
+
+	.thumb img {
+		display: block;
+		width: 44px;
+		aspect-ratio: 5 / 7;
+		object-fit: cover;
+		object-position: center top;
+		border-radius: 4px;
+		background: var(--chip);
+	}
+
+	.main {
+		grid-area: main;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		min-width: 0;
+	}
+
+	.main .title {
+		overflow: hidden;
+		font-weight: 600;
+		line-height: 1.35;
+		text-align: left;
+		text-decoration: none;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.byline {
+		overflow: hidden;
+		color: var(--artist);
+		font-size: 0.75rem;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.chips {
+		grid-area: chips;
+		display: flex;
+		gap: 0.25rem;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.chips .chip {
+		flex: none;
+		padding: 0 0.35rem;
+		border: 1px solid var(--chip-border);
+		border-radius: 5px;
+		background: var(--chip);
+		font-size: 0.7rem;
+		line-height: 1.2rem;
+	}
+
+	.pages,
+	.added,
+	.reading {
+		color: var(--muted);
+		font-size: 0.75rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	.pages {
+		grid-area: pages;
+	}
+
+	.added {
+		grid-area: added;
+	}
+
+	.reading {
+		grid-area: reading;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+		min-width: 4rem;
+	}
+
+	.track {
+		display: block;
+		height: 4px;
+		border-radius: 2px;
+		background: var(--border);
+	}
+
+	.track span {
+		display: block;
+		height: 100%;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+
+	.mark {
+		grid-area: mark;
+		justify-self: end;
+	}
+
+	.fresh {
+		color: var(--new);
 	}
 
 	.bar-space {
@@ -1017,52 +1186,6 @@
 	.picked {
 		outline: 2px solid var(--accent);
 		outline-offset: -2px;
-	}
-
-	.row {
-		display: flex;
-		gap: 0.75rem;
-		min-width: 0;
-		padding: 0.5rem;
-		border-radius: 9px;
-		background: var(--surface);
-	}
-
-	.thumb {
-		flex: none;
-		width: 84px;
-	}
-
-	.thumb img {
-		width: 100%;
-		aspect-ratio: 5 / 7;
-		object-fit: cover;
-		object-position: center top;
-		border-radius: 5px;
-		background: var(--chip);
-	}
-
-	.body {
-		display: flex;
-		flex-direction: column;
-		gap: 0.3rem;
-		min-width: 0;
-	}
-
-	.body .title {
-		text-align: left;
-		font-weight: 600;
-		line-height: 1.3;
-		text-decoration: none;
-	}
-
-	.meta {
-		font-size: 0.8rem;
-		color: var(--muted);
-	}
-
-	.fresh {
-		color: var(--new);
 	}
 
 	.footer {

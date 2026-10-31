@@ -177,7 +177,7 @@ async fn search(
         query.collapse_series = collapse_series;
         let result = snapshot.index.search(&query).map_err(Error::bad_request)?;
         // 结果和列表元数据来自同一个快照，结果里的每本都查得到。
-        let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&item)).collect();
+        let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&snapshot, &item)).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": degraded, "items": items})))
     }).await
 }
@@ -257,7 +257,7 @@ async fn recent(
         let items: Vec<_> = snapshot
             .recently_read(limit)
             .iter()
-            .map(list_item)
+            .map(|item| list_item(&snapshot, item))
             .collect();
         Ok(Json(json!({ "items": items })))
     })
@@ -473,9 +473,20 @@ pub(crate) async fn categories(State(app): State<App>) -> Result<Json<Value>> {
     .await
 }
 
-/// 搜索结果和最近阅读里的一项。
-fn list_item(item: &crate::snapshot::Item<'_>) -> Value {
+/// 搜索结果和最近阅读里的一项。`categories` 是它所在的静态分类，列表行上的书签按钮要用。
+/// 分类只有几个，成员按 ID 升序存放，逐个二分查找。
+fn list_item(snapshot: &crate::snapshot::Snapshot, item: &crate::snapshot::Item<'_>) -> Value {
+    let id = item.archive.id;
+    let categories: Vec<i64> = snapshot
+        .categories()
+        .iter()
+        .filter(|category| {
+            category.search.is_empty() && category.archives.binary_search(&id).is_ok()
+        })
+        .map(|category| category.id)
+        .collect();
     json!({
+        "categories": categories,
         "id": item.archive.id, "title": item.archive.title,
         "page_count": item.archive.page_count, "is_new": item.archive.is_new,
         "progress": progress(item.progress), "tags": tag_groups(item.tags()),
@@ -504,7 +515,7 @@ async fn series(
             .volumes
             .iter()
             .filter_map(|id| snapshot.item(*id))
-            .map(|item| list_item(&item))
+            .map(|item| list_item(&snapshot, &item))
             .collect();
         Ok(Json(
             json!({"id": series.id, "name": series.name, "items": items}),
@@ -535,7 +546,7 @@ async fn similar(
             .similar(id, limit)
             .iter()
             .filter_map(|id| snapshot.item(*id))
-            .map(|item| list_item(&item))
+            .map(|item| list_item(&snapshot, &item))
             .collect();
         Ok(Json(json!({ "items": items })))
     })

@@ -7,15 +7,16 @@
 		type Category
 	} from '#lib/api.ts';
 	import Icon from '#lib/Icon.svelte';
-	import { pending, pendingKey } from '#lib/membership.svelte.ts';
+	import { membersOf, pending, pendingKey, setMember } from '#lib/membership.svelte.ts';
 
 	let {
 		archive,
-		members = $bindable(),
+		members,
 		categories = $bindable(),
 		bar = false
 	}: {
 		archive: number;
+		/** 页面加载时这本书所在的静态分类，改过以后以 membership.svelte.ts 里的为准。 */
 		members: number[];
 		categories: Category[];
 		/** 阅读器工具栏上不要边框，和旁边的图标按钮一样。 */
@@ -23,22 +24,20 @@
 	} = $props();
 
 	let bookmark = $derived(categories.find((category) => category.bookmark));
-	let marked = $derived(bookmark !== undefined && members.includes(bookmark.id));
+	let marked = $derived(
+		bookmark !== undefined && membersOf(archive, members).includes(bookmark.id)
+	);
 	let error = $state('');
-
-	function setMember(id: number, member: boolean) {
-		const others = members.filter((other) => other !== id);
-		members = member ? [...others, id] : others;
-	}
 
 	async function toggle() {
 		if (!bookmark) return;
 		const target = archive;
+		const loaded = members;
 		const id = bookmark.id;
 		const key = pendingKey(target, id);
 		if (pending.has(key)) return;
-		const member = !members.includes(id);
-		setMember(id, member);
+		const member = !membersOf(target, loaded).includes(id);
+		setMember(target, id, member);
 		pending.add(key);
 		error = '';
 		try {
@@ -49,11 +48,9 @@
 				return categories;
 			});
 		} catch (cause) {
-			// 请求返回前换了书时，结果不再写进新书的状态。
-			if (archive === target) {
-				setMember(id, !member);
-				error = cause instanceof ApiError ? cause.message : '网络错误';
-			}
+			// 回滚按书记，换了书或者按钮已经销毁也照样撤销；提示只给还显示着这本书的按钮。
+			setMember(target, id, !member);
+			if (archive === target) error = cause instanceof ApiError ? cause.message : '网络错误';
 		} finally {
 			pending.delete(key);
 		}

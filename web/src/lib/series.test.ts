@@ -13,6 +13,7 @@ function volume(id: number, progress: [page: number, time: number] | null): Arch
 		date_added: 0,
 		source_url: null,
 		tags: [],
+		categories: [],
 		series: null
 	};
 }

@@ -7,13 +7,20 @@
 		setCategoryMember,
 		type Category
 	} from '#lib/api.ts';
-	import { pending, pendingKey } from '#lib/membership.svelte.ts';
+	import { membersOf, pending, pendingKey, setMember } from '#lib/membership.svelte.ts';
 
 	let {
 		archive,
 		categories = $bindable(),
-		members = $bindable()
-	}: { archive: number; categories: Category[]; members: number[] } = $props();
+		members
+	}: {
+		archive: number;
+		categories: Category[];
+		/** 页面加载时这本书所在的静态分类，改过以后以 membership.svelte.ts 里的为准。 */
+		members: number[];
+	} = $props();
+
+	let current = $derived(membersOf(archive, members));
 
 	let open = $state(false);
 	let name = $state('');
@@ -21,9 +28,9 @@
 	let error = $state('');
 	let choices = $derived(categories.filter((category) => !category.dynamic));
 
-	// 请求返回前换了书（详情页的相关推荐会复用这一页）时，结果只落到发起时的那本书上，
-	// 不再改界面，免得把旧书的结果写进新书的勾选状态。`members` 和 `categories` 绑定在
-	// 父页面上，阅读器关掉菜单销毁这个组件后，返回的结果照样写回父页面。
+	// 请求返回前换了书（详情页的相关推荐会复用这一页）时，成员照样按发起时的那本书记，
+	// 只是提示和刷新不再落到新书上。`categories` 绑定在父页面上，阅读器关掉菜单销毁这个
+	// 组件后，返回的本数照样写回父页面。
 	const stale = (target: number) => archive !== target;
 
 	function message(cause: unknown) {
@@ -35,18 +42,14 @@
 		categories = await listCategories(fetch).catch(() => categories);
 	}
 
-	function setMember(id: number, member: boolean) {
-		const others = members.filter((other) => other !== id);
-		members = member ? [...others, id] : others;
-	}
-
 	async function toggle(category: Category) {
 		// 同一个分类同时只有一个请求，否则先发的 DELETE 和后发的 PUT 可能倒序提交。
 		const target = archive;
+		const loaded = members;
 		const key = pendingKey(target, category.id);
 		if (pending.has(key)) return;
-		const member = !members.includes(category.id);
-		setMember(category.id, member);
+		const member = !membersOf(target, loaded).includes(category.id);
+		setMember(target, category.id, member);
 		pending.add(key);
 		error = '';
 		try {
@@ -54,10 +57,8 @@
 			if (!stale(target)) await reload();
 		} catch (cause) {
 			// 只撤销这一项，同时进行的其他勾选可能已经成功。
-			if (!stale(target)) {
-				setMember(category.id, !member);
-				error = `没有保存：${message(cause)}`;
-			}
+			setMember(target, category.id, !member);
+			if (!stale(target)) error = `没有保存：${message(cause)}`;
 		} finally {
 			pending.delete(key);
 		}
@@ -71,7 +72,7 @@
 		const existing = choices.find((category) => category.name === trimmed);
 		if (existing) {
 			name = '';
-			if (!members.includes(existing.id)) await toggle(existing);
+			if (!current.includes(existing.id)) await toggle(existing);
 			return;
 		}
 		const target = archive;
@@ -80,8 +81,8 @@
 		try {
 			const { id } = await createCategory(trimmed);
 			await setCategoryMember(id, target, true);
+			setMember(target, id, true);
 			if (stale(target)) return;
-			setMember(id, true);
 			// 先放进本地列表，取列表失败时新分类也在，再输入同名不会重复新建。
 			// 等待期间别的勾选触发的刷新可能已经取到了它，按 ID 去重。
 			if (!categories.some((category) => category.id === id)) {
@@ -109,7 +110,7 @@
 
 <div class="picker">
 	<button class="toggle" aria-expanded={open} onclick={() => (open = !open)}>
-		加入分类{#if members.length}（{members.length}）{/if}
+		加入分类{#if current.length}（{current.length}）{/if}
 	</button>
 	{#if open}
 		<div class="choices" role="group" aria-label="加入分类">
@@ -117,7 +118,7 @@
 				<label>
 					<input
 						type="checkbox"
-						checked={members.includes(category.id)}
+						checked={current.includes(category.id)}
 						disabled={pending.has(pendingKey(archive, category.id))}
 						onchange={() => toggle(category)}
 					/>
