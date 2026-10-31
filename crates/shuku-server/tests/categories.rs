@@ -238,6 +238,23 @@ async fn favorites_is_the_bookmark_and_lrr_duplicates_are_flagged() {
     };
     assert_eq!(flag("Favorites"), (false, false));
     assert_eq!(flag("favorites"), (true, false));
+
+    // LRR 默认的书签分类叫“🔖 Favorites”，前面的 emoji 不影响识别。
+    let fixture = Fixture::new();
+    let router = fixture.app().await.router();
+    let (code, _, _) = request(
+        &router,
+        "POST",
+        "/api/categories",
+        Some(value!({"name": "🔖 Favorites"})),
+        &[],
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(
+        json(&router, "/api/categories").await["categories"][0]["bookmark"],
+        true
+    );
     assert_eq!(flag("收藏"), (false, false));
     // 同名的只有编号最小的静态分类被认出，书库页隐藏的和控制台列出的是同一个。
     let duplicates: Vec<_> = flags

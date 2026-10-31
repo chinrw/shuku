@@ -468,8 +468,12 @@ fn first_static(
 
 /// 书签按钮对应的分类。
 pub(crate) fn bookmark_category(snapshot: &crate::snapshot::Snapshot) -> Option<i64> {
+    // LRR 的书签分类名前面常带一个书签 emoji（“🔖 Favorites”），比较前去掉两端的符号。
     first_static(snapshot, |name| {
-        BOOKMARK_NAMES.contains(&name.trim().to_lowercase().as_str())
+        let name = name
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
+        BOOKMARK_NAMES.contains(&name.as_str())
     })
 }
 
