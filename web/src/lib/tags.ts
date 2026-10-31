@@ -89,3 +89,23 @@ export function namespaceClass(namespace: string): string {
 			return '';
 	}
 }
+
+/** 编辑框里的标签：和 LRR 一样写成 `命名空间:值`，用逗号分隔，按存储层给出的顺序。 */
+export function tagText(groups: TagGroup[]): string {
+	return groups
+		.flatMap((group) =>
+			group.values.map((value) => (group.namespace ? `${group.namespace}:${value}` : value))
+		)
+		.join(', ');
+}
+
+/**
+ * 把编辑框里的文字拆成标签，只按英文逗号分隔，和 LRR 一样，空项去掉。全角逗号和换行
+ * 都不算分隔：已有的标签值里可能有全角逗号；换行由服务端拒绝，不会被悄悄拆成两个标签。
+ */
+export function parseTagText(text: string): string[] {
+	return text
+		.split(',')
+		.map((tag) => tag.trim())
+		.filter((tag) => tag !== '');
+}

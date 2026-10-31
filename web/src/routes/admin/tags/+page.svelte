@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { namespaces as loadNamespaces, type NamespaceCount } from '#lib/admin.ts';
+	import { namespaces as loadNamespaces, renameTag, type NamespaceCount } from '#lib/admin.ts';
 	import { suggestTags, type TagCount } from '#lib/api.ts';
 	import { count, percent } from '#lib/format.ts';
 	import { tagTerm } from '#lib/query.ts';
@@ -11,19 +11,60 @@
 	let selected = $state<string | null>(null);
 	let top = $state<TagCount[]>([]);
 	let error = $state<string | null>(null);
+	// 改名后递增，让最常用标签的列表重新取。
+	let version = $state(0);
+
+	let from = $state('');
+	let to = $state('');
+	let renaming = $state(false);
+	let renameNote = $state('');
+
+	function message(cause: unknown) {
+		return cause instanceof Error ? cause.message : String(cause);
+	}
+
+	async function load() {
+		try {
+			const loaded = await loadNamespaces();
+			list = loaded;
+			if (!loaded.some((item) => item.namespace === selected)) {
+				selected = loaded.find((item) => item.namespace !== '')?.namespace ?? null;
+			}
+		} catch (cause) {
+			error = message(cause);
+		}
+	}
 
 	$effect(() => {
-		loadNamespaces()
-			.then((loaded) => {
-				list = loaded;
-				selected = loaded.find((item) => item.namespace !== '')?.namespace ?? null;
-			})
-			.catch((cause) => (error = cause instanceof Error ? cause.message : String(cause)));
+		load();
 	});
+
+	async function rename(event: SubmitEvent) {
+		event.preventDefault();
+		const source = from.trim();
+		const target = to.trim();
+		if (!source || !target || renaming) return;
+		if (!confirm(`把标签“${source}”改成“${target}”？目标已经存在时两者合并，不能撤销。`)) return;
+		renaming = true;
+		renameNote = '';
+		try {
+			const { archives } = await renameTag(source, target);
+			renameNote = `已改名，涉及 ${count(archives)} 本。`;
+			from = '';
+			to = '';
+			await load();
+			version += 1;
+		} catch (cause) {
+			renameNote = `没有改名：${message(cause)}`;
+		} finally {
+			renaming = false;
+		}
+	}
 
 	// 用搜索框补全的接口按“命名空间:”前缀取最常用的标签，切换时取消上一次请求。
 	$effect(() => {
 		const namespace = selected;
+		void version;
 		top = [];
 		if (!namespace) return;
 		const abort = new AbortController();
@@ -49,12 +90,25 @@
 	<h1>标签</h1>
 	{#if list}
 		<span class="adm-sub">
-			{count(list.reduce((sum, item) => sum + item.tags, 0))} 个标签 · {list.length} 个命名空间 · 改名和合并在 M2
+			{count(list.reduce((sum, item) => sum + item.tags, 0))} 个标签 · {list.length} 个命名空间
 		</span>
 	{/if}
 </div>
 
 {#if error}<p class="error">加载失败：{error}</p>{/if}
+
+<form class="adm-card rename" onsubmit={rename}>
+	<div class="adm-row">
+		<h2>改名或合并</h2>
+		<span class="adm-note">写成 命名空间:值。新名字已经有了时两个标签合并；只改大小写也可以。</span>
+	</div>
+	<div class="fields">
+		<input bind:value={from} placeholder="原标签，如 artist:alfa" aria-label="原标签" spellcheck="false" />
+		<input bind:value={to} placeholder="新标签，如 artist:alpha" aria-label="新标签" spellcheck="false" />
+		<button class="adm-button primary" disabled={renaming || !from.trim() || !to.trim()}>改名</button>
+	</div>
+	{#if renameNote}<p class="adm-note" role="status">{renameNote}</p>{/if}
+</form>
 
 {#if list}
 	<div class="layout">
@@ -104,6 +158,28 @@
 {/if}
 
 <style>
+	.rename {
+		display: grid;
+		gap: 0.6rem;
+		margin-bottom: 1rem;
+	}
+
+	.fields {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+		gap: 0.5rem;
+	}
+
+	.fields input {
+		min-height: 2.5rem;
+		padding: 0 0.7rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: var(--sunken);
+		color: inherit;
+		font: inherit;
+	}
+
 	.layout {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));

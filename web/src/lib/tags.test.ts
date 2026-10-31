@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { namespaceClass, tagLine, tagRows } from './tags';
+import { namespaceClass, parseTagText, tagLine, tagRows, tagText } from './tags';
 
 const item = {
 	date_added: 1_700_000_000,
@@ -78,5 +78,27 @@ describe('namespaceClass', () => {
 		expect(namespaceClass('circle')).toBe('ns-group');
 		expect(namespaceClass('series')).toBe('ns-parody');
 		expect(namespaceClass('female')).toBe('');
+	});
+});
+
+describe('tag text', () => {
+	it('writes namespaced tags the way LRR does', () => {
+		expect(
+			tagText([
+				{ namespace: '', values: ['独立标签'] },
+				{ namespace: 'artist', values: ['a', 'b'] }
+			])
+		).toBe('独立标签, artist:a, artist:b');
+	});
+
+	it('splits only on commas and drops empty items', () => {
+		expect(parseTagText(' artist:a ,\nlanguage:中文,, title:你好，世界 ')).toEqual([
+			'artist:a',
+			'language:中文',
+			'title:你好，世界'
+		]);
+		expect(parseTagText('  ')).toEqual([]);
+		// 换行不是分隔符，原样交给服务端，由它拒绝。
+		expect(parseTagText('artist:a\nb, c')).toEqual(['artist:a\nb', 'c']);
 	});
 });

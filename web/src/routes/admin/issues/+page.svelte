@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { duplicates, issues, type DuplicateFile, type Issues } from '#lib/admin.ts';
+	import {
+		deleteMissing,
+		duplicates,
+		issues,
+		type DuplicateFile,
+		type Issues
+	} from '#lib/admin.ts';
 	import { bytes, clock, count } from '#lib/format.ts';
 
 	type Tab = 'failed' | 'unreadable' | 'skipped' | 'missing' | 'duplicates';
@@ -9,6 +15,26 @@
 	let tab = $state<Tab>('failed');
 	let error = $state<string | null>(null);
 	let loading = $state(false);
+
+	let deleting = $state(false);
+	let deleteNote = $state('');
+
+	async function remove(ids: number[]) {
+		const what = ids.length === 1 ? '这条记录' : `这 ${count(ids.length)} 条记录`;
+		if (deleting || !confirm(`删除${what}？阅读进度和分类也一起删除，不能恢复。`)) return;
+		deleting = true;
+		deleteNote = '';
+		try {
+			const result = await deleteMissing(ids);
+			const kept = result.present.length;
+			deleteNote = `删除了 ${count(result.deleted.length)} 条${kept ? `，${count(kept)} 条的文件又出现了，没有删` : ''}。`;
+			data = await issues();
+		} catch (cause) {
+			deleteNote = `没有删除：${cause instanceof Error ? cause.message : String(cause)}`;
+		} finally {
+			deleting = false;
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -37,7 +63,8 @@
 		failed: '最近一次扫描读不了的文件和原因。修好文件后在任务页点“立即扫描”重试。',
 		unreadable: '没有读权限的子目录。里面已入库的记录不当作丢失。',
 		skipped: '7z、RAR、PDF 等 M1 还不读的格式，以后支持后再扫描。',
-		missing: '库里有记录、内容目录里已经找不到的文件。M1 只列出，删除记录放到 M2。',
+		missing:
+			'库里有记录、内容目录里已经找不到的文件。改名或移动的文件扫描时会自动认回；确实删掉了的，可以在这里删除记录。',
 		duplicates: '完整指纹相同的文件，每组列出全部路径。只统计已经算好指纹的书。'
 	};
 
@@ -80,6 +107,21 @@
 	<p class="adm-note">{hints[tab]}</p>
 	{#if error}<p class="error">加载失败：{error}</p>{/if}
 
+	{#if data && tab === 'missing'}
+		{#if data.missing.items.length > 0 && !data.scanning}
+			<div class="adm-row bulk">
+				<button
+					class="adm-button danger"
+					disabled={deleting}
+					onclick={() => remove(data!.missing.items.map((item) => item.id))}
+				>
+					删除列出的 {count(data.missing.items.length)} 条记录
+				</button>
+			</div>
+		{/if}
+		{#if deleteNote}<p class="adm-note" role="status">{deleteNote}</p>{/if}
+	{/if}
+
 	{#if data}
 		<div class="adm-scroll" role="tabpanel">
 			{#if tab === 'failed' || tab === 'unreadable'}
@@ -107,18 +149,26 @@
 				{#if shown(data.skipped)}<p class="adm-empty">{shown(data.skipped)}</p>{/if}
 			{:else if tab === 'missing'}
 				<table class="adm-table">
-					<thead><tr><th>标题</th><th>原路径</th></tr></thead>
+					<thead><tr><th>标题</th><th>原路径</th><th></th></tr></thead>
 					<tbody>
 						{#each data.missing.items as item (item.id)}
 							<tr>
 								<td><a href="/a/{item.id}">{item.title ?? `#${item.id}`}</a></td>
 								<td class="adm-mono">{item.path}</td>
+								<td class="num">
+									<button
+										class="adm-button danger small"
+										disabled={deleting || data.scanning}
+										onclick={() => remove([item.id])}>删除</button
+									>
+								</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 				{#if data.missing.items.length === 0}<p class="adm-empty">没有丢失的文件。</p>{/if}
 				{#if shown(data.missing)}<p class="adm-empty">{shown(data.missing)}</p>{/if}
+
 			{:else if groups}
 				<table class="adm-table">
 					<thead><tr><th>组</th><th>路径</th><th class="num">大小</th></tr></thead>
@@ -146,6 +196,15 @@
 </div>
 
 <style>
+	.small {
+		min-height: 1.9rem;
+		padding: 0 0.7rem;
+	}
+
+	.bulk {
+		justify-content: flex-start;
+	}
+
 	.refresh {
 		margin-left: auto;
 		min-height: 2.1rem;

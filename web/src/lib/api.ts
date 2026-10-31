@@ -33,6 +33,10 @@ export interface TagGroup {
 export interface ArchiveDetail extends ArchiveItem {
 	summary: string;
 	file_size: number;
+	/** 相对内容目录的路径。 */
+	path: string;
+	/** 文件已经不在内容目录里，记录可以删除。 */
+	missing: boolean;
 	/** 这本书所在的静态分类的 ID。 */
 	categories: number[];
 }
@@ -202,4 +206,26 @@ export function putProgress(
 		body: JSON.stringify(progress),
 		keepalive: options.keepalive
 	});
+}
+
+/** 改标题、简介、来源或标签，省略的字段不变。`source_url` 为空字符串时清除来源。 */
+export interface ArchiveEdit {
+	title?: string;
+	summary?: string;
+	source_url?: string;
+	/** 整体替换，写法是 `命名空间:值`。 */
+	tags?: string[];
+}
+
+export function editArchive(id: number, edit: ArchiveEdit): Promise<ArchiveDetail> {
+	return request(fetch, `/api/archives/${id}`, {
+		method: 'PATCH',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(edit)
+	});
+}
+
+/** 删除文件已经不在的记录。文件还在时服务端返回 409。 */
+export async function deleteArchive(id: number) {
+	await send(fetch, `/api/archives/${id}`, { method: 'DELETE' });
 }

@@ -129,3 +129,20 @@ export const startHash = () => call<{ started: boolean }>('/api/admin/hash', { m
 export const refreshSnapshot = () => call<unknown>('/api/admin/refresh', { method: 'POST' });
 export const clearCache = () =>
 	call<{ removed_files: number; removed_bytes: number }>('/api/admin/cache', { method: 'DELETE' });
+/** 删除文件已经不在的记录，一次最多 1000 条。文件还在的和已经没有的分别列出，不删。 */
+export const deleteMissing = (ids: number[]) =>
+	call<{ deleted: number[]; present: number[]; not_found: number[] }>(
+		'/api/admin/missing/delete',
+		{
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ ids })
+		}
+	);
+/** 标签改名，目标已经存在时合并。返回原来用到这个标签的本数。 */
+export const renameTag = (from: string, to: string) =>
+	call<{ archives: number }>('/api/admin/tags/rename', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ from, to })
+	});

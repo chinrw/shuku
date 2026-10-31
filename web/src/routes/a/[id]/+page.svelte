@@ -4,8 +4,10 @@
 </script>
 
 <script lang="ts">
-	import { afterNavigate } from '$app/navigation';
-	import { downloadUrl } from '#lib/api.ts';
+	import { afterNavigate, goto, invalidateAll } from '$app/navigation';
+	import { onDestroy } from 'svelte';
+	import { ApiError, deleteArchive, downloadUrl } from '#lib/api.ts';
+	import ArchiveEditor from '#lib/ArchiveEditor.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { relatedQueries } from '#lib/related.ts';
@@ -23,7 +25,38 @@
 		categoryList.filter((category) => members.includes(category.id))
 	);
 
-	afterNavigate(({ from, type }) => {
+	// 每次点开编辑是一个新对象，换到另一本书时编辑框自动收起。保存返回前可能已经
+	// 换了书或重新点开过编辑，只收起发起保存的那一次。
+	let editing = $state.raw<{ id: number } | null>(null);
+	let deleting = $state(false);
+	let deleteError = $state('');
+	let mounted = true;
+	onDestroy(() => (mounted = false));
+
+	async function saved(session: { id: number }) {
+		await invalidateAll();
+		if (editing === session) editing = null;
+	}
+
+	async function remove() {
+		if (deleting || !confirm(`删除《${book.title}》的记录？阅读进度和分类也一起删除，不能恢复。`)) return;
+		const target = book.id;
+		deleting = true;
+		deleteError = '';
+		try {
+			await deleteArchive(target);
+			// 删除返回前已经去了别的页面时，不把人拽回书库。
+			if (mounted && book.id === target) await goto('/', { replaceState: true });
+		} catch (cause) {
+			if (book.id === target) deleteError = cause instanceof ApiError ? cause.message : '网络错误';
+		} finally {
+			deleting = false;
+		}
+	}
+
+	afterNavigate(({ from, to, type }) => {
+		// 换了书就结束这次编辑；不清掉的话，回到原书时编辑框会带着旧的保存回调重新出现。
+		if (from?.params?.id !== to?.params?.id) editing = null;
 		if (from?.route.id === '/') libraryBehind = true;
 		else if (!(from?.route.id === '/a/[id]/read' && type === 'popstate')) libraryBehind = false;
 	});
@@ -74,19 +107,38 @@
 				<a class="primary" href="/a/{book.id}/read?page=0">开始阅读</a>
 			{/if}
 			<a href={downloadUrl(book.id)} download>下载</a>
+			{#if editing?.id !== book.id}
+				<button onclick={() => (editing = { id: book.id })}>编辑</button>
+			{/if}
 		</div>
 	</section>
+
+	{#if book.missing}
+		<section class="missing" role="status">
+			<p>文件已经不在内容目录里了：<span class="path">{book.path}</span></p>
+			<p>文件改名或移动后，下次扫描会认出它并保留这条记录。确实删掉了的话，可以删除记录。</p>
+			<button disabled={deleting} onclick={remove}>删除这条记录</button>
+			{#if deleteError}<p class="error" role="alert">没有删除：{deleteError}</p>{/if}
+		</section>
+	{/if}
 
 	<div class="categories">
 		<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
 	</div>
 
-	<section class="tags">
-		<TagTable rows={tagRows(book)} />
-	</section>
+	{#if editing?.id === book.id}
+		{@const session = editing}
+		<section class="tags">
+			<ArchiveEditor {book} onsaved={() => saved(session)} oncancel={() => (editing = null)} />
+		</section>
+	{:else}
+		<section class="tags table">
+			<TagTable rows={tagRows(book)} />
+		</section>
 
-	{#if book.summary}
-		<section class="summary"><p>{book.summary}</p></section>
+		{#if book.summary}
+			<section class="summary"><p>{book.summary}</p></section>
+		{/if}
 	{/if}
 
 	{#if data.pages.length}
@@ -125,6 +177,7 @@
 		grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
 		grid-template-areas:
 			'cover head'
+			'missing missing'
 			'categories categories'
 			'tags tags'
 			'summary summary'
@@ -139,9 +192,10 @@
 	@media (min-width: 720px) {
 		main {
 			grid-template-columns: 280px minmax(0, 1fr);
-			grid-template-rows: auto auto auto 1fr auto auto;
+			grid-template-rows: auto auto auto auto 1fr auto auto;
 			grid-template-areas:
 				'cover head'
+				'cover missing'
 				'cover categories'
 				'cover tags'
 				'cover summary'
@@ -193,12 +247,48 @@
 		margin-top: 0.9rem;
 	}
 
-	.actions a {
+	.actions a,
+	.actions button,
+	.missing button {
 		padding: 0.5rem 0.9rem;
 		border: 1px solid var(--border);
 		border-radius: 6px;
 		background: var(--surface);
+		color: inherit;
+		font: inherit;
 		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.missing {
+		grid-area: missing;
+		display: grid;
+		justify-items: start;
+		gap: 0.5rem;
+		padding: 0.75rem;
+		border: 1px solid var(--danger);
+		border-radius: 9px;
+		font-size: 0.85rem;
+		line-height: 1.6;
+	}
+
+	.missing p {
+		margin: 0;
+	}
+
+	.missing .path {
+		font-family: ui-monospace, monospace;
+		overflow-wrap: anywhere;
+	}
+
+	.missing button {
+		border-color: var(--danger);
+		color: var(--danger);
+	}
+
+	.missing button:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 
 	.actions a.primary {
@@ -214,6 +304,10 @@
 
 	.tags {
 		grid-area: tags;
+		min-width: 0;
+	}
+
+	.tags.table {
 		padding: 0.75rem;
 		border-radius: 9px;
 		background: var(--surface);
