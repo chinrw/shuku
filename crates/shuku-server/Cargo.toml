@@ -26,6 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shuku-archive = { path = "../shuku-archive" }
 shuku-index = { path = "../shuku-index" }
+shuku-metadata = { path = "../shuku-metadata" }
 shuku-store = { path = "../shuku-store" }
 tempfile = "3"
 thiserror.workspace = true

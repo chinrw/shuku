@@ -10,6 +10,7 @@
 	import ArchiveEditor from '#lib/ArchiveEditor.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
+	import MetadataFetcher from '#lib/MetadataFetcher.svelte';
 	import PageGrid from '#lib/PageGrid.svelte';
 	import { relatedQueries } from '#lib/related.ts';
 	import RelatedRow from '#lib/RelatedRow.svelte';
@@ -125,6 +126,8 @@
 
 	<div class="categories">
 		<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
+		<!-- 换书时重建，上一本填的画廊地址不会带到这一本。 -->
+		{#key book.id}<MetadataFetcher archive={book.id} />{/key}
 	</div>
 
 	{#if editing?.id === book.id}

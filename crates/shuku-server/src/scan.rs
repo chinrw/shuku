@@ -28,6 +28,8 @@ struct Prepared {
     newest: i64,
     quick_hash: String,
     pages: Vec<Page>,
+    /// 新文件里的 ComicInfo.xml，打开了它的自动运行时才读。
+    comicinfo: Option<shuku_metadata::Metadata>,
 }
 
 impl App {
@@ -51,6 +53,7 @@ impl App {
     fn scan_locked(&self) -> Result<ScanReport> {
         let content = &self.0.config.content_dir;
         let entries = self.reader()?.scan_entries()?;
+        let plugins = self.scan_plugins()?;
         // 不跟随符号链接，避免循环和越出内容目录。
         let mut files = Vec::new();
         // 直接包含图片文件的子目录，每个当成一本书。
@@ -143,7 +146,7 @@ impl App {
                     let relative = relative.to_str().ok_or_else(|| {
                         Error::File(format!("路径不是 UTF-8：{}", path.display()))
                     })?;
-                    prepare(path, relative, existing.get(relative))
+                    prepare(path, relative, existing.get(relative), &plugins)
                 })
                 .collect();
             let mut saves = Vec::new();
@@ -173,7 +176,8 @@ impl App {
                 continue;
             }
             // 一批一个事务。已有记录的元数据在同一个事务里读出，迁移工具同时改了标题也不会被覆盖。
-            self.write(|writer| {
+            let queued = self.write(|writer| {
+                let mut queued = false;
                 for prepared in saves {
                     let existing_id = existing.get(&prepared.path).map(|entry| entry.id);
                     let moved_id = if existing_id.is_none() {
@@ -203,8 +207,23 @@ impl App {
                     let path = metadata.path.clone();
                     let saved = writer.save_archive(id, &metadata, &prepared.pages)?;
                     // 迁移工具先于扫描运行时，LRR 的元数据按路径暂存着，在同一个事务里套用。
-                    if existing_id.is_none() {
-                        writer.apply_lrr_pending(saved, &path)?;
+                    // 只有真正新加入、不是从 LRR 迁移来的书才跑元数据功能，和 LRR 只对新上传的书
+                    // 自动运行插件一样；迁移来的元数据已经是 LRR 里跑过插件的结果。
+                    if existing_id.is_none()
+                        && !writer.apply_lrr_pending(saved, &path)?
+                        && moved_id.is_none()
+                    {
+                        // 新书的标题就是去掉扩展名的文件名（文件夹是整个文件夹名），
+                        // 文件名解析用它，和 LRR 用文件名一样。
+                        if let Some(edit) =
+                            plugins.edit_for_new(&path, &metadata.title, prepared.comicinfo)
+                        {
+                            edit.apply(writer, saved)?;
+                        }
+                        if plugins.queues_ehentai() {
+                            writer.queue_metadata(saved)?;
+                            queued = true;
+                        }
                     }
                     if moved_id.is_some() {
                         report.moved += 1;
@@ -214,9 +233,13 @@ impl App {
                         report.added += 1;
                     }
                 }
-                Ok(())
+                Ok(queued)
             })?;
             self.listing_changed();
+            // 每批提交后就叫醒队列，后面的批次失败也不会让已经入队的书一直等着。
+            if queued {
+                self.metadata_queued();
+            }
             self.tasks(|tasks| tasks.scan.progress(batch.len(), &report));
             #[cfg(test)]
             if let Some(hook) = self
@@ -303,7 +326,12 @@ fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
     })
 }
 
-fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<Option<Prepared>> {
+fn prepare(
+    path: &Path,
+    relative: &str,
+    existing: Option<&ScanEntry>,
+    plugins: &crate::metadata::ScanPlugins,
+) -> Result<Option<Prepared>> {
     let folder = path.is_dir();
     let before = shuku_archive::identity(path)?;
     if existing
@@ -340,6 +368,11 @@ fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<
             height: page.height,
         })
         .collect();
+    // 已入库的文件变了不重读：元数据功能只对新书自动运行。
+    let comicinfo = existing
+        .is_none()
+        .then(|| plugins.comicinfo(path))
+        .flatten();
     // 下载工具可能正往内容目录里写文件。读的过程中文件变了，就不记录这次的结果，下次扫描再处理。
     if shuku_archive::identity(path)? != before {
         return Err(Error::File(format!(
@@ -355,6 +388,7 @@ fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<
         newest: unix_seconds(before.newest)?,
         quick_hash,
         pages,
+        comicinfo,
     }))
 }
 

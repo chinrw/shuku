@@ -255,6 +255,55 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 { "items": [ArchiveItem] }
 ```
 
+## 元数据功能
+
+内置的文件名解析、ComicInfo.xml、E-Hentai/ExHentai 查找和标签中文翻译，代替 LRR 的同名插件。和 LRR 的插件一样只加标签、不删已有的标签；标题按设置决定换不换；归档还没有来源地址时才记下找到的来源。写入后和编辑接口一样安排一次延迟的快照刷新。这几个接口有和分类一样的同源检查。
+
+扫描新加入的书（不是从 LRR 迁移来的，也不是移动了位置的旧书）时，打开了自动运行的文件名和 ComicInfo 在扫描的事务里直接写入；打开了 E-Hentai 自动运行时，这本书放进后台队列。队列存在数据库里，服务重启后接着处理，每两次 E-Hentai 查找之间至少隔 4 秒，页面提示请求太快时隔 40 秒。只有 HTTP 服务处理队列，`shuku scan` 不联网。
+
+`POST /api/archives/{id}/metadata`
+
+对一本书运行一个元数据功能并写入。请求体 `{"provider": "filename"}`，`provider` 是 `filename`、`comicinfo` 或 `ehentai`；`ehentai` 还可以带 `"url": "https://exhentai.org/g/123/abcdef/"`，直接用这个画廊、不搜索。返回写入的内容，`title` 在不替换标题时为 `null`，`source_url` 在已有来源时为 `null`：
+
+```json
+{ "title": "标题", "tags": [{ "namespace": "artist", "value": "某作者" }], "source_url": "https://exhentai.org/g/123/abcdef/" }
+```
+
+E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来源地址、封面原图的 SHA-1（以图搜图）、标题里 `[数字]` 形式的画廊 ID、标题文字（有 ASCII 的 `artist` 标签时一并加入）。错误：文件名和正则匹配不上、归档里没有 ComicInfo.xml、E-Hentai 上没找到都返回 422；画廊地址无效 400；IP 被封 503；E-Hentai 返回空页面（cookie 没设或过期）或请求失败 502。
+
+`GET /api/admin/settings/metadata`、`PUT /api/admin/settings/metadata`
+
+读写设置。`PUT` 的请求体是补丁，只写要改的字段，对象逐层合并；不认识的字段返回 400，正则编译不过也返回 400。两者都返回合并后的完整设置：
+
+```json
+{
+  "replace_title": true,
+  "filename": { "auto": false, "trailing_tags": false, "keep_all_captures": false, "regex": "" },
+  "comicinfo": { "auto": false },
+  "ehentai": { "auto": false, "exhentai": false, "language": "", "use_thumbnail": true,
+               "search_gid": false, "japanese_title": false, "extra_tags": false, "expunged": false,
+               "cookies_set": { "ipb_member_id": false, "ipb_pass_hash": false, "star": false, "igneous": false } },
+  "translation": { "enabled": false }
+}
+```
+
+登录 cookie 只写不读：读到的 `cookies_set` 只说每个有没有设置；写时用 `{"ehentai": {"cookies": {"ipb_member_id": "…", "ipb_pass_hash": "…"}}}`，写空字符串清除。`filename.regex` 为空时用默认的同人志格式 `(活动) [作者] 标题 (原作) [语言]`，写法是 Rust 的 regex 语法（字符类里的 `[` 要转义），命名分组的名字就是标签的命名空间，`title` 分组是标题，`tag` 分组是不带命名空间的标签，`artist2` 这样带数字后缀的和 `artist` 是同一个命名空间。翻译数据库固定是数据目录里的 `db.text.json`，路径不能从接口改。打开翻译后，E-Hentai 的标签按 EhTagTranslation 的数据库译成中文，分类写成 `reclass:`，上传者和发布时间写成 `上传者:`、`时间戳:`，和 LRR 的 ETagCN 插件一致；不翻译时是 `category:`、`uploader:`、`timestamp:`。保存设置会让暂停的队列继续。
+
+`GET /api/admin/metadata`
+
+后台队列和翻译数据库的状态。`queue.length` 是队列里的本数；`done`、`failed` 和 `last_error` 只数这次启动以来的；`paused` 不为空时队列停着，原因是 IP 被封、cookie 失效、网络不通或翻译数据库读不了，那本书留在队列里。`translation.entries` 是载入的翻译条数。
+
+```json
+{
+  "queue": { "length": 12, "enabled": true, "current": 4521, "done": 30, "failed": 2,
+             "last_error": "没有找到匹配的 E-Hentai 画廊", "paused": null },
+  "translation": { "enabled": true, "path": "/var/lib/shuku/db.text.json", "entries": 52000, "error": null },
+  "cookies": true
+}
+```
+
+`POST /api/admin/metadata/resume` 让暂停的队列继续，返回 204。`DELETE /api/admin/metadata/queue` 清空队列，返回 `{"removed": 12}`。
+
 ## 控制台
 
 网页端的 `/admin` 页用下面这些接口。M1 没有认证，它们和其他接口一样只在局域网里用；删除失踪记录和标签改名见上面的“编辑和删除”。为了不让别的网页借浏览器触发任务，POST 和 DELETE 请求的 `Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致时返回 403；两个头都没有的请求（curl 等）照常处理。

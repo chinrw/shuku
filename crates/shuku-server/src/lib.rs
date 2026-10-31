@@ -11,6 +11,7 @@ mod hash;
 mod hosts;
 mod images;
 mod logs;
+mod metadata;
 mod scan;
 mod settings;
 mod snapshot;
@@ -71,6 +72,8 @@ pub enum Error {
     #[error(transparent)]
     Index(#[from] shuku_index::BuildError),
     #[error(transparent)]
+    Metadata(#[from] shuku_metadata::Error),
+    #[error(transparent)]
     Walk(#[from] walkdir::Error),
     #[error(transparent)]
     Task(#[from] tokio::task::JoinError),
@@ -130,6 +133,8 @@ struct Inner {
     /// 单元测试用：扫描每提交一批后调用，让扫描停在中途。
     #[cfg(test)]
     scan_batch_hook: Mutex<Option<Box<dyn FnMut() + Send>>>,
+    /// 元数据功能的设置、翻译表和后台 E-Hentai 队列。
+    metadata: metadata::MetadataState,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
     stopping: AtomicBool,
 }
@@ -156,6 +161,7 @@ impl App {
             let database = Arc::new(db::Database::open(&config.data_dir.join("shuku.sqlite"))?);
             let snapshot = snapshot::Snapshot::load(&*database.reader()?)?;
             let settings = settings::Settings::load(database.reader()?.setting(settings::KEY));
+            let metadata = metadata::MetadataState::load(&*database.reader()?)?;
             let changed = Arc::new(Notify::new());
             let writes = db::spawn_writer(database.clone(), changed.clone())?;
             Ok(Self(Arc::new(Inner {
@@ -175,6 +181,7 @@ impl App {
                 settings_changed: Arc::new(Notify::new()),
                 #[cfg(test)]
                 scan_batch_hook: Mutex::new(None),
+                metadata,
                 stopping: AtomicBool::new(false),
             })))
         })

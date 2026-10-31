@@ -27,12 +27,26 @@ impl IntoResponse for Error {
             Self::Store(
                 shuku_store::Error::DynamicCategory(_) | shuku_store::Error::CategoryKindChange(_),
             ) => StatusCode::BAD_REQUEST,
+            Self::Metadata(error) => metadata_status(error),
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         if status.is_server_error() {
             tracing::error!(error = %self, "请求失败");
         }
         (status, Json(json!({"error": self.to_string()}))).into_response()
+    }
+}
+
+/// E-Hentai 那边的问题算作上游错误，不是服务端自己出错。
+fn metadata_status(error: &shuku_metadata::Error) -> StatusCode {
+    use shuku_metadata::Error;
+    match error {
+        Error::NotFound => StatusCode::UNPROCESSABLE_ENTITY,
+        Error::GalleryUrl(_) | Error::Regex(_) => StatusCode::BAD_REQUEST,
+        Error::Banned | Error::Throttled => StatusCode::SERVICE_UNAVAILABLE,
+        Error::Http(_) | Error::Api(_) | Error::EmptyPage => StatusCode::BAD_GATEWAY,
+        Error::Xml(_) | Error::XmlEncoding => StatusCode::UNPROCESSABLE_ENTITY,
+        Error::Translation(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -58,6 +72,7 @@ impl App {
             .route("/api/archives/{id}/progress", put(write_progress))
             .merge(self.edit_router())
             .merge(self.categories_router())
+            .merge(self.metadata_router())
             .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
             .route("/api/", any(|| async { Error::not_found() }))

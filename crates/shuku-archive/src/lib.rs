@@ -204,6 +204,46 @@ pub fn read_page(path: impl AsRef<Path>, page: &Page) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// 读名为 `file_name` 的条目（不分大小写，可以在子目录里），有好几个时取路径最短的。
+/// 没有这个条目时返回 `None`。用来读 ComicInfo.xml 这类小文件，超过 `limit` 字节视为损坏。
+pub fn read_named_entry(
+    path: impl AsRef<Path>,
+    file_name: &str,
+    limit: u64,
+) -> Result<Option<Vec<u8>>> {
+    let mut archive = zip::ZipArchive::new(BufReader::new(File::open(path)?))?;
+    let wanted = file_name.to_lowercase();
+    let found = (0..archive.len())
+        .filter_map(|index| {
+            // 名字不是合法编码的条目不可能是要找的文件，跳过。
+            let name = archive.name_for_index(index)?.ok()?;
+            let base = name.rsplit('/').next().unwrap_or(&name);
+            (!name.ends_with('/') && base.to_lowercase() == wanted)
+                .then(|| (name.chars().count(), index))
+        })
+        .min();
+    let Some((_, index)) = found else {
+        return Ok(None);
+    };
+    let entry = archive.by_index(index)?;
+    let entry_name = entry.name()?.into_owned();
+    if entry.size() > limit {
+        return Err(Error::CorruptEntry {
+            entry_name,
+            reason: "条目超过大小上限",
+        });
+    }
+    let mut bytes = Vec::new();
+    entry.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(Error::CorruptEntry {
+            entry_name,
+            reason: "条目超过大小上限",
+        });
+    }
+    Ok(Some(bytes))
+}
+
 /// 按扩展名判断是不是图片，忽略 macOS 的 `__MACOSX/` 和 `._` 文件。扫描用它找散放的图片。
 pub fn is_image(name: &str) -> bool {
     let lower = name.to_lowercase();

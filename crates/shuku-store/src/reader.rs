@@ -123,6 +123,24 @@ impl Reader {
             .query_row("SELECT count(*) FROM lrr_pending", [], |row| row.get(0))?)
     }
 
+    /// 等着查 E-Hentai 的下一本，按 ID 从小到大。
+    pub fn next_queued_metadata(&self) -> Result<Option<i64>> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT archive_id FROM metadata_queue ORDER BY archive_id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn metadata_queue_len(&self) -> Result<u64> {
+        Ok(self
+            .connection
+            .query_row("SELECT count(*) FROM metadata_queue", [], |row| row.get(0))?)
+    }
+
     /// 一次读出搜索快照需要的全部数据：标签字典、每本的列表元数据和全部进度，
     /// 都来自同一个读取快照。
     pub fn library(&self) -> Result<Library> {

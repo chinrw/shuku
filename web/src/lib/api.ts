@@ -155,6 +155,28 @@ export async function random(params: {
 	}
 }
 
+export type MetadataProvider = 'filename' | 'comicinfo' | 'ehentai';
+
+/** 一次元数据查找写入的内容：替换后的标题（不替换时为空）、加上的标签和新记下的来源。 */
+export interface FoundMetadata {
+	title: string | null;
+	tags: { namespace: string; value: string }[];
+	source_url: string | null;
+}
+
+/** 对一本书运行一个元数据功能并写入。`url` 只对 E-Hentai 有效，指定画廊不再搜索。 */
+export function fetchMetadata(
+	archive: number,
+	provider: MetadataProvider,
+	url?: string
+): Promise<FoundMetadata> {
+	return request(fetch, `/api/archives/${archive}/metadata`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(url ? { provider, url } : { provider })
+	});
+}
+
 /** 最近读过的归档，按翻页时间从新到旧。 */
 export async function recent(fetch: Fetch, limit?: number): Promise<ArchiveItem[]> {
 	const query = limit === undefined ? '' : `?${new URLSearchParams({ limit: String(limit) })}`;

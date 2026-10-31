@@ -162,3 +162,66 @@ export const renameTag = (from: string, to: string) =>
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ from, to })
 	});
+
+/** 元数据功能的设置。cookie 只写不读，读到的是每个有没有设置。 */
+export interface MetadataSettings {
+	replace_title: boolean;
+	filename: { auto: boolean; trailing_tags: boolean; keep_all_captures: boolean; regex: string };
+	comicinfo: { auto: boolean };
+	ehentai: {
+		auto: boolean;
+		exhentai: boolean;
+		language: string;
+		use_thumbnail: boolean;
+		search_gid: boolean;
+		japanese_title: boolean;
+		extra_tags: boolean;
+		expunged: boolean;
+		cookies_set: Record<CookieName, boolean>;
+	};
+	translation: { enabled: boolean };
+}
+
+export type CookieName = 'ipb_member_id' | 'ipb_pass_hash' | 'star' | 'igneous';
+
+/** PUT 的补丁：只写要改的字段，cookie 写成空字符串表示清除。 */
+export type MetadataPatch = {
+	[K in keyof MetadataSettings]?: K extends 'ehentai'
+		? Partial<Omit<MetadataSettings['ehentai'], 'cookies_set'>> & {
+				cookies?: Partial<Record<CookieName, string>>;
+			}
+		: MetadataSettings[K] extends object
+			? Partial<MetadataSettings[K]>
+			: MetadataSettings[K];
+};
+
+export interface MetadataStatus {
+	queue: {
+		length: number;
+		enabled: boolean;
+		current: number | null;
+		done: number;
+		failed: number;
+		last_error: string | null;
+		paused: string | null;
+	};
+	translation: { enabled: boolean; path: string; entries: number | null; error: string | null };
+	cookies: boolean;
+}
+
+const json = (method: string, body: unknown): RequestInit => ({
+	method,
+	headers: { 'content-type': 'application/json' },
+	body: JSON.stringify(body)
+});
+
+export const metadataSettings = () => call<MetadataSettings>('/api/admin/settings/metadata');
+export const saveMetadataSettings = (patch: MetadataPatch) =>
+	call<MetadataSettings>('/api/admin/settings/metadata', json('PUT', patch));
+export const metadataStatus = () => call<MetadataStatus>('/api/admin/metadata');
+export const resumeMetadataQueue = async () => {
+	const response = await fetch('/api/admin/metadata/resume', { method: 'POST' });
+	if (!response.ok) throw new ApiError(response.status, response.statusText);
+};
+export const clearMetadataQueue = () =>
+	call<{ removed: number }>('/api/admin/metadata/queue', { method: 'DELETE' });

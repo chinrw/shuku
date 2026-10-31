@@ -73,6 +73,14 @@ nix develop -c cargo run -p shuku-migrate-lrr -- \
 
 `--redis` 填 LRR 所用 Redis 的地址，路径部分是元数据所在的库编号。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。路径不在这个目录下的记录不导入，会列在输出里。LRR 里没有 `date_added` 标签的归档用文件的修改时间作为加入时间，输出里会报告数量。
 
+## 元数据功能
+
+控制台设置页的“元数据”卡片代替 LRR 的文件名解析、ComicInfo、E-Hentai 和 ETagCN 插件，默认都关着。打开“新书自动运行”后，只对扫描新加入的书生效，从 LRR 迁移来的书保持 LRR 里的元数据；单本书可以在详情页的“获取元数据”里手动运行。接口和各项设置的含义见 `docs/api.md` 的“元数据功能”一节。
+
+E-Hentai 和 ExHentai 要登录 cookie：在浏览器里登录后，从开发者工具复制 `ipb_member_id`、`ipb_pass_hash`（ExHentai 还要 `igneous`），填进设置卡片。cookie 存在数据目录的 SQLite 里，接口不会再返回它们。服务端访问 E-Hentai 走 `HTTPS_PROXY` 等代理环境变量。
+
+把标签译成中文要 EhTagTranslation 项目的数据库文件。从 <https://github.com/EhTagTranslation/Database/releases> 下载 `db.text.json`，放进数据目录。路径固定，不能在控制台里改：设置接口还没有认证，可改的路径会让任何人都能让服务端去读别的文件。文件换了以后，下一次查找时自动重新载入。
+
 ## 使用发布包
 
 推送 `vX.Y.Z` 或 `vX.Y.Z-后缀` 形式的标签（例如 `git tag v0.1.0 && git push origin v0.1.0`）后，GitHub Actions 构建并发布 `shuku-<标签>-x86_64-linux.tar.gz` 和它的 SHA-256 校验文件，在仓库的 Releases 页面下载。包里有静态链接（musl）的 `shuku` 和 `shuku-migrate-lrr`，不依赖系统库，NixOS 上也能直接运行；网页端构建产物在 `web/build`。

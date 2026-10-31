@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { serverSettings, updateServerSettings, type ServerSettings } from '#lib/admin.ts';
 	import { adminStatus } from '#lib/adminStatus.svelte.ts';
+	import MetadataSettings from './MetadataSettings.svelte';
 	import { settings, type Direction, type LibraryView, type ReaderMode } from '#lib/settings.svelte.ts';
 
 	const prefs = settings();
@@ -131,6 +132,8 @@
 			</dl>
 		{/if}
 	</section>
+
+	<MetadataSettings />
 
 	<section class="adm-card">
 		<h2>这台设备</h2>

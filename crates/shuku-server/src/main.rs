@@ -118,7 +118,9 @@ async fn main() -> Result<()> {
     app.spawn_scheduler();
     let background = app.clone();
     tokio::spawn(async move {
-        if let Err(error) = background.scan().await {
+        let scanned = background.scan().await;
+        background.spawn_metadata_worker();
+        if let Err(error) = scanned {
             tracing::error!(%error, "启动扫描失败");
             return;
         }

@@ -3,7 +3,7 @@ mod common;
 use common::{bmp, patch_first_entry_headers, write_zip};
 use shuku_archive::{
     BrokenPage, CompressionMethod, Error, MAX_PAGE_SIZE, list_pages, list_pages_with_broken,
-    read_page,
+    read_named_entry, read_page,
 };
 use zip::CompressionMethod::{Deflated, Stored};
 
@@ -315,4 +315,36 @@ fn rejects_pages_whose_declared_size_exceeds_the_limit() {
     let declared = u32::try_from(MAX_PAGE_SIZE + 1).unwrap();
     patch_first_entry_headers(&path, 22, 24, &declared.to_le_bytes());
     assert!(matches!(list_pages(&path), Err(Error::CorruptEntry { .. })));
+}
+
+#[test]
+fn a_named_entry_is_found_case_insensitively_preferring_the_shortest_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("book.cbz");
+    write_zip(
+        &path,
+        &[
+            ("extra/deeper/ComicInfo.xml", Stored, b"deep"),
+            ("book/comicinfo.XML", Deflated, b"<ComicInfo/>"),
+            ("NotComicInfo.xml", Stored, b"other"),
+        ],
+    );
+    assert_eq!(
+        read_named_entry(&path, "ComicInfo.xml", 1024).unwrap(),
+        Some(b"<ComicInfo/>".to_vec())
+    );
+    assert_eq!(read_named_entry(&path, "missing.xml", 1024).unwrap(), None);
+}
+
+#[test]
+fn a_named_entry_over_the_limit_is_rejected() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("book.cbz");
+    write_zip(&path, &[("ComicInfo.xml", Deflated, &[b'a'; 100])]);
+    assert!(read_named_entry(&path, "ComicInfo.xml", 99).is_err());
+    assert!(
+        read_named_entry(&path, "ComicInfo.xml", 100)
+            .unwrap()
+            .is_some()
+    );
 }
