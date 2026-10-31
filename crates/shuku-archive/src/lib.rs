@@ -2,6 +2,7 @@
 
 mod fingerprint;
 mod header;
+mod jpeg;
 
 pub use fingerprint::{content_hash, content_hash_file, quick_hash, quick_hash_file};
 
@@ -129,17 +130,33 @@ pub fn list_pages(path: impl AsRef<Path>) -> Result<Vec<Page>> {
                     header::HeaderReader::new(decoded, page.size),
                 ))
             }
-        }
-        .map_err(|source| Error::Image {
-            entry_name: page.entry_name.clone(),
-            source,
-        })?;
-        let (Ok(width), Ok(height)) = (u32::try_from(size.width), u32::try_from(size.height))
-        else {
-            return Err(Error::CorruptEntry {
-                entry_name: page.entry_name,
-                reason: "图片尺寸超出 u32 范围",
-            });
+        };
+        let (width, height) = match size {
+            Ok(size) => {
+                let (Ok(width), Ok(height)) =
+                    (u32::try_from(size.width), u32::try_from(size.height))
+                else {
+                    return Err(Error::CorruptEntry {
+                        entry_name: page.entry_name,
+                        reason: "图片尺寸超出 u32 范围",
+                    });
+                };
+                (width, height)
+            }
+            // imagesize 不容忍 JPEG 段之间的多余字节，从头顺序读一遍再试。
+            Err(source) => {
+                let raw = archive.by_index_raw(index)?.take(page.compressed_size);
+                let fallback = match method {
+                    CompressionMethod::Stored => jpeg::size(BufReader::new(raw)),
+                    CompressionMethod::Deflate => jpeg::size(BufReader::new(
+                        flate2::read::DeflateDecoder::new(raw).take(page.size),
+                    )),
+                };
+                fallback.ok_or_else(|| Error::Image {
+                    entry_name: page.entry_name.clone(),
+                    source,
+                })?
+            }
         };
         page.width = width;
         page.height = height;

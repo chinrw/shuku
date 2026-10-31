@@ -221,6 +221,31 @@ fn dimensions_can_follow_large_jpeg_metadata_in_stored_and_deflated_entries() {
 }
 
 #[test]
+fn dimensions_skip_stray_bytes_between_jpeg_segments() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("book.zip");
+    let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe2, 0x03, 0xa2];
+    jpeg.resize(jpeg.len() + 928, 7);
+    // 真实书库里的图在两个 APP2 段之间夹着两个多余的字节，imagesize 因此读不出尺寸。
+    jpeg.extend_from_slice(&[0x0c, 0x37, 0xff, 0xe2, 0x03, 0xa2]);
+    jpeg.resize(jpeg.len() + 928, 7);
+    jpeg.extend_from_slice(&[
+        0xff, 0xc0, 0, 17, 8, 0x08, 0x31, 0x0b, 0xb8, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff,
+        0xda, 0, 2, 0xff, 0xd9,
+    ]);
+    assert!(imagesize::blob_size(&jpeg).is_err());
+    write_zip(
+        &path,
+        &[("1.jpg", Stored, &jpeg), ("2.jpg", Deflated, &jpeg)],
+    );
+    let pages = list_pages(&path).unwrap();
+    assert_eq!(pages.len(), 2);
+    for page in pages {
+        assert_eq!((page.width, page.height), (3000, 2097));
+    }
+}
+
+#[test]
 fn deflated_page_size_mismatch_is_an_error() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("book.zip");
