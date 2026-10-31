@@ -1,0 +1,277 @@
+/* 配色和网页端（web/src/app.css）一致，跟随系统的深色和浅色。 */
+:root {
+	--bg: #34353b;
+	--surface: #43464e;
+	--raised: #3c3e45;
+	--sunken: #2b2c31;
+	--fg: #dddddd;
+	--muted: #a6a9ae;
+	--border: #50545c;
+	--chip-border: #6d7179;
+	--accent: #3b97ea;
+	--ok: #5cc28a;
+	--danger: #f87171;
+	color-scheme: dark;
+	font-family: system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif;
+	font-size: 14px;
+	color: var(--fg);
+	background: var(--bg);
+	-webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-color-scheme: light) {
+	:root {
+		--bg: #e3e0d1;
+		--surface: #edebdf;
+		--raised: #f2efdf;
+		--sunken: #d6d1bd;
+		--fg: #5c0d11;
+		--muted: #806769;
+		--border: #cfcab6;
+		--chip-border: #806769;
+		--accent: #9b4e03;
+		--ok: #1f7a4a;
+		--danger: #b91c1c;
+		color-scheme: light;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+/* 下面不少元素设了 display，hidden 属性要压过它们。 */
+[hidden] {
+	display: none !important;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+}
+
+main {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	max-width: 32rem;
+	margin: 0 auto;
+	padding: calc(12px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+}
+
+header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 44px;
+}
+
+h1 {
+	flex: 1;
+	margin: 0;
+	font-size: 17px;
+	font-weight: 700;
+}
+
+button {
+	font: inherit;
+	color: inherit;
+	cursor: pointer;
+}
+
+.link {
+	min-height: 44px;
+	padding: 0 4px;
+	border: none;
+	background: none;
+	color: var(--accent);
+	font-size: 13px;
+}
+
+.back {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	margin-left: -10px;
+	border: none;
+	background: none;
+}
+
+ul {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.server {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--surface);
+	text-align: left;
+}
+
+.server.current {
+	border: 2px solid var(--accent);
+	padding: 11px 13px;
+}
+
+.badge {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	border-radius: 10px;
+	background: var(--sunken);
+	font-weight: 700;
+}
+
+.text {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	min-width: 0;
+}
+
+.title {
+	font-weight: 600;
+}
+
+.address {
+	overflow: hidden;
+	color: var(--muted);
+	font: 12px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.state {
+	color: var(--muted);
+	font-size: 12px;
+}
+
+.state::before {
+	content: '';
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	margin-right: 5px;
+	border-radius: 50%;
+	background: var(--muted);
+}
+
+.state.online::before {
+	background: var(--ok);
+}
+
+.state.offline::before {
+	background: var(--danger);
+}
+
+.trailing {
+	margin-left: auto;
+	color: var(--accent);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.add {
+	height: 46px;
+	border: 1px dashed var(--chip-border);
+	border-radius: 12px;
+	background: none;
+}
+
+.note,
+.hint {
+	margin: 0;
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+form {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+label {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	color: var(--muted);
+	font-size: 13px;
+}
+
+input {
+	height: 44px;
+	padding: 0 12px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--surface);
+	color: var(--fg);
+	font: inherit;
+	font-size: 14px;
+}
+
+#url {
+	font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+[role='status'] {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 12px;
+	border-radius: 10px;
+	background: var(--raised);
+	line-height: 1.5;
+}
+
+[role='status'] strong {
+	font-weight: 600;
+}
+
+[role='status'].error strong {
+	color: var(--danger);
+}
+
+[role='status'] span {
+	color: var(--muted);
+	font-size: 12px;
+}
+
+.primary {
+	height: 48px;
+	margin-top: 4px;
+	border: none;
+	border-radius: 12px;
+	background: var(--accent);
+	color: #fff;
+	font-weight: 600;
+}
+
+.primary:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.danger {
+	height: 44px;
+	border: 1px solid var(--danger);
+	border-radius: 12px;
+	background: none;
+	color: var(--danger);
+}

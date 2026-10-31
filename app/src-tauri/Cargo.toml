@@ -1,0 +1,30 @@
+[package]
+name = "shuku-app"
+version = "0.1.0"
+description = "Shuku desktop and Android client"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# 客户端要 WebKitGTK、WebView2 或 Android 的工具链，和服务端分开成独立的 workspace，
+# 服务端的 cargo test 和 clippy 不需要这些系统库。
+[workspace]
+
+[lib]
+# Android 要 cdylib，桌面要 rlib 给 main.rs 用；staticlib 是 iOS 用的，暂不需要。
+name = "shuku_app_lib"
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-opener = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

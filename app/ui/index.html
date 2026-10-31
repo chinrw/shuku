@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<title>Shuku</title>
+		<link rel="stylesheet" href="style.css" />
+		<script type="module" src="app.js"></script>
+	</head>
+	<body>
+		<main id="list" hidden>
+			<header>
+				<h1>服务器</h1>
+				<button type="button" class="link" id="toggle-edit">编辑</button>
+			</header>
+			<ul id="servers"></ul>
+			<button type="button" class="add" id="add">添加服务器</button>
+			<p class="note">
+				每个服务器的阅读进度、分类、收藏和设置各自独立；切换后回到那个服务器上次看的页面。在服务器的书库页点左上角的书库名回到这里。
+			</p>
+		</main>
+
+		<main id="form" hidden>
+			<header>
+				<button type="button" class="back" id="back" aria-label="返回服务器列表">
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+				</button>
+				<h1 id="form-title">添加服务器</h1>
+			</header>
+			<form id="server-form" novalidate>
+				<label>
+					服务器地址
+					<input id="url" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="http://192.168.1.10:3002" required />
+					<span class="hint">填浏览器里打开 Shuku 用的那个地址。可以是局域网 IP（http://192.168.1.10:3002），也可以是 Tailscale 的 https 地址。</span>
+				</label>
+				<div id="status" role="status" hidden></div>
+				<label id="token-field" hidden>
+					设备令牌
+					<input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="shuku_…" />
+					<span class="hint">在电脑上打开这个服务器的控制台，“设置 › 设备令牌”里给这台设备新建一个，复制过来。令牌只显示一次，可以随时在控制台吊销。</span>
+				</label>
+				<label>
+					名字
+					<input id="name" maxlength="100" />
+					<span class="hint">只在这台设备上用来区分服务器，默认取服务器自己的名字。</span>
+				</label>
+				<button class="primary" id="save">保存并打开</button>
+				<button type="button" class="danger" id="remove" hidden>删除这个服务器</button>
+			</form>
+		</main>
+	</body>
+</html>

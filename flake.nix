@@ -29,6 +29,25 @@
           ];
           RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };
+        # 桌面客户端（app/）在 Linux 上编译和运行要的 WebKitGTK 等系统库，用
+        # `nix develop .#app` 进入。Android 和其他平台只在 CI 上构建。
+        app = pkgs.mkShell {
+          packages = with pkgs; [
+            cargo
+            rustc
+            clippy
+            rustfmt
+            cargo-tauri
+            nodejs
+            pkg-config
+            webkitgtk_4_1
+            libsoup_3
+            gtk3
+            librsvg
+            openssl
+            glib-networking
+          ];
+        };
       });
     };
 }
