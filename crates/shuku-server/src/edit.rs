@@ -230,7 +230,7 @@ fn valid_source(url: &str) -> Result<()> {
 }
 
 /// LRR 用逗号分隔标签，网页端的编辑框也是，所以标签里不能有逗号，也不能有换行。
-fn valid_tags(tags: &[Tag]) -> Result<()> {
+pub(crate) fn valid_tags(tags: &[Tag]) -> Result<()> {
     if tags.len() > BATCH_LIMIT {
         return Err(Error::bad_request(format!("一次最多 {BATCH_LIMIT} 个标签")));
     }

@@ -84,9 +84,13 @@ nix develop -c cargo run -p shuku-migrate-lrr -- \
 
 ## 元数据功能
 
-控制台设置页的“元数据”卡片代替 LRR 的文件名解析、ComicInfo、E-Hentai 和 ETagCN 插件，默认都关着。打开“新书自动运行”后，只对扫描新加入的书生效，从 LRR 迁移来的书保持 LRR 里的元数据；单本书可以在详情页的“获取元数据”里手动运行。接口和各项设置的含义见 `docs/api.md` 的“元数据功能”一节。
+控制台设置页的“元数据”卡片代替 LRR 的文件名解析、ComicInfo、E-Hentai 和 ETagCN 插件，另有给按卷出版的普通漫画用的 Bangumi 和 AniList，默认都关着。打开“新书自动运行”后，只对扫描新加入的书生效，从 LRR 迁移来的书保持 LRR 里的元数据；单本书可以在详情页的“获取元数据”里手动运行。接口和各项设置的含义见 `docs/api.md` 的“元数据功能”一节。
 
 E-Hentai 和 ExHentai 要登录 cookie：在浏览器里登录后，从开发者工具复制 `ipb_member_id`、`ipb_pass_hash`（ExHentai 还要 `igneous`），填进设置卡片。cookie 存在数据目录的 SQLite 里，接口不会再返回它们。服务端访问 E-Hentai 走 `HTTPS_PROXY` 等代理环境变量。
+
+同人志和普通漫画适合各跑一个实例：同一个 `shuku` 程序，各自的内容目录、数据目录和端口。设置存在各自的数据库里，同人志实例开 E-Hentai 和中文翻译，普通漫画实例开 Bangumi 或 AniList。两边的搜索、分类和阅读进度不互通。
+
+在线来源可以设成“查到的先放进候选”。这时后台查到的结果不直接写入，等人或 agent 通过 `/api/metadata/candidates` 读取、改写（例如把 AniList 的英文标签译成中文）后批准。已经入库的书可以用 `POST /api/metadata/queue` 成批放进某个来源的队列。
 
 把标签译成中文要 EhTagTranslation 项目的数据库文件。从 <https://github.com/EhTagTranslation/Database/releases> 下载 `db.text.json`，放进数据目录。路径固定，不能在控制台里改：设置接口还没有认证，可改的路径会让任何人都能让服务端去读别的文件。文件换了以后，下一次查找时自动重新载入。
 

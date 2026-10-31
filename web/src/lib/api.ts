@@ -181,16 +181,17 @@ export async function random(params: {
 	}
 }
 
-export type MetadataProvider = 'filename' | 'comicinfo' | 'ehentai';
+export type MetadataProvider = 'filename' | 'comicinfo' | 'ehentai' | 'bangumi' | 'anilist';
 
 /** 一次元数据查找写入的内容：替换后的标题（不替换时为空）、加上的标签和新记下的来源。 */
 export interface FoundMetadata {
 	title: string | null;
+	summary: string | null;
 	tags: { namespace: string; value: string }[];
 	source_url: string | null;
 }
 
-/** 对一本书运行一个元数据功能并写入。`url` 只对 E-Hentai 有效，指定画廊不再搜索。 */
+/** 对一本书运行一个元数据功能并写入。`url` 只对在线来源有效，指定画廊或条目不再搜索。 */
 export function fetchMetadata(
 	archive: number,
 	provider: MetadataProvider,

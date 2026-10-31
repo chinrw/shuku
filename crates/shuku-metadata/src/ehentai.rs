@@ -2,17 +2,20 @@
 //! LRR 的 E-Hentai 元数据插件（2.6）和用户在用的 ETagCN（2.5.3，同样的查找，
 //! 结果再译成中文）：已知画廊地址、封面图的 SHA-1、标题里的画廊 ID、标题文字。
 
-use crate::{Error, Metadata, Result, parse_tag, translate::Translations};
+use crate::{
+    Error, Metadata, Result,
+    http::{Client, Http},
+    parse_tag,
+    translate::Translations,
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 use shuku_store::Tag;
-use std::{sync::OnceLock, time::Duration};
+use std::sync::OnceLock;
 
 const API_URL: &str = "https://api.e-hentai.org/api.php";
-/// E-Hentai 慢的时候一页要好几秒，超过这么久算失败。
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -84,48 +87,13 @@ impl Cookies {
     }
 }
 
-/// 发请求的那一层，测试里换成假的。
-pub trait Http {
-    fn get(&self, url: &str) -> impl Future<Output = Result<String>> + Send;
-    fn post_json(&self, url: &str, body: &Value) -> impl Future<Output = Result<String>> + Send;
-}
-
-/// 带登录 cookie 的 HTTP 客户端。cookie 只发给 E-Hentai 的几个域名。
-#[derive(Clone)]
-pub struct Client {
-    http: reqwest::Client,
-    cookie: Option<String>,
-}
-
-impl Client {
-    pub fn new(cookies: &Cookies) -> Result<Self> {
-        Ok(Self {
-            http: reqwest::Client::builder()
-                .timeout(REQUEST_TIMEOUT)
-                .user_agent(concat!("Shuku/", env!("CARGO_PKG_VERSION")))
-                .build()?,
-            cookie: cookies.header(),
-        })
-    }
-
-    fn request(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match &self.cookie {
-            Some(cookie) => builder.header(reqwest::header::COOKIE, cookie),
-            None => builder,
-        }
-    }
-}
-
-impl Http for Client {
-    async fn get(&self, url: &str) -> Result<String> {
-        let response = self.request(self.http.get(url)).send().await?;
-        Ok(response.error_for_status()?.text().await?)
-    }
-
-    async fn post_json(&self, url: &str, body: &Value) -> Result<String> {
-        let response = self.request(self.http.post(url).json(body)).send().await?;
-        Ok(response.error_for_status()?.text().await?)
-    }
+/// 只给 E-Hentai 用的客户端，每个请求都带登录 cookie。
+pub fn client(cookies: &Cookies) -> Result<Client> {
+    Client::new(
+        cookies
+            .header()
+            .map(|cookie| (reqwest::header::COOKIE, cookie)),
+    )
 }
 
 /// 查找要用的归档信息。
@@ -414,6 +382,7 @@ fn gallery_metadata(response: &str, options: &EhOptions, chinese: bool) -> Resul
     let title = unescape_html(title.trim());
     Ok(Metadata {
         title: (!title.is_empty()).then_some(title),
+        summary: None,
         tags,
         source_url: None,
     })

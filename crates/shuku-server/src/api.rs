@@ -44,7 +44,9 @@ fn metadata_status(error: &shuku_metadata::Error) -> StatusCode {
         Error::NotFound => StatusCode::UNPROCESSABLE_ENTITY,
         Error::GalleryUrl(_) | Error::Regex(_) => StatusCode::BAD_REQUEST,
         Error::Banned | Error::Throttled => StatusCode::SERVICE_UNAVAILABLE,
-        Error::Http(_) | Error::Api(_) | Error::EmptyPage => StatusCode::BAD_GATEWAY,
+        Error::Http(_) | Error::Status(_) | Error::Api(_) | Error::EmptyPage => {
+            StatusCode::BAD_GATEWAY
+        }
         Error::Xml(_) | Error::XmlEncoding => StatusCode::UNPROCESSABLE_ENTITY,
         Error::Translation(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }

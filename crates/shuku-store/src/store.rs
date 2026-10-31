@@ -18,7 +18,7 @@ pub struct Store {
 /// 一个写事务里的操作。方法出错时不回滚已经做过的修改，由调用方决定：
 /// 用 `?` 把错误传出 [`Store::write`] 回滚整个事务，或者用 [`Writer::savepoint`] 只撤销一步。
 pub struct Writer<'a> {
-    connection: &'a Connection,
+    pub(crate) connection: &'a Connection,
 }
 
 impl Deref for Store {
@@ -635,28 +635,6 @@ impl Writer<'_> {
             params![key, id],
         )?;
         Ok(())
-    }
-
-    /// 把归档放进后台查 E-Hentai 的队列，已经在里面的不变。
-    pub fn queue_metadata(&mut self, id: i64) -> Result<()> {
-        self.connection.execute(
-            "INSERT INTO metadata_queue (archive_id) VALUES (?1) ON CONFLICT DO NOTHING",
-            [id],
-        )?;
-        Ok(())
-    }
-
-    /// 从队列里去掉一本，返回它是否在队列里。
-    pub fn dequeue_metadata(&mut self, id: i64) -> Result<bool> {
-        Ok(self
-            .connection
-            .execute("DELETE FROM metadata_queue WHERE archive_id = ?1", [id])?
-            > 0)
-    }
-
-    /// 清空队列，返回去掉了几本。
-    pub fn clear_metadata_queue(&mut self) -> Result<u64> {
-        Ok(self.connection.execute("DELETE FROM metadata_queue", [])? as u64)
     }
 
     /// 仅接受翻页时间严格更新的上报，返回是否写入。

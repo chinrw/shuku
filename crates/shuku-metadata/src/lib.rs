@@ -1,19 +1,28 @@
-//! Shuku 的内置元数据功能，取代用户在 LRR 里启用的几个元数据插件：
-//! 文件名解析、ComicInfo.xml、E-Hentai/ExHentai 查找，以及用 EhTagTranslation 的
-//! 数据库把标签译成中文。这里只解析和联网，不碰数据库；结果由服务端写入。
+//! Shuku 的内置元数据功能：取代 LRR 插件的文件名解析、ComicInfo.xml、E-Hentai/ExHentai 查找
+//! 和 EhTagTranslation 中文翻译，以及给按卷出版的普通漫画用的 Bangumi 和 AniList。
+//! 这里只解析和联网，不碰数据库；结果由服务端写入。
 
+pub mod anilist;
+pub mod bangumi;
 pub mod comicinfo;
 pub mod ehentai;
 pub mod filename;
+pub mod http;
+pub mod series;
 pub mod translate;
 
+use serde::{Deserialize, Serialize};
 use shuku_store::Tag;
 
 /// 一次元数据查找的结果。和 LRR 的插件一样，标签只会加到已有标签上，不删旧标签。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// 服务端把待确认的结果按这个结构存成 JSON，改字段要照顾已经存着的候选。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Metadata {
     /// `None` 表示不改标题。
     pub title: Option<String>,
+    /// 归档还没有简介时才写入。
+    pub summary: Option<String>,
     pub tags: Vec<Tag>,
     /// 归档还没有来源地址时才写入。
     pub source_url: Option<String>,
@@ -25,6 +34,9 @@ impl Metadata {
         if other.title.is_some() {
             self.title = other.title;
         }
+        if other.summary.is_some() {
+            self.summary = other.summary;
+        }
         if other.source_url.is_some() {
             self.source_url = other.source_url;
         }
@@ -32,7 +44,10 @@ impl Metadata {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.title.is_none() && self.tags.is_empty() && self.source_url.is_none()
+        self.title.is_none()
+            && self.summary.is_none()
+            && self.tags.is_empty()
+            && self.source_url.is_none()
     }
 }
 
@@ -46,19 +61,21 @@ pub enum Error {
     XmlEncoding,
     #[error("翻译数据库无法解析：{0}")]
     Translation(#[from] serde_json::Error),
-    #[error("请求 E-Hentai 失败：{0}")]
+    #[error("联网请求失败：{0}")]
     Http(#[from] reqwest::Error),
-    #[error("E-Hentai 返回错误：{0}")]
+    #[error("对方返回 HTTP {0}")]
+    Status(u16),
+    #[error("对方返回错误：{0}")]
     Api(String),
     #[error("ExHentai 返回了空页面，登录 cookie 可能没设置或已经过期")]
     EmptyPage,
     #[error("访问 E-Hentai 太频繁，IP 被暂时封禁")]
     Banned,
-    #[error("E-Hentai 提示请求太快，过一会儿再查")]
+    #[error("对方提示请求太快，过一会儿再查")]
     Throttled,
-    #[error("没有找到匹配的 E-Hentai 画廊")]
+    #[error("没有找到匹配的结果")]
     NotFound,
-    #[error("画廊地址无效：{0}")]
+    #[error("地址无效：{0}")]
     GalleryUrl(String),
 }
 

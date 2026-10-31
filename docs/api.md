@@ -289,19 +289,55 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 ## 元数据功能
 
-内置的文件名解析、ComicInfo.xml、E-Hentai/ExHentai 查找和标签中文翻译，代替 LRR 的同名插件。和 LRR 的插件一样只加标签、不删已有的标签；标题按设置决定换不换；归档还没有来源地址时才记下找到的来源。写入后和编辑接口一样安排一次延迟的快照刷新。这几个接口有和分类一样的同源检查。
+内置的元数据来源：本地的文件名解析和 ComicInfo.xml，在线的 E-Hentai/ExHentai（可以把标签译成中文，代替 LRR 的 ETagCN）、Bangumi 和 AniList。和 LRR 的插件一样只加标签、不删已有的标签；标题按设置决定换不换（Bangumi 和 AniList 查的是系列，不给标题）；来源地址和简介只在书还没有时写入。写入后和编辑接口一样安排一次延迟的快照刷新。这些接口有和分类一样的同源检查。
 
-扫描新加入的书（不是从 LRR 迁移来的，也不是移动了位置的旧书）时，打开了自动运行的文件名和 ComicInfo 在扫描的事务里直接写入；打开了 E-Hentai 自动运行时，这本书放进后台队列。队列存在数据库里，服务重启后接着处理，每两次 E-Hentai 查找之间至少隔 4 秒，页面提示请求太快时隔 40 秒。只有 HTTP 服务处理队列，`shuku scan` 不联网。
+扫描新加入的书（不是从 LRR 迁移来的，也不是移动了位置的旧书）时，打开了自动运行的文件名和 ComicInfo 在扫描的事务里直接写入；打开了自动运行的在线来源把这本书放进各自的后台队列。队列存在数据库里，服务重启后接着处理。每个来源各自限速：E-Hentai 两次查找至少隔 4 秒（被提示太快时 40 秒），Bangumi 1 秒（30 秒），AniList 2 秒（60 秒）。队列里的书不管自动运行开没开都会查，自动运行只决定新书放不放进来。只有 HTTP 服务处理队列，`shuku scan` 不联网。
+
+在线来源打开 `review`（先放候选）后，后台查到的结果不直接写入，存成候选，等人或 agent 读取、改写（例如把标签译成中文）后批准或拒绝。每本书每个来源最多一条候选，再查一次会替换它。
+
+Bangumi 和 AniList 按系列查：搜索词是书的 `series:` 标签（ComicInfo 的 Series、文件名解析的原作），没有时用扫描按文件夹和卷号认出的系列名，再没有时是去掉括号内容和卷号（`第3卷`、`Vol.3`、`v03`、`#3`、末尾的数字）的标题。书已有这个站的来源地址时直接取那个条目。Bangumi 加 `series:`、`artist:`（作者、作画、原作、脚本、插图）、`publisher:`、`magazine:` 和按人数排的用户标签；AniList 加 `series:`、`artist:`（Story、Art 等职位）、`genre:` 和按相关度筛过的标签。AniList 以英文和罗马字为主，中文书名多半搜不到。
 
 `POST /api/archives/{id}/metadata`
 
-对一本书运行一个元数据功能并写入。请求体 `{"provider": "filename"}`，`provider` 是 `filename`、`comicinfo` 或 `ehentai`；`ehentai` 还可以带 `"url": "https://exhentai.org/g/123/abcdef/"`，直接用这个画廊、不搜索。返回写入的内容，`title` 在不替换标题时为 `null`，`source_url` 在已有来源时为 `null`：
+对一本书运行一个来源。请求体 `{"provider": "filename"}`，`provider` 是 `filename`、`comicinfo`、`ehentai`、`bangumi` 或 `anilist`；在线来源还可以带 `"url"`，直接用这个画廊或条目、不搜索（`https://exhentai.org/g/123/abcdef/`、`https://bgm.tv/subject/305429`、`https://anilist.co/manga/118586`）。`"apply": false` 时只返回查到、将要写入的内容，不写入，也不存候选。返回实际写入（或将要写入）的内容，`title` 在不替换标题时为 `null`，`summary` 和 `source_url` 在书已有时为 `null`：
 
 ```json
-{ "title": "标题", "tags": [{ "namespace": "artist", "value": "某作者" }], "source_url": "https://exhentai.org/g/123/abcdef/" }
+{ "title": null, "summary": "简介", "tags": [{ "namespace": "artist", "value": "某作者" }],
+  "source_url": "https://bgm.tv/subject/305429" }
 ```
 
-E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来源地址、封面原图的 SHA-1（以图搜图）、标题里 `[数字]` 形式的画廊 ID、标题文字（有 ASCII 的 `artist` 标签时一并加入）。错误：文件名和正则匹配不上、归档里没有 ComicInfo.xml、E-Hentai 上没找到都返回 422；画廊地址无效 400；IP 被封 503；E-Hentai 返回空页面（cookie 没设或过期）或请求失败 502。
+E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来源地址、封面原图的 SHA-1（以图搜图）、标题里 `[数字]` 形式的画廊 ID、标题文字（有 ASCII 的 `artist` 标签时一并加入）。错误：文件名和正则匹配不上、书里没有 ComicInfo.xml、在线来源没找到都返回 422；地址无效 400；IP 被封或请求太快 503；E-Hentai 返回空页面（cookie 没设或过期）、对方出错或请求失败 502。
+
+`GET /api/metadata/queue?provider=&after=&after_provider=&limit=`
+
+队列里的书，按归档 ID、来源排序。`provider` 只列一个来源；翻页时把上一页最后一条的 `id` 和 `provider` 作为 `after` 和 `after_provider` 传回来；`limit` 默认 50，范围 1 到 500。`counts` 是每个来源排着的本数，`title` 来自快照，快照还没刷新到时为 `null`：
+
+```json
+{ "counts": { "bangumi": 120 }, "more": true,
+  "items": [{ "id": 42, "provider": "bangumi", "title": "葬送的芙莉莲 第01卷" }] }
+```
+
+`POST /api/metadata/queue` 把书放进一个在线来源的队列，请求体 `{"provider": "bangumi", "ids": [42, 43]}`，一次 1 到 1000 本，已经在队列里的不变。返回 `{"queued": [42], "not_found": [43]}`。`DELETE /api/metadata/queue?provider=` 清空一个来源的队列（不带 `provider` 时清空全部），返回 `{"removed": 12}`。
+
+`GET /api/metadata/candidates?provider=&after=&after_provider=&limit=`
+
+待确认的候选，排序和翻页同队列。每条带书现在的标题、简介、来源和标签（`archive`，书已经删了时为 `null`），和查到、将要写入的内容（`found`，格式同运行接口的返回）：
+
+```json
+{ "more": false,
+  "items": [{ "id": 42, "provider": "anilist", "fetched_at": 1761800000000,
+              "archive": { "title": "葬送的芙莉莲 第01卷", "summary": "", "source_url": null,
+                           "tags": [{ "namespace": "artist", "value": "山田鐘人" }] },
+              "found": { "title": null, "summary": "The adventure is over.",
+                         "tags": [{ "namespace": "series", "value": "Sousou no Frieren" }],
+                         "source_url": "https://anilist.co/manga/118586" } }] }
+```
+
+`GET /api/metadata/candidates/{id}/{provider}` 取一条，格式同列表里的一项。
+
+`PUT /api/metadata/candidates/{id}/{provider}` 整个替换这条候选将要写入的内容，请求体是 `found` 那样的对象（字段都可省略，不认识的字段返回 400），按编辑接口的规则校验标签，例如 agent 把标签和简介译好后写回。返回 204。
+
+`POST /api/metadata/candidates/{id}/{provider}/approve` 批准并写入，删掉这条候选，在一个事务里完成。请求体可以省略，也可以是 `found` 那样的对象，这时写它、不管存着的内容。返回实际写入的内容。`DELETE /api/metadata/candidates/{id}/{provider}` 拒绝，删掉候选，不写入，返回 204。候选不存在时两者都返回 404。
 
 `GET /api/admin/settings/metadata`、`PUT /api/admin/settings/metadata`
 
@@ -312,29 +348,38 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
   "replace_title": true,
   "filename": { "auto": false, "trailing_tags": false, "keep_all_captures": false, "regex": "" },
   "comicinfo": { "auto": false },
-  "ehentai": { "auto": false, "exhentai": false, "language": "", "use_thumbnail": true,
+  "ehentai": { "auto": false, "review": false, "exhentai": false, "language": "", "use_thumbnail": true,
                "search_gid": false, "japanese_title": false, "extra_tags": false, "expunged": false,
                "cookies_set": { "ipb_member_id": false, "ipb_pass_hash": false, "star": false, "igneous": false } },
-  "translation": { "enabled": false }
+  "translation": { "enabled": false },
+  "bangumi": { "auto": false, "review": false, "prefer_chinese": true, "tag_limit": 10, "token_set": false },
+  "anilist": { "auto": false, "review": false, "title": "native", "native_names": true,
+               "min_tag_rank": 60, "spoilers": false }
 }
 ```
 
-登录 cookie 只写不读：读到的 `cookies_set` 只说每个有没有设置；写时用 `{"ehentai": {"cookies": {"ipb_member_id": "…", "ipb_pass_hash": "…"}}}`，写空字符串清除。`filename.regex` 为空时用默认的同人志格式 `(活动) [作者] 标题 (原作) [语言]`，写法是 Rust 的 regex 语法（字符类里的 `[` 要转义），命名分组的名字就是标签的命名空间，`title` 分组是标题，`tag` 分组是不带命名空间的标签，`artist2` 这样带数字后缀的和 `artist` 是同一个命名空间。翻译数据库固定是数据目录里的 `db.text.json`，路径不能从接口改。打开翻译后，E-Hentai 的标签按 EhTagTranslation 的数据库译成中文，分类写成 `reclass:`，上传者和发布时间写成 `上传者:`、`时间戳:`，和 LRR 的 ETagCN 插件一致；不翻译时是 `category:`、`uploader:`、`timestamp:`。保存设置会让暂停的队列继续。
+登录 cookie 和 Bangumi 的令牌只写不读：读到的 `cookies_set` 和 `token_set` 只说有没有设置；写时用 `{"ehentai": {"cookies": {"ipb_member_id": "…", "ipb_pass_hash": "…"}}}` 和 `{"bangumi": {"token": "…"}}`，写空字符串清除。没有 Bangumi 令牌也能查，但搜不到被标成 NSFW 的条目。`filename.regex` 为空时用默认的同人志格式 `(活动) [作者] 标题 (原作) [语言]`，写法是 Rust 的 regex 语法（字符类里的 `[` 要转义），命名分组的名字就是标签的命名空间，`title` 分组是标题，`tag` 分组是不带命名空间的标签，`artist2` 这样带数字后缀的和 `artist` 是同一个命名空间。翻译数据库固定是数据目录里的 `db.text.json`，路径不能从接口改。打开翻译后，E-Hentai 的标签按 EhTagTranslation 的数据库译成中文，分类写成 `reclass:`，上传者和发布时间写成 `上传者:`、`时间戳:`，和 LRR 的 ETagCN 插件一致；不翻译时是 `category:`、`uploader:`、`timestamp:`。AniList 的 `title` 是 `series:` 用哪种标题（`native`、`romaji`、`english`）。保存设置会让暂停的来源继续。
 
 `GET /api/admin/metadata`
 
-后台队列和翻译数据库的状态。`queue.length` 是队列里的本数；`done`、`failed` 和 `last_error` 只数这次启动以来的；`paused` 不为空时队列停着，原因是 IP 被封、cookie 失效、网络不通或翻译数据库读不了，那本书留在队列里。`translation.entries` 是载入的翻译条数。
+每个在线来源的队列和运行状态，以及翻译数据库的状态。`queued` 和 `candidates` 是排着的本数和待确认的候选数；`done`、`failed` 和 `last_error` 只数这次启动以来的；`paused` 不为空时这个来源停着，原因是 IP 被封、cookie 或令牌无效、对方出错、网络不通或翻译数据库读不了，那本书留在队列里，别的来源照常。`translation.entries` 是载入的翻译条数。
 
 ```json
 {
-  "queue": { "length": 12, "enabled": true, "current": 4521, "done": 30, "failed": 2,
-             "last_error": "没有找到匹配的 E-Hentai 画廊", "paused": null },
+  "providers": {
+    "ehentai": { "auto": true, "review": false, "queued": 12, "candidates": 0, "current": 4521,
+                 "done": 30, "failed": 2, "last_error": "没有找到匹配的结果", "paused": null },
+    "bangumi": { "auto": false, "review": true, "queued": 0, "candidates": 5, "current": null,
+                 "done": 5, "failed": 0, "last_error": null, "paused": null },
+    "anilist": { "auto": false, "review": false, "queued": 0, "candidates": 0, "current": null,
+                 "done": 0, "failed": 0, "last_error": null, "paused": null }
+  },
   "translation": { "enabled": true, "path": "/var/lib/shuku/db.text.json", "entries": 52000, "error": null },
   "cookies": true
 }
 ```
 
-`POST /api/admin/metadata/resume` 让暂停的队列继续，返回 204。`DELETE /api/admin/metadata/queue` 清空队列，返回 `{"removed": 12}`。
+`POST /api/admin/metadata/resume?provider=` 让暂停的来源继续（不带 `provider` 时全部），返回 204。
 
 ## 控制台
 

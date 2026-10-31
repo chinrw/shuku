@@ -8,7 +8,7 @@ use shuku_store::{Error, Store, open_connection};
 fn rejects_newer_schema_versions_without_changing_them() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    for version in [10, 12] {
+    for version in [11, 13] {
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "user_version", version)
@@ -60,7 +60,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(pragma("user_version"), 9);
+    assert_eq!(pragma("user_version"), 10);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
     assert_eq!(pragma("mmap_size"), 0x7fff_0000);
@@ -87,6 +87,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             "category",
             "category_archive",
             "lrr_pending",
+            "metadata_candidate",
             "metadata_queue",
             "page_list",
             "progress",

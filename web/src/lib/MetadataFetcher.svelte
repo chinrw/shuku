@@ -15,12 +15,16 @@
 	const providers: [MetadataProvider, string][] = [
 		['filename', '文件名'],
 		['comicinfo', 'ComicInfo'],
-		['ehentai', 'E-Hentai']
+		['ehentai', 'E-Hentai'],
+		['bangumi', 'Bangumi'],
+		['anilist', 'AniList']
 	];
+	const online: MetadataProvider[] = ['ehentai', 'bangumi', 'anilist'];
 
 	function describe(found: FoundMetadata) {
 		const parts = [`加了 ${found.tags.length} 个标签`];
 		if (found.title) parts.push(`标题改为“${found.title}”`);
+		if (found.summary) parts.push('写了简介');
 		if (found.source_url) parts.push('记下了来源');
 		return parts.join('，');
 	}
@@ -32,7 +36,7 @@
 		result = '';
 		error = '';
 		try {
-			const found = await fetchMetadata(target, provider, provider === 'ehentai' ? url.trim() : undefined);
+			const found = await fetchMetadata(target, provider, online.includes(provider) ? url.trim() : undefined);
 			if (target !== archive) return;
 			result = describe(found);
 			await invalidateAll();
@@ -56,11 +60,11 @@
 				{/each}
 			</div>
 			<label>
-				<span>E-Hentai 画廊地址（可选，填了就不搜索）</span>
+				<span>E-Hentai 画廊、Bangumi 或 AniList 条目地址（可选，填了就不搜索，点对应的按钮）</span>
 				<input
 					type="url"
 					bind:value={url}
-					placeholder="https://exhentai.org/g/…/…/"
+					placeholder="https://exhentai.org/g/…/…/ 或 https://bgm.tv/subject/…"
 					autocomplete="off"
 				/>
 			</label>

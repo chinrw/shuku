@@ -1,5 +1,6 @@
 //! Shuku 的 SQLite 存储层。
 
+mod metadata;
 mod models;
 mod pool;
 mod reader;
@@ -8,7 +9,7 @@ mod store;
 pub use models::{
     Archive, ArchiveMetadata, BrokenArchive, Category, CompressionMethod, DuplicateFile, Library,
     LibraryArchive, LibraryStats, LibraryTag, LrrArchive, LrrCategory, LrrPending, LrrTankoubon,
-    Page, Progress, ScanEntry, Series, Tag,
+    MetadataCandidate, Page, Progress, ScanEntry, Series, Tag,
 };
 pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;
@@ -42,6 +43,7 @@ const MIGRATIONS: &[Migration] = &[
     (include_str!("migrations/007_settings.sql"), None),
     (include_str!("migrations/008_metadata_queue.sql"), None),
     (include_str!("migrations/009_series.sql"), None),
+    (include_str!("migrations/010_metadata_sources.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]

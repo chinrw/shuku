@@ -261,3 +261,14 @@ pub struct Page {
     pub width: u32,
     pub height: u32,
 }
+
+/// 在线来源查到、等人或 agent 确认的结果，见 `metadata_candidate` 表。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataCandidate {
+    pub archive_id: i64,
+    pub provider: String,
+    /// 服务端写入的 JSON，存储层不解析。
+    pub found: String,
+    /// Unix 毫秒。
+    pub fetched_at: i64,
+}

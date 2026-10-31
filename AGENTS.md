@@ -24,7 +24,7 @@ nix develop -c cargo fmt --all
 - 网页端（`web/`）有书库、搜索、详情和阅读器（翻页和滚动两种模式），已在本地生成的测试书库上跑通。搜索框有标签补全（`/api/tags`）。搜索框下面和 LRR 首页一样是用户自己的分类（`/api/categories`，从 LRR 导入），点一下按分类筛选。详情页和阅读器菜单里可以把书加进或移出静态分类、新建分类；分类的写操作和进度上报一样还没有认证，只在局域网里用。搜索支持 LRR 的 `pages:`、`read:` 数值条件；书库页有新书、没读过、读了一半、读完、未打标签几个快捷筛选（`filter` 参数）。“新书”是 `is_new` 为真且没有进度，打开阅读后不改 `is_new`，靠进度区分，所以不会因为读书触发快照整体重建。`/api/facets` 仍在，但书库页不再显示自动统计的常见标签。书库首页顶部是最近阅读（`/api/recent`），点封面从上次的页继续读。和 LRR 一样，书库里点封面或标题直接进阅读器，从上次读到的页开始。阅读器顶部常驻工具栏（返回、翻页、页码、总览、设置、全屏）；全屏按钮进浏览器全屏并收起工具栏，iPhone 的 Safari 不支持网页全屏，只收起工具栏。总览面板里有标签、分类、下载、详情页入口和全部页面的缩略图。详情页从总览面板和标签弹窗进入，同样有页面缩略图和下载按钮；阅读器的翻页模式可以选整页或适应宽度，适应宽度时空格和 PageDown 先滚完这一屏再翻页。服务端把页面高宽比的中位数达到 2 的书标成条漫（页面清单的 `webtoon`，`--no-webtoon-detection` 关掉），网页端对条漫固定用上下连续滚动；阅读器菜单里可以按本改成开或关，记在浏览器的 localStorage 里。
 - 控制台（网页端 `/admin`，接口 `/api/admin/*`）有概览、任务、问题、标签、日志、设置六个分区，设计见设计文档的“管理控制台”一节。能看状态、触发扫描等任务，删除文件已经不在的记录，给标签改名或合并，设置内置元数据功能；认证还没做。扫描问题和任务进度只在内存里，重启后由启动扫描重新生成；日志是进程内最近 1000 条。
 - 详情页可以改标题、标签、来源和简介（`PATCH /api/archives/{id}`）。网页端、以后的内置插件和 MCP 都走 `shuku-server` 的 `App::edit_archive`，校验只在 `ArchiveEdit::validate` 里做；插件在扫描的批次事务里写入时先 `validate` 再 `apply`。写入后安排一次延迟的快照刷新，搜索结果最多落后一个刷新延迟。标签被换掉或删掉后没有归档和 Tankoubon 再用时，从标签表里删除。
-- 内置元数据功能（文件名、ComicInfo、E-Hentai/ExHentai、标签译中文）已实现，见“插件”一节；控制台设置页里开关和填 cookie，详情页可以对单本手动运行。按标题查公开的 E-Hentai 和载入真实的 db.text.json 试过，ExHentai 和封面搜索还没在真实环境跑过。
+- 内置元数据功能（文件名、ComicInfo、E-Hentai/ExHentai、标签译中文、Bangumi、AniList）已实现，见“插件”一节；控制台设置页里开关和填 cookie，详情页可以对单本手动运行。在线来源可以设成先放候选，人或 agent 通过 `/api/metadata/*` 读取、改写后批准。按标题查公开的 E-Hentai 和载入真实的 db.text.json 试过，ExHentai 和封面搜索还没在真实环境跑过。
 - 删除记录只接受文件已经不在内容目录里的归档，扫描进行中或内容目录是空的（网络盘没挂载时就是这样）时拒绝。删除连带阅读进度、分类和 Tankoubon 成员关系，编号不复用。
 - 迁移工具可以早于扫描运行：还没扫描入库的归档把 LRR 的元数据按路径暂存在 `lrr_pending` 表，扫描新增那个路径时在同一个事务里套用。LRR 的 `date_added` 标签就是 Shuku 的加入时间，没有这个标签的归档用文件的修改时间（扫描时间对整个迁移来的书库都是同一天）。
 - 扫描默认跳过以 `.` 开头的目录和文件（下载工具的临时目录常常只有它自己能读）。新入库的归档用文件修改时间作为加入时间。
@@ -62,7 +62,7 @@ Cargo workspace 按层拆分，crate 都放在 `crates/` 下：
 | `shuku-archive` | 归档读取、页面清单、图片尺寸、内容指纹 |
 | `shuku-server` | HTTP API、扫描、后台任务；可执行文件 `shuku` |
 | `shuku-migrate-lrr` | 从 LRR 的 Redis 导入元数据的一次性工具 |
-| `shuku-metadata` | 内置元数据功能：文件名解析、ComicInfo、E-Hentai 查找、标签中文翻译（只解析和联网，不碰数据库） |
+| `shuku-metadata` | 内置元数据功能：文件名解析、ComicInfo、E-Hentai、Bangumi、AniList 查找和标签中文翻译（只解析和联网，不碰数据库） |
 | `shuku-types` | 服务端与客户端共享的 API 类型（有客户端需要时再建） |
 | `shuku-client` | 客户端核心，供 Android 和 Tauri 使用（M4 再建） |
 
@@ -135,10 +135,12 @@ SQLite 的约定：
 不兼容 LRR 的 Perl 插件。常用的几个改成内置功能，放在 `shuku-metadata`，不做插件机制。每个元数据来源都是可选的，默认关着，不用的不需要配置：
 
 - 文件名解析（LRR 的 Filename Parsing）、ComicInfo.xml、E-Hentai/ExHentai 元数据，以及 ETagCN。ETagCN 不只是翻译：它和 E-Hentai 插件做同样的查找，再用 EhTagTranslation 的 `db.text.json` 把结果译成中文。Shuku 把它拆成 E-Hentai 查找加一个翻译开关。用过 ETagCN 的 LRR 书库迁移过来后标签已经是中文（`女性:`、`语言:`），所以翻译后的结果照样存成中文标签，和迁移来的数据一致，不在显示时再译。
-- 三个功能的输入完全不同（文件名、归档里的一个文件、网络），没有共用的 trait，服务端按 `metadata::Provider` 分派。联网只经过 `ehentai::Http`，测试换成假的。
-- 和 LRR 一样只加标签、不删；标题按“替换标题”设置决定；归档已有来源地址时不改。写入都经过 `edit::ArchiveEdit`。
-- 只对扫描新加入的书自动运行，从 LRR 迁移来的（套用了 `lrr_pending`）和移动了位置的不运行。文件名和 ComicInfo 在扫描的批次事务里写入；E-Hentai 放进 `metadata_queue` 表，HTTP 服务里的后台任务逐本查，两次查找至少隔 4 秒，IP 被封、cookie 失效、网络不通时暂停，那本书留在队列里。
-- 设置存在 `setting` 表的 `metadata` 键里，登录 cookie 也在里面；设置接口只返回 cookie 有没有设置，不返回值。
+- Bangumi 和 AniList 给按卷出版的普通漫画用，按系列查（`series::series_query`：`series:` 标签、扫描认出的系列名、去掉卷号的标题，依次取第一个有的），不给标题，加作者、出版社或类型、标签和简介。同人志和普通漫画各跑一个实例，各自开关来源，不做按目录启用。
+- 各来源的输入完全不同（文件名、归档里的一个文件、网络），没有共用的 trait，服务端按 `metadata::Provider` 分派。联网只经过 `http::Http`，测试换成假的。
+- 和 LRR 一样只加标签、不删；标题按“替换标题”设置决定；来源地址和简介只在书还没有时写入，在写入的事务里判断。写入都经过 `edit::ArchiveEdit`，写不进的标签（带逗号、换行）先丢掉。
+- 只对扫描新加入的书自动运行，从 LRR 迁移来的（套用了 `lrr_pending`）和移动了位置的不运行。文件名和 ComicInfo 在扫描的批次事务里写入；在线来源放进 `metadata_queue` 表（按书和来源），HTTP 服务里的后台任务逐本查，每个来源一个后台任务、各自限速（E-Hentai 4 秒、Bangumi 1 秒、AniList 2 秒），IP 被封、cookie 或令牌无效、网络不通时只暂停那个来源，那本书留在队列里。队列里的书不管自动运行开没开都会查。
+- 在线来源打开 `review` 时结果存进 `metadata_candidate`（每本每个来源一条），由人或 agent 改写后批准写入或拒绝。这是给 agent 介入（例如翻译）留的口子，MCP 包的就是 `/api/metadata/*` 这几个接口。
+- 设置存在 `setting` 表的 `metadata` 键里，E-Hentai 的 cookie 和 Bangumi 的令牌也在里面；设置接口只返回它们有没有设置，不返回值。
 - 文件名正则用 Rust 的 regex 语法，LRR 的默认正则要把字符类里的 `[` 转义才能用（见 `filename::DEFAULT_REGEX`）。
 
 以后需要下载器、更多站点或包装 gallery-dl 的子进程协议时再定接口。

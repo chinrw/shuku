@@ -241,8 +241,8 @@ impl App {
                         {
                             edit.apply(writer, saved)?;
                         }
-                        if plugins.queues_ehentai() {
-                            writer.queue_metadata(saved)?;
+                        for provider in plugins.queued_providers() {
+                            writer.queue_metadata(saved, provider)?;
                             queued = true;
                         }
                     }

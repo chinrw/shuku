@@ -69,6 +69,9 @@ async fn settings_merge_patches_reject_unknown_keys_and_hide_cookies() {
         value!({"filename": {"atuo": true}}),
         value!({"filename": {"regex": "(unclosed"}}),
         value!({"translation": {"path": "/etc/passwd"}}),
+        value!({"anilist": {"min_tag_rank": 101}}),
+        value!({"anilist": {"min_tag_rank": 256}}),
+        value!({"bangumi": {"tag_limit": 101}}),
         value!({"replace_title": "yes"}),
     ] {
         let (status, _) = send(&router, "PUT", "/api/admin/settings/metadata", bad.clone()).await;
@@ -138,7 +141,7 @@ async fn new_books_get_filename_and_comicinfo_metadata_and_join_the_queue() {
         assert!(names.contains(&expected.to_owned()), "{names:?}");
     }
     let status = json(&router, "/api/admin/metadata").await;
-    assert_eq!(status["queue"]["length"], 1);
+    assert_eq!(status["providers"]["ehentai"]["queued"], 1);
 
     // 已经入库的书再扫描不会重跑。
     let (code, cleared) = send(&router, "DELETE", "/api/admin/metadata/queue", Value::Null).await;
@@ -146,7 +149,7 @@ async fn new_books_get_filename_and_comicinfo_metadata_and_join_the_queue() {
     assert_eq!(cleared["removed"], 1);
     app.scan().await.unwrap();
     assert_eq!(
-        json(&router, "/api/admin/metadata").await["queue"]["length"],
+        json(&router, "/api/admin/metadata").await["providers"]["ehentai"]["queued"],
         0
     );
 }
@@ -165,7 +168,7 @@ async fn books_scanned_with_everything_off_are_left_alone() {
     assert_eq!(detail["title"], "[Artist] Title");
     assert!(tag_names(&detail).is_empty());
     assert_eq!(
-        json(&router, "/api/admin/metadata").await["queue"]["length"],
+        json(&router, "/api/admin/metadata").await["providers"]["ehentai"]["queued"],
         0
     );
 }
@@ -334,7 +337,186 @@ async fn books_migrated_from_lrr_keep_their_metadata_and_skip_the_queue() {
     assert_eq!(detail["title"], "LRR 的标题");
     assert!(tag_names(&detail).is_empty());
     assert_eq!(
-        json(&router, "/api/admin/metadata").await["queue"]["length"],
+        json(&router, "/api/admin/metadata").await["providers"]["ehentai"]["queued"],
         0
     );
+}
+
+/// 一本已入库、没有标签的书和它的 ID。
+async fn one_book(fixture: &Fixture, name: &str) -> (shuku_server::App, Router, i64) {
+    fixture.archive(name, 4, 6);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let id = json(&router, "/api/search").await["items"][0]["id"]
+        .as_i64()
+        .unwrap();
+    (app, router, id)
+}
+
+#[tokio::test]
+async fn a_preview_returns_what_would_be_written_without_writing() {
+    let fixture = Fixture::new();
+    let (_app, router, id) = one_book(&fixture, "[Artist] Title.cbz").await;
+    let (status, found) = send(
+        &router,
+        "POST",
+        &format!("/api/archives/{id}/metadata"),
+        value!({"provider": "filename", "apply": false}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["title"], "Title");
+    assert_eq!(
+        found["tags"],
+        value!([{"namespace": "artist", "value": "Artist"}])
+    );
+    let detail = json(&router, &format!("/api/archives/{id}")).await;
+    assert_eq!(detail["title"], "[Artist] Title");
+    assert!(tag_names(&detail).is_empty());
+}
+
+#[tokio::test]
+async fn a_preview_leaves_out_a_summary_and_source_the_book_already_has() {
+    let fixture = Fixture::new();
+    archive_with_comicinfo(&fixture, "book.cbz", COMICINFO);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let id = json(&router, "/api/search").await["items"][0]["id"]
+        .as_i64()
+        .unwrap();
+    let uri = format!("/api/archives/{id}/metadata");
+    let body = value!({"provider": "comicinfo", "apply": false});
+    let (_, before) = send(&router, "POST", &uri, body.clone()).await;
+    assert_eq!(before["source_url"], "https://example.org/book/1");
+    let (status, _) = send(
+        &router,
+        "PATCH",
+        &format!("/api/archives/{id}"),
+        value!({"summary": "已有的简介", "source_url": "https://example.org/other"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, after) = send(&router, "POST", &uri, body).await;
+    assert_eq!(after["summary"], Value::Null);
+    assert_eq!(after["source_url"], Value::Null);
+    assert_eq!(after["title"], "Info Title");
+}
+
+#[tokio::test]
+async fn books_can_be_queued_for_an_online_source_through_the_api() {
+    let fixture = Fixture::new();
+    let (_app, router, id) = one_book(&fixture, "book.cbz").await;
+    let (status, queued) = send(
+        &router,
+        "POST",
+        "/api/metadata/queue",
+        value!({"provider": "bangumi", "ids": [id, 999]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queued}");
+    assert_eq!(queued, value!({"queued": [id], "not_found": [999]}));
+    for bad in [
+        value!({"provider": "filename", "ids": [id]}),
+        value!({"provider": "bangumi", "ids": []}),
+    ] {
+        let (status, _) = send(&router, "POST", "/api/metadata/queue", bad.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+
+    let listed = json(&router, "/api/metadata/queue").await;
+    assert_eq!(listed["counts"], value!({"bangumi": 1}));
+    assert_eq!(
+        listed["items"],
+        value!([{"id": id, "provider": "bangumi", "title": "book"}])
+    );
+    let page = json(&router, &format!("/api/metadata/queue?after={id}")).await;
+    assert_eq!(page["items"], value!([]));
+    let status = json(&router, "/api/admin/metadata").await;
+    assert_eq!(status["providers"]["bangumi"]["queued"], 1);
+    assert_eq!(status["providers"]["anilist"]["queued"], 0);
+
+    let (_, cleared) = send(
+        &router,
+        "DELETE",
+        "/api/metadata/queue?provider=bangumi",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(cleared["removed"], 1);
+}
+
+#[tokio::test]
+async fn an_agent_can_read_rewrite_approve_and_reject_candidates() {
+    let fixture = Fixture::new();
+    let (_app, router, id) = one_book(&fixture, "葬送的芙莉莲 第01卷.cbz").await;
+    // 后台查到的结果；测试里不联网，直接写进候选表。
+    shuku_store::Store::open(fixture.database())
+        .unwrap()
+        .write(|writer| {
+            writer.save_metadata_candidate(
+                id,
+                "anilist",
+                r#"{"tags": [{"namespace": "series", "value": "Sousou no Frieren"},
+                             {"namespace": "", "value": "Magic"}],
+                    "summary": "The adventure is over.",
+                    "source_url": "https://anilist.co/manga/118586"}"#,
+                1_700_000_000_000,
+            )?;
+            writer.save_metadata_candidate(id, "bangumi", r#"{"tags": []}"#, 1_700_000_000_001)
+        })
+        .unwrap();
+
+    let listed = json(&router, "/api/metadata/candidates?provider=anilist").await;
+    let item = &listed["items"][0];
+    assert_eq!(item["id"], id);
+    assert_eq!(item["archive"]["title"], "葬送的芙莉莲 第01卷");
+    assert_eq!(item["found"]["summary"], "The adventure is over.");
+    assert_eq!(listed["more"], false);
+
+    let uri = format!("/api/metadata/candidates/{id}/anilist");
+    let translated = value!({
+        "tags": [{"namespace": "series", "value": "葬送的芙莉莲"}, {"namespace": "", "value": "魔法"}],
+        "summary": "冒险结束了。",
+        "source_url": "https://anilist.co/manga/118586",
+    });
+    for bad in [
+        value!({"tags": [{"namespace": "", "value": "a, b"}]}),
+        value!({"tagz": []}),
+    ] {
+        let (status, _) = send(&router, "PUT", &uri, bad.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let (status, _) = send(&router, "PUT", &uri, translated.clone()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        json(&router, &uri).await["found"]["summary"],
+        "冒险结束了。"
+    );
+
+    let (status, applied) = send(&router, "POST", &format!("{uri}/approve"), Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    assert_eq!(applied["summary"], "冒险结束了。");
+    let detail = json(&router, &format!("/api/archives/{id}")).await;
+    assert_eq!(detail["summary"], "冒险结束了。");
+    assert_eq!(detail["source_url"], "https://anilist.co/manga/118586");
+    assert_eq!(tag_names(&detail), [":魔法", "series:葬送的芙莉莲"]);
+    let (status, _, _) = request(&router, "GET", &uri, None, &[]).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let bangumi = format!("/api/metadata/candidates/{id}/bangumi");
+    let (status, _, _) = request(&router, "DELETE", &bangumi, None, &[]).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _, _) = request(&router, "DELETE", &bangumi, None, &[]).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = request(
+        &router,
+        "GET",
+        &format!("/api/metadata/candidates/{id}/filename"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

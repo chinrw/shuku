@@ -68,6 +68,7 @@ pub fn parse(bytes: &[u8]) -> Result<Metadata> {
     });
     Ok(Metadata {
         title: field("Title"),
+        summary: field("Summary"),
         tags,
         source_url,
     })
@@ -91,10 +92,11 @@ mod tests {
   <Tags>full color</Tags>
   <Web>https://example.org/g/1/abc/</Web>
   <LanguageISO>zh</LanguageISO>
-  <Summary>ignored</Summary>
+  <Summary>A summary.</Summary>
 </ComicInfo>";
         let metadata = parse(xml.as_bytes()).unwrap();
         assert_eq!(metadata.title.as_deref(), Some("The Title"));
+        assert_eq!(metadata.summary.as_deref(), Some("A summary."));
         assert_eq!(
             metadata.source_url.as_deref(),
             Some("https://example.org/g/1/abc/")

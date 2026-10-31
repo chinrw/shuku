@@ -112,6 +112,7 @@ impl FilenameParser {
             .filter(|title| !title.is_empty());
         Some(Metadata {
             title,
+            summary: None,
             tags,
             source_url: None,
         })

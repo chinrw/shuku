@@ -1,6 +1,6 @@
 <script lang="ts">
-	// 控制台设置页的“元数据”卡片：文件名、ComicInfo、E-Hentai 和中文翻译的选项，
-	// 以及后台 E-Hentai 队列的状态。cookie 只写不读，输入框留空表示不改。
+	// 控制台设置页的“元数据”卡片：文件名、ComicInfo、E-Hentai 和中文翻译、Bangumi、AniList 的选项，
+	// 以及每个在线来源的队列和候选。cookie 和令牌只写不读，输入框留空表示不改。
 	import { onMount } from 'svelte';
 	import {
 		clearMetadataQueue,
@@ -10,7 +10,8 @@
 		saveMetadataSettings,
 		type CookieName,
 		type MetadataSettings,
-		type MetadataStatus
+		type MetadataStatus,
+		type OnlineProvider
 	} from '#lib/admin.ts';
 	import { ApiError } from '#lib/api.ts';
 
@@ -25,6 +26,7 @@
 		star: '',
 		igneous: ''
 	});
+	let token = $state('');
 	let saving = $state(false);
 	/** 最近一次刷新状态失败的原因；成功后清空。失败时仍显示上一次的状态，标明已过期。 */
 	let statusError = $state('');
@@ -36,6 +38,12 @@
 		['ipb_pass_hash', 'ipb_pass_hash'],
 		['star', 'star（可选）'],
 		['igneous', 'igneous（可选，ExHentai 用）']
+	];
+
+	const providers: [OnlineProvider, string][] = [
+		['ehentai', 'E-Hentai'],
+		['bangumi', 'Bangumi'],
+		['anilist', 'AniList']
 	];
 
 	function describe(cause: unknown) {
@@ -60,25 +68,31 @@
 		return () => clearInterval(timer);
 	});
 
-	async function save(clear?: CookieName) {
+	/** `clear` 是要清除的 cookie，或者 `'token'` 清除 Bangumi 的令牌。 */
+	async function save(clear?: CookieName | 'token') {
 		if (!form || saving) return;
 		saving = true;
 		message = '';
 		error = '';
 		const { cookies_set: _, ...ehentai } = form.ehentai;
+		const { token_set: __, ...bangumi } = form.bangumi;
 		const typed = Object.fromEntries(
 			Object.entries(cookies).filter(([, value]) => value.trim() !== '')
 		) as Partial<Record<CookieName, string>>;
-		if (clear) typed[clear] = '';
+		if (clear && clear !== 'token') typed[clear] = '';
+		const newToken = clear === 'token' ? '' : token.trim() || undefined;
 		try {
 			form = await saveMetadataSettings({
 				replace_title: form.replace_title,
 				filename: form.filename,
 				comicinfo: form.comicinfo,
 				ehentai: { ...ehentai, cookies: typed },
-				translation: form.translation
+				translation: form.translation,
+				bangumi: newToken === undefined ? bangumi : { ...bangumi, token: newToken },
+				anilist: form.anilist
 			});
 			cookies = { ipb_member_id: '', ipb_pass_hash: '', star: '', igneous: '' };
+			token = '';
 			message = '已保存';
 			await refreshStatus();
 		} catch (cause) {
@@ -88,14 +102,14 @@
 		}
 	}
 
-	async function resume() {
-		await resumeMetadataQueue().catch((cause) => (error = describe(cause)));
+	async function resume(provider: OnlineProvider) {
+		await resumeMetadataQueue(provider).catch((cause) => (error = describe(cause)));
 		await refreshStatus();
 	}
 
-	async function clearQueue() {
-		if (!confirm('清空队列？队列里的书不会再自动查 E-Hentai。')) return;
-		await clearMetadataQueue().catch((cause) => (error = describe(cause)));
+	async function clearQueue(provider: OnlineProvider, label: string) {
+		if (!confirm(`清空 ${label} 的队列？队列里的书不会再去查。`)) return;
+		await clearMetadataQueue(provider).catch((cause) => (error = describe(cause)));
 		await refreshStatus();
 	}
 </script>
@@ -103,8 +117,9 @@
 <section class="adm-card">
 	<h2>元数据</h2>
 	<p class="adm-note">
-		代替 LRR 的文件名解析、ComicInfo、E-Hentai 和 ETagCN 插件。只给扫描新加入的书自动运行，从 LRR
-		迁移来的书不动；详情页的“获取元数据”可以对单本手动运行。和 LRR 一样只加标签，不删已有的。
+		代替 LRR 的文件名解析、ComicInfo、E-Hentai 和 ETagCN 插件，另有给按卷出版的漫画用的 Bangumi 和
+		AniList。只给扫描新加入的书自动运行，从 LRR 迁移来的书不动；详情页的“获取元数据”可以对单本手动运行。
+		和 LRR 一样只加标签，不删已有的；来源和简介只在书还没有时写入。同人志和普通漫画各跑一个实例，这里的开关各配各的。
 	</p>
 	{#if form}
 		<label class="check"><input type="checkbox" bind:checked={form.replace_title} />用找到的标题替换原标题</label>
@@ -129,6 +144,9 @@
 		<h3>E-Hentai</h3>
 		<label class="check"
 			><input type="checkbox" bind:checked={form.ehentai.auto} />新书放进后台队列，每本之间隔 4 秒</label
+		>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.ehentai.review} />查到的先放进候选，确认后才写入</label
 		>
 		<label class="check"><input type="checkbox" bind:checked={form.ehentai.exhentai} />在 ExHentai 上搜索</label>
 		<label class="check"
@@ -183,6 +201,63 @@
 			</p>
 		{/if}
 
+		<h3>Bangumi</h3>
+		<p class="adm-note">按系列查（用 series 标签，没有时用去掉卷号的标题），加作者、出版社、连载杂志、简介和用户标签，不改标题。</p>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.bangumi.auto} />新书放进后台队列，每本之间隔 1 秒</label
+		>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.bangumi.review} />查到的先放进候选，确认后才写入</label
+		>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.bangumi.prefer_chinese} />系列名用中文名</label
+		>
+		<label class="field">
+			<span class="adm-label">最多加几个用户标签</span>
+			<input type="number" min="0" max="100" bind:value={form.bangumi.tag_limit} />
+		</label>
+		<label class="field">
+			<span class="adm-label"
+				>访问令牌（可选，查 NSFW 条目要它）· {form.bangumi.token_set ? '已设置，留空不改' : '未设置'}</span
+			>
+			<span class="cookie">
+				<input type="password" autocomplete="off" bind:value={token} />
+				{#if form.bangumi.token_set}
+					<button class="adm-button" disabled={saving} onclick={() => save('token')}>清除</button>
+				{/if}
+			</span>
+		</label>
+
+		<h3>AniList</h3>
+		<p class="adm-note">按系列查，加作者、类型、标签和简介，不改标题。条目以英文和罗马字为主，中文书名多半搜不到。</p>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.anilist.auto} />新书放进后台队列，每本之间隔 2 秒</label
+		>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.anilist.review} />查到的先放进候选，确认后才写入</label
+		>
+		<div class="option">
+			<span class="adm-label">系列名用</span>
+			<div class="adm-tabs" role="group" aria-label="系列名用">
+				{#each [['native', '原名'], ['romaji', '罗马字'], ['english', '英文']] as [key, label] (key)}
+					<button
+						class="adm-tab"
+						aria-pressed={form.anilist.title === key}
+						onclick={() => form && (form.anilist.title = key as MetadataSettings['anilist']['title'])}
+						>{label}</button
+					>
+				{/each}
+			</div>
+		</div>
+		<label class="check"
+			><input type="checkbox" bind:checked={form.anilist.native_names} />作者名用原文写法</label
+		>
+		<label class="check"><input type="checkbox" bind:checked={form.anilist.spoilers} />也要剧透标签</label>
+		<label class="field">
+			<span class="adm-label">标签的最低相关度（0 到 100）</span>
+			<input type="number" min="0" max="100" bind:value={form.anilist.min_tag_rank} />
+		</label>
+
 		<div class="adm-actions">
 			<button class="adm-button" disabled={saving} onclick={() => save()}>{saving ? '保存中…' : '保存'}</button>
 			{#if message}<span class="adm-note" role="status">{message}</span>{/if}
@@ -196,26 +271,37 @@
 		</p>
 	{/if}
 	{#if status}
-		<h3>E-Hentai 队列</h3>
-		<div class="adm-row">
-			<span>排队 {status.queue.length} 本 · 本次启动后完成 {status.queue.done}、失败 {status.queue.failed}</span>
-			<span class="adm-actions">
-				{#if status.queue.paused}
-					<button class="adm-button" onclick={resume}>继续</button>
-				{/if}
-				<button class="adm-button danger" disabled={status.queue.length === 0} onclick={clearQueue}>清空…</button>
-			</span>
-		</div>
-		{#if status.queue.paused}
-			<p class="bad">已暂停：{status.queue.paused}</p>
-		{:else if !status.queue.enabled && status.queue.length > 0}
-			<p class="adm-note">自动运行关着，队列不处理。</p>
-		{:else if status.queue.current !== null}
-			<p class="adm-note">正在查 <a href="/a/{status.queue.current}">#{status.queue.current}</a></p>
-		{/if}
-		{#if status.queue.last_error}
-			<p class="adm-note">最近一次失败：{status.queue.last_error}</p>
-		{/if}
+		<h3>在线来源的队列</h3>
+		<p class="adm-note">
+			队列里的书不管自动运行开没开都会查。候选是“先放候选”时查到、等确认的结果，用接口或 MCP 读取、改写后批准。
+		</p>
+		{#each providers as [provider, label] (provider)}
+			{@const queue = status.providers[provider]}
+			<div class="adm-row">
+				<span
+					>{label}：排队 {queue.queued} 本 · 候选 {queue.candidates} 条 · 本次启动后完成 {queue.done}、失败
+					{queue.failed}</span
+				>
+				<span class="adm-actions">
+					{#if queue.paused}
+						<button class="adm-button" onclick={() => resume(provider)}>继续</button>
+					{/if}
+					<button
+						class="adm-button danger"
+						disabled={queue.queued === 0}
+						onclick={() => clearQueue(provider, label)}>清空…</button
+					>
+				</span>
+			</div>
+			{#if queue.paused}
+				<p class="bad">已暂停：{queue.paused}</p>
+			{:else if queue.current !== null}
+				<p class="adm-note">正在查 <a href="/a/{queue.current}">#{queue.current}</a></p>
+			{/if}
+			{#if queue.last_error}
+				<p class="adm-note">最近一次失败：{queue.last_error}</p>
+			{/if}
+		{/each}
 	{/if}
 </section>
 
@@ -248,6 +334,13 @@
 		background: var(--sunken);
 		color: var(--fg);
 		font-size: 0.85rem;
+	}
+
+	.option {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.6rem;
 	}
 
 	.cookies {

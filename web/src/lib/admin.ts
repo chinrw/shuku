@@ -175,13 +175,14 @@ export const renameTag = (from: string, to: string) =>
 		body: JSON.stringify({ from, to })
 	});
 
-/** 元数据功能的设置。cookie 只写不读，读到的是每个有没有设置。 */
+/** 元数据功能的设置。cookie 和令牌只写不读，读到的是有没有设置。 */
 export interface MetadataSettings {
 	replace_title: boolean;
 	filename: { auto: boolean; trailing_tags: boolean; keep_all_captures: boolean; regex: string };
 	comicinfo: { auto: boolean };
 	ehentai: {
 		auto: boolean;
+		review: boolean;
 		exhentai: boolean;
 		language: string;
 		use_thumbnail: boolean;
@@ -192,31 +193,53 @@ export interface MetadataSettings {
 		cookies_set: Record<CookieName, boolean>;
 	};
 	translation: { enabled: boolean };
+	bangumi: {
+		auto: boolean;
+		review: boolean;
+		prefer_chinese: boolean;
+		tag_limit: number;
+		token_set: boolean;
+	};
+	anilist: {
+		auto: boolean;
+		review: boolean;
+		title: 'romaji' | 'english' | 'native';
+		native_names: boolean;
+		min_tag_rank: number;
+		spoilers: boolean;
+	};
 }
 
 export type CookieName = 'ipb_member_id' | 'ipb_pass_hash' | 'star' | 'igneous';
+export type OnlineProvider = 'ehentai' | 'bangumi' | 'anilist';
 
-/** PUT 的补丁：只写要改的字段，cookie 写成空字符串表示清除。 */
-export type MetadataPatch = {
-	[K in keyof MetadataSettings]?: K extends 'ehentai'
-		? Partial<Omit<MetadataSettings['ehentai'], 'cookies_set'>> & {
-				cookies?: Partial<Record<CookieName, string>>;
-			}
-		: MetadataSettings[K] extends object
-			? Partial<MetadataSettings[K]>
-			: MetadataSettings[K];
-};
+/** PUT 的补丁：只写要改的字段，cookie 和令牌写成空字符串表示清除。 */
+export interface MetadataPatch {
+	replace_title?: boolean;
+	filename?: Partial<MetadataSettings['filename']>;
+	comicinfo?: Partial<MetadataSettings['comicinfo']>;
+	ehentai?: Partial<Omit<MetadataSettings['ehentai'], 'cookies_set'>> & {
+		cookies?: Partial<Record<CookieName, string>>;
+	};
+	translation?: Partial<MetadataSettings['translation']>;
+	bangumi?: Partial<Omit<MetadataSettings['bangumi'], 'token_set'>> & { token?: string };
+	anilist?: Partial<MetadataSettings['anilist']>;
+}
+
+export interface ProviderStatus {
+	auto: boolean;
+	review: boolean;
+	queued: number;
+	candidates: number;
+	current: number | null;
+	done: number;
+	failed: number;
+	last_error: string | null;
+	paused: string | null;
+}
 
 export interface MetadataStatus {
-	queue: {
-		length: number;
-		enabled: boolean;
-		current: number | null;
-		done: number;
-		failed: number;
-		last_error: string | null;
-		paused: string | null;
-	};
+	providers: Record<OnlineProvider, ProviderStatus>;
 	translation: { enabled: boolean; path: string; entries: number | null; error: string | null };
 	cookies: boolean;
 }
@@ -231,9 +254,11 @@ export const metadataSettings = () => call<MetadataSettings>('/api/admin/setting
 export const saveMetadataSettings = (patch: MetadataPatch) =>
 	call<MetadataSettings>('/api/admin/settings/metadata', json('PUT', patch));
 export const metadataStatus = () => call<MetadataStatus>('/api/admin/metadata');
-export const resumeMetadataQueue = async () => {
-	const response = await fetch('/api/admin/metadata/resume', { method: 'POST' });
+export const resumeMetadataQueue = async (provider: OnlineProvider) => {
+	const response = await fetch(`/api/admin/metadata/resume?provider=${provider}`, {
+		method: 'POST'
+	});
 	if (!response.ok) throw new ApiError(response.status, response.statusText);
 };
-export const clearMetadataQueue = () =>
-	call<{ removed: number }>('/api/admin/metadata/queue', { method: 'DELETE' });
+export const clearMetadataQueue = (provider: OnlineProvider) =>
+	call<{ removed: number }>(`/api/metadata/queue?provider=${provider}`, { method: 'DELETE' });
