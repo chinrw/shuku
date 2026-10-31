@@ -6,9 +6,9 @@ mod reader;
 mod store;
 
 pub use models::{
-    Archive, ArchiveMetadata, Category, CompressionMethod, DuplicateFile, Library, LibraryArchive,
-    LibraryStats, LibraryTag, LrrArchive, LrrCategory, LrrPending, LrrTankoubon, Page, Progress,
-    ScanEntry, Tag,
+    Archive, ArchiveMetadata, BrokenArchive, Category, CompressionMethod, DuplicateFile, Library,
+    LibraryArchive, LibraryStats, LibraryTag, LrrArchive, LrrCategory, LrrPending, LrrTankoubon,
+    Page, Progress, ScanEntry, Tag,
 };
 pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;
@@ -38,6 +38,7 @@ const MIGRATIONS: &[Migration] = &[
     ),
     (include_str!("migrations/004_lrr_pending.sql"), None),
     (include_str!("migrations/005_category_ids.sql"), None),
+    (include_str!("migrations/006_broken_pages.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]

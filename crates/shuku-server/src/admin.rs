@@ -344,7 +344,9 @@ async fn status(State(app): State<App>) -> Result<Json<Value>> {
         let cache = app.cache_usage()?;
         let (tags, namespaces) = snapshot.tag_counts();
         let config = &app.0.config;
-        let (scan, hash) = app.tasks(|tasks| (scan_json(&tasks.scan), hash_json(&tasks.hash)));
+        let (mut scan, hash) = app.tasks(|tasks| (scan_json(&tasks.scan), hash_json(&tasks.hash)));
+        // 坏页存在库里，不随扫描清空，所以不在任务状态里，另外数。
+        scan["issues"]["broken"] = stats.with_broken_pages.into();
         Ok(Json(json!({
             "server": {
                 "version": env!("CARGO_PKG_VERSION"),
@@ -398,6 +400,14 @@ fn hash_json(task: &HashTask) -> Value {
 async fn issues(State(app): State<App>) -> Result<Json<Value>> {
     app.blocking(|app| {
         let snapshot = app.snapshot();
+        let (broken_total, broken) = app.reader()?.broken_archives(ISSUE_LIMIT)?;
+        let broken: Vec<_> = broken
+            .into_iter()
+            .map(|archive| {
+                json!({"id": archive.id, "path": archive.path, "title": archive.title,
+                    "pages": archive.pages})
+            })
+            .collect();
         Ok(Json(app.tasks(|tasks| {
             let issues = &tasks.scan.issues;
             let missing: Vec<_> = issues
@@ -423,6 +433,7 @@ async fn issues(State(app): State<App>) -> Result<Json<Value>> {
                 "skipped": {"total": issues.skipped.total, "items": skipped},
                 "unreadable": {"total": issues.unreadable.total, "items": issues.unreadable.items},
                 "missing": {"total": issues.missing.total, "items": missing},
+                "broken": {"total": broken_total, "items": broken},
             })
         })))
     })

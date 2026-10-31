@@ -28,7 +28,8 @@ interface Task {
 export interface ScanTask extends Task {
 	processed: number;
 	report: ScanReport;
-	issues: { failed: number; skipped: number; unreadable: number; missing: number };
+	/** `broken` 是有坏页的本数，存在库里，不随扫描清空。 */
+	issues: { failed: number; skipped: number; unreadable: number; missing: number; broken: number };
 }
 
 export interface HashTask extends Task {
@@ -79,6 +80,7 @@ export interface Issues {
 	skipped: Listed<{ path: string }>;
 	unreadable: Listed<{ path: string; error: string }>;
 	missing: Listed<{ id: number; path: string; title: string | null }>;
+	broken: Listed<{ id: number; path: string; title: string; pages: string[] }>;
 }
 
 export interface DuplicateFile {

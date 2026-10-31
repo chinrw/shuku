@@ -221,6 +221,11 @@ impl Writer<'_> {
              ON CONFLICT(archive_id) DO UPDATE SET pages = excluded.pages",
             params![id, postcard::to_stdvec(pages)?],
         )?;
+        let broken = pages.iter().filter(|page| page.width == 0).count() as i64;
+        transaction.execute(
+            "UPDATE archive SET broken_pages = ?1 WHERE id = ?2",
+            params![broken, id],
+        )?;
         Ok(id)
     }
 

@@ -82,6 +82,12 @@ fn respond(
         if params.v != archive.metadata.quick_hash {
             return Err(Error::not_found());
         }
+        // 缩略图用第一张读得出尺寸的页，封面坏了也有图；全是坏页时仍用第一页，解码失败返回 422。
+        let n = if thumbnail {
+            pages.iter().position(|page| page.width > 0).unwrap_or(0)
+        } else {
+            n
+        };
         let page = pages.into_iter().nth(n).ok_or_else(Error::not_found)?;
         (archive, page)
     };
@@ -93,6 +99,9 @@ fn respond(
         || unix_seconds(before.modified()?)? != archive.metadata.mtime
     {
         return Err(changed_file());
+    }
+    if thumbnail && page.width == 0 {
+        return Err(broken_page());
     }
     let width = if thumbnail {
         Some(500.min(page.width))
@@ -206,11 +215,21 @@ fn write_cache(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// 认不出格式的是坏页（全是 0、0 字节、改了扩展名的别的文件），返回 422。
 fn content_type(bytes: &[u8]) -> Result<&'static str> {
     if crate::decode::is_jxl(bytes) {
         return Ok("image/jxl");
     }
-    Ok(image::guess_format(bytes)?.to_mime_type())
+    image::guess_format(bytes)
+        .map(|format| format.to_mime_type())
+        .map_err(|_| broken_page())
+}
+
+pub(crate) fn broken_page() -> Error {
+    Error::Http {
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+        message: "页面图片已损坏".into(),
+    }
 }
 
 fn changed_file() -> Error {

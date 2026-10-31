@@ -523,12 +523,19 @@ async fn pages(
             && crate::webtoon::looks_like_webtoon(
                 pages.iter().map(|page| (page.width, page.height)),
             );
+        // 坏页的宽和高记为 0，客户端拿它排版会塌成一条线，按常见的竖版页面给一个占位尺寸。
         let pages: Vec<_> = pages
             .into_iter()
             .enumerate()
             .map(|(n, page)| {
+                let broken = page.width == 0;
+                let (width, height) = if broken {
+                    BROKEN_PAGE_SIZE
+                } else {
+                    (page.width, page.height)
+                };
                 json!({
-                    "width": page.width, "height": page.height,
+                    "width": width, "height": height, "broken": broken,
                     "url": format!("/api/archives/{id}/pages/{n}?v={hash}"),
                     "thumbnail_url": format!("/api/archives/{id}/pages/{n}/thumbnail?v={hash}"),
                 })
@@ -538,6 +545,9 @@ async fn pages(
     })
     .await
 }
+
+/// 坏页在页面清单接口里的占位尺寸，约等于 A4 的竖版比例。
+const BROKEN_PAGE_SIZE: (u32, u32) = (1000, 1414);
 
 pub(crate) fn require_archive(reader: &shuku_store::Reader, id: i64) -> Result<Archive> {
     reader.archive(id)?.ok_or_else(Error::not_found)

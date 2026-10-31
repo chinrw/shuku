@@ -166,8 +166,20 @@ pub struct LibraryStats {
     pub with_progress: u64,
     /// 暂存着、等扫描到时套用的 LRR 记录数。
     pub lrr_pending: u64,
+    /// 有坏页的归档数。
+    pub with_broken_pages: u64,
     pub categories: u64,
     pub tankoubons: u64,
+}
+
+/// 有坏页的归档，见 [`crate::Reader::broken_archives`]。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokenArchive {
+    pub id: i64,
+    pub path: String,
+    pub title: String,
+    /// 坏页的条目名，按页序。
+    pub pages: Vec<String>,
 }
 
 /// 见 [`crate::Reader::duplicates`]。
@@ -222,7 +234,7 @@ impl FromSql for CompressionMethod {
     }
 }
 
-/// 页面在清单中的下标就是从 0 开始的 page_no。
+/// 页面在清单中的下标就是从 0 开始的 page_no。宽和高为 0 表示读不出尺寸的坏页。
 /// 清单用 postcard 按字段顺序编码存进数据库，增删或调换字段都要加一项迁移重写旧数据。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Page {

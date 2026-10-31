@@ -4,8 +4,9 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
-    Archive, ArchiveMetadata, Category, DuplicateFile, Error, Library, LibraryArchive,
-    LibraryStats, LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry, Tag, configure,
+    Archive, ArchiveMetadata, BrokenArchive, Category, DuplicateFile, Error, Library,
+    LibraryArchive, LibraryStats, LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry, Tag,
+    configure,
 };
 
 /// 只读连接。WAL 模式下读不挡写，写也不挡读；每个读取方法看到的是调用开始时已提交的数据。
@@ -221,7 +222,8 @@ impl Reader {
                     (SELECT count(*) FROM progress),
                     (SELECT count(*) FROM lrr_pending),
                     (SELECT count(*) FROM category),
-                    (SELECT count(*) FROM tankoubon)",
+                    (SELECT count(*) FROM tankoubon),
+                    (SELECT count(*) FROM archive WHERE broken_pages > 0)",
             [],
             |row| {
                 Ok(LibraryStats {
@@ -234,9 +236,43 @@ impl Reader {
                     lrr_pending: row.get(6)?,
                     categories: row.get(7)?,
                     tankoubons: row.get(8)?,
+                    with_broken_pages: row.get(9)?,
                 })
             },
         )?)
+    }
+
+    /// 有坏页的归档，按路径排序。返回总数和前 `limit` 本，每本带坏页的条目名。
+    pub fn broken_archives(&self, limit: usize) -> Result<(u64, Vec<BrokenArchive>)> {
+        let total: u64 = self.connection.query_row(
+            "SELECT count(*) FROM archive WHERE broken_pages > 0",
+            [],
+            |row| row.get(0),
+        )?;
+        let rows = self
+            .connection
+            .prepare(
+                "SELECT id, path, title FROM archive WHERE broken_pages > 0 ORDER BY path LIMIT ?1",
+            )?
+            .query_map([limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<(i64, String, String)>>>()?;
+        let mut archives = Vec::with_capacity(rows.len());
+        for (id, path, title) in rows {
+            let pages = read_pages(&self.connection, id)?
+                .into_iter()
+                .filter(|page| page.width == 0)
+                .map(|page| page.entry_name)
+                .collect();
+            archives.push(BrokenArchive {
+                id,
+                path,
+                title,
+                pages,
+            });
+        }
+        Ok((total, archives))
     }
 
     /// 完整指纹相同的归档，每组按路径排序，组按指纹排序。返回组的总数和前 `limit` 组。

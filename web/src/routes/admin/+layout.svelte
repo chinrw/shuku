@@ -12,7 +12,10 @@
 	let status = $derived(adminStatus.current);
 	let problems = $derived(
 		status
-			? status.scan.issues.failed + status.scan.issues.unreadable + status.scan.issues.missing
+			? status.scan.issues.failed +
+					status.scan.issues.unreadable +
+					status.scan.issues.missing +
+					status.scan.issues.broken
 			: 0
 	);
 	let busy = $derived(

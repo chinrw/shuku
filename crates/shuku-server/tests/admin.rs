@@ -314,3 +314,49 @@ async fn write_requests_from_other_sites_are_rejected() {
     .await;
     assert_eq!(status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn books_with_broken_pages_are_imported_and_listed() {
+    let fixture = Fixture::new();
+    let good = fixture.archive("good.cbz", 10, 20);
+    // 第一页全是 0（真实书库里见过），第二页正常。
+    let path = fixture.config.content_dir.join("bad-page.cbz");
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    for (name, bytes) in [("01.jpg", vec![0_u8; 4096]), ("02.png", good)] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut zip, &bytes).unwrap();
+    }
+    zip.finish().unwrap();
+    let app = fixture.app().await;
+    let report = app.scan().await.unwrap();
+    assert_eq!((report.added, report.failed), (2, 0));
+    let router = app.router();
+
+    let issues = json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["broken"]["total"], 1);
+    let item = &issues["broken"]["items"][0];
+    assert_eq!(item["path"], "bad-page.cbz");
+    assert_eq!(item["pages"], serde_json::json!(["01.jpg"]));
+    assert_eq!(
+        json(&router, "/api/admin/status").await["scan"]["issues"]["broken"],
+        1
+    );
+
+    let id = item["id"].as_i64().unwrap();
+    let pages = json(&router, &format!("/api/archives/{id}/pages")).await;
+    let first = &pages["pages"][0];
+    assert_eq!(first["broken"], true);
+    assert!(first["width"].as_u64().unwrap() > 0 && first["height"].as_u64().unwrap() > 0);
+    assert_eq!(pages["pages"][1]["broken"], false);
+    let (status, _, _) = request(&router, "GET", first["url"].as_str().unwrap(), None, &[]).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    // 封面坏了时缩略图用第二页。
+    let cover = json(&router, &format!("/api/archives/{id}")).await["cover_url"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status, headers, _) = request(&router, "GET", &cover, None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["content-type"], "image/jpeg");
+}

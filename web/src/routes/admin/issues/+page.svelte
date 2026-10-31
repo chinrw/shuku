@@ -8,7 +8,7 @@
 	} from '#lib/admin.ts';
 	import { bytes, clock, count } from '#lib/format.ts';
 
-	type Tab = 'failed' | 'unreadable' | 'skipped' | 'missing' | 'duplicates';
+	type Tab = 'failed' | 'broken' | 'unreadable' | 'skipped' | 'missing' | 'duplicates';
 
 	let data = $state<Issues | null>(null);
 	let groups = $state<{ total: number; groups: { files: DuplicateFile[] }[] } | null>(null);
@@ -61,6 +61,7 @@
 
 	const hints: Record<Tab, string> = {
 		failed: '最近一次扫描读不了的文件和原因。修好文件后在任务页点“立即扫描”重试。',
+		broken: '和 LRR 一样照样入库、但有几页读不出来的书（全是 0 的图、0 字节的文件、改了扩展名的别的文件）。坏页在阅读器里显示不出来。',
 		unreadable: '没有读权限的子目录。里面已入库的记录不当作丢失。',
 		skipped: '7z、RAR、PDF 等 M1 还不读的格式，以后支持后再扫描。',
 		missing:
@@ -70,6 +71,7 @@
 
 	let tabs = $derived<{ key: Tab; label: string; total: number | null }[]>([
 		{ key: 'failed', label: '扫描失败', total: data?.failed.total ?? null },
+		{ key: 'broken', label: '有坏页的书', total: data?.broken.total ?? null },
 		{ key: 'unreadable', label: '读不了的目录', total: data?.unreadable.total ?? null },
 		{ key: 'skipped', label: '不支持的格式', total: data?.skipped.total ?? null },
 		{ key: 'missing', label: '文件丢失', total: data?.missing.total ?? null },
@@ -136,6 +138,20 @@
 				</table>
 				{#if listed.items.length === 0}<p class="adm-empty">没有。</p>{/if}
 				{#if shown(listed)}<p class="adm-empty">{shown(listed)}</p>{/if}
+			{:else if tab === 'broken'}
+				<table class="adm-table">
+					<thead><tr><th>书</th><th>坏页</th></tr></thead>
+					<tbody>
+						{#each data.broken.items as item (item.id)}
+							<tr>
+								<td><a href="/a/{item.id}">{item.title}</a><div class="adm-mono">{item.path}</div></td>
+								<td class="adm-mono">{item.pages.join('、')}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if data.broken.items.length === 0}<p class="adm-empty">没有。</p>{/if}
+				{#if shown(data.broken)}<p class="adm-empty">{shown(data.broken)}</p>{/if}
 			{:else if tab === 'skipped'}
 				<table class="adm-table">
 					<thead><tr><th>路径</th></tr></thead>

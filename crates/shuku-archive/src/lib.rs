@@ -19,12 +19,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Zip(#[from] zip::result::ZipError),
-    #[error("无法读取图片 {entry_name} 的尺寸：{source}")]
-    Image {
-        entry_name: String,
-        #[source]
-        source: imagesize::ImageError,
-    },
     #[error("不支持的压缩方式：{0}")]
     UnsupportedCompression(zip::CompressionMethod),
     #[error("损坏的 ZIP 条目 {entry_name}：{reason}")]
@@ -58,8 +52,23 @@ pub struct Page {
     pub height: u32,
 }
 
-/// 解析中央目录并探测图片尺寸，不解码像素，也不写入内容目录。
+/// 读不出尺寸的页。它仍在页面清单里，宽和高记为 0。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokenPage {
+    pub entry_name: String,
+    pub reason: String,
+}
+
+/// 解析中央目录并探测图片尺寸，不解码像素，也不写入内容目录。读不出尺寸的页
+/// 宽和高记为 0，见 [`list_pages_with_broken`]。
 pub fn list_pages(path: impl AsRef<Path>) -> Result<Vec<Page>> {
+    Ok(list_pages_with_broken(path)?.0)
+}
+
+/// 同 [`list_pages`]，另外返回读不出尺寸的页和原因。和 LRR 一样，个别页坏了
+/// （全是 0 的图、0 字节的文件、改了扩展名的别的文件）整本仍然入库，坏页留在清单里，
+/// 阅读时显示不出来。ZIP 结构本身的错误仍然让整本失败。
+pub fn list_pages_with_broken(path: impl AsRef<Path>) -> Result<(Vec<Page>, Vec<BrokenPage>)> {
     let mut file = File::open(path)?;
     let mut magic = Vec::with_capacity(4);
     file.by_ref().take(4).read_to_end(&mut magic)?;
@@ -71,6 +80,7 @@ pub fn list_pages(path: impl AsRef<Path>) -> Result<Vec<Page>> {
     let file_size = file.metadata()?.len();
     let mut archive = zip::ZipArchive::new(BufReader::new(file))?;
     let mut pages = Vec::new();
+    let mut broken = Vec::new();
     for index in 0..archive.len() {
         let entry = archive.by_index_raw(index)?;
         let entry_name = entry.name()?.into_owned();
@@ -131,18 +141,11 @@ pub fn list_pages(path: impl AsRef<Path>) -> Result<Vec<Page>> {
                 ))
             }
         };
-        let (width, height) = match size {
-            Ok(size) => {
-                let (Ok(width), Ok(height)) =
-                    (u32::try_from(size.width), u32::try_from(size.height))
-                else {
-                    return Err(Error::CorruptEntry {
-                        entry_name: page.entry_name,
-                        reason: "图片尺寸超出 u32 范围",
-                    });
-                };
-                (width, height)
-            }
+        let dimensions = match size {
+            Ok(size) => match (u32::try_from(size.width), u32::try_from(size.height)) {
+                (Ok(width), Ok(height)) => Ok((width, height)),
+                _ => Err("图片尺寸超出 u32 范围".to_owned()),
+            },
             // imagesize 不容忍 JPEG 段之间的多余字节，从头顺序读一遍再试。
             Err(source) => {
                 let raw = archive.by_index_raw(index)?.take(page.compressed_size);
@@ -152,18 +155,23 @@ pub fn list_pages(path: impl AsRef<Path>) -> Result<Vec<Page>> {
                         flate2::read::DeflateDecoder::new(raw).take(page.size),
                     )),
                 };
-                fallback.ok_or_else(|| Error::Image {
-                    entry_name: page.entry_name.clone(),
-                    source,
-                })?
+                fallback.ok_or_else(|| source.to_string())
             }
         };
-        page.width = width;
-        page.height = height;
+        match dimensions {
+            Ok((width, height)) => {
+                page.width = width;
+                page.height = height;
+            }
+            Err(reason) => broken.push(BrokenPage {
+                entry_name: page.entry_name.clone(),
+                reason,
+            }),
+        }
         pages.push(page);
     }
     pages.sort_by(|a, b| natural_cmp(&a.entry_name.to_lowercase(), &b.entry_name.to_lowercase()));
-    Ok(pages)
+    Ok((pages, broken))
 }
 
 /// 按清单里的数据区间直接读页，不重新解析 ZIP 中央目录。

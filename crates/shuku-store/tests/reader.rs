@@ -237,3 +237,31 @@ fn duplicates_group_archives_by_full_content_hash() {
     assert_eq!(total, 2);
     assert_eq!(ids(&groups), [vec![a2, a1]]);
 }
+
+#[test]
+fn archives_with_zero_sized_pages_are_listed_as_broken() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = Store::open(directory.path().join("shuku.sqlite")).unwrap();
+    let mut with_broken = pages();
+    with_broken[1].width = 0;
+    with_broken[1].height = 0;
+    let broken = store
+        .save_archive(None, &metadata("b/broken.cbz"), &with_broken)
+        .unwrap();
+    store
+        .save_archive(None, &metadata("a/fine.cbz"), &pages())
+        .unwrap();
+
+    let (total, archives) = store.broken_archives(10).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(archives[0].id, broken);
+    assert_eq!(archives[0].path, "b/broken.cbz");
+    assert_eq!(archives[0].pages, ["10.jpg"]);
+    assert_eq!(store.stats().unwrap().with_broken_pages, 1);
+
+    // 重新扫描后页面都好了，就不再列出。
+    store
+        .save_archive(Some(broken), &metadata("b/broken.cbz"), &pages())
+        .unwrap();
+    assert_eq!(store.broken_archives(10).unwrap().0, 0);
+}

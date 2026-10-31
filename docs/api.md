@@ -187,6 +187,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
     {
       "width": 1200,
       "height": 1700,
+      "broken": false,
       "url": "/api/archives/42/pages/0?v=<quick_hash>",
       "thumbnail_url": "/api/archives/42/pages/0/thumbnail?v=<quick_hash>"
     }
@@ -198,15 +199,17 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 响应另有 `"webtoon": true/false`：页面高宽比的中位数达到 2 时为 `true`，网页端据此把这本当条漫，用上下连续滚动阅读。服务端用 `--no-webtoon-detection` 启动时总是 `false`。阅读器里的手动开关存在浏览器里，优先于这个值。
 
+`broken` 为 `true` 的是读不出尺寸的坏页（全是 0 的图、0 字节的文件、改了扩展名的别的文件），这时 `width` 和 `height` 是 1000×1414 的占位值，请求它的图片通常返回 422。和 LRR 一样，有坏页的书照样入库。
+
 ## 图片
 
 `GET /api/archives/{id}/pages/{n}?v=<quick_hash>[&w=<宽度>]`
 
-返回第 `n` 页（从 0 开始）的图片。不带 `w` 时返回原始字节，`Content-Type` 按图片格式设置。带 `w` 时返回缩到该宽度的 JPEG，原图不比 `w` 宽时返回原图；缩放结果缓存在数据目录。`w` 只接受 720、1080、1440、2160 这几档，其他值返回 400，避免同一页缓存过多变体。超过 6400 万像素的图片不缩放，请求 `w` 或缩略图时返回 422。
+返回第 `n` 页（从 0 开始）的图片。不带 `w` 时返回原始字节，`Content-Type` 按图片格式设置。带 `w` 时返回缩到该宽度的 JPEG，原图不比 `w` 宽时返回原图；缩放结果缓存在数据目录。`w` 只接受 720、1080、1440、2160 这几档，其他值返回 400，避免同一页缓存过多变体。超过 6400 万像素的图片不缩放，请求 `w` 或缩略图时返回 422。认不出格式的坏页也返回 422。
 
 `GET /api/archives/{id}/thumbnail?v=<quick_hash>`
 
-返回封面（第 0 页）缩到 500 宽的 JPEG。
+返回封面缩到 500 宽的 JPEG。封面是第一张不是坏页的页，通常就是第 0 页。
 
 `GET /api/archives/{id}/pages/{n}/thumbnail?v=<quick_hash>`
 
@@ -295,11 +298,12 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
   "failed": { "total": 1, "items": [{ "path": "a/broken.zip", "error": "zip 结构损坏" }] },
   "skipped": { "total": 1, "items": [{ "path": "b/book.rar" }] },
   "unreadable": { "total": 0, "items": [] },
-  "missing": { "total": 1, "items": [{ "id": 42, "path": "c/gone.zip", "title": "已删除的书" }] }
+  "missing": { "total": 1, "items": [{ "id": 42, "path": "c/gone.zip", "title": "已删除的书" }] },
+  "broken": { "total": 1, "items": [{ "id": 7, "path": "d/book.zip", "title": "标题", "pages": ["01.jpg"] }] }
 }
 ```
 
-路径都相对内容目录。`unreadable` 是没有读权限的子目录；`missing` 是库里有记录、文件已经不在的归档，`title` 取自快照，快照里没有时为 `null`。
+路径都相对内容目录。`unreadable` 是没有读权限的子目录；`missing` 是库里有记录、文件已经不在的归档，`title` 取自快照，快照里没有时为 `null`。`broken` 是有坏页的书和坏页的条目名，存在库里（`archive.broken_pages`），不随扫描清空；状态接口的 `scan.issues.broken` 是它的本数。
 
 `GET /api/admin/duplicates?limit=`
 

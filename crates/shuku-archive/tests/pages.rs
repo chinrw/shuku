@@ -1,7 +1,10 @@
 mod common;
 
 use common::{bmp, patch_first_entry_headers, write_zip};
-use shuku_archive::{CompressionMethod, Error, MAX_PAGE_SIZE, list_pages, read_page};
+use shuku_archive::{
+    BrokenPage, CompressionMethod, Error, MAX_PAGE_SIZE, list_pages, list_pages_with_broken,
+    read_page,
+};
 use zip::CompressionMethod::{Deflated, Stored};
 
 #[test]
@@ -153,7 +156,7 @@ fn unsupported_compression_and_encryption_are_explicit_errors() {
 }
 
 #[test]
-fn corrupt_image_headers_and_entry_ranges_are_not_silently_skipped() {
+fn broken_images_stay_in_the_list_and_corrupt_entry_ranges_fail() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("book.zip");
     for method in [Stored, Deflated] {
@@ -162,11 +165,25 @@ fn corrupt_image_headers_and_entry_ranges_are_not_silently_skipped() {
             &[
                 ("1.bmp", method, b"not an image"),
                 ("2.bmp", method, &bmp(2, 3)),
+                ("3.jpg", method, b""),
             ],
         );
-        assert!(
-            matches!(list_pages(&path), Err(Error::Image { entry_name, .. }) if entry_name == "1.bmp")
-        );
+        let (pages, broken) = list_pages_with_broken(&path).unwrap();
+        let sizes: Vec<_> = pages
+            .iter()
+            .map(|page| (page.entry_name.as_str(), page.width, page.height))
+            .collect();
+        assert_eq!(sizes, [("1.bmp", 0, 0), ("2.bmp", 2, 3), ("3.jpg", 0, 0)]);
+        let names: Vec<_> = broken
+            .iter()
+            .map(|BrokenPage { entry_name, reason }| {
+                assert!(!reason.is_empty());
+                entry_name.as_str()
+            })
+            .collect();
+        assert_eq!(names, ["1.bmp", "3.jpg"]);
+        // 坏页的原始内容照样能按记录的区间读出来。
+        assert_eq!(read_page(&path, &pages[0]).unwrap(), b"not an image");
     }
     let image = bmp(2, 3);
     write_zip(&path, &[("1.bmp", Stored, &image)]);

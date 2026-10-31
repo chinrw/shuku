@@ -272,7 +272,11 @@ fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<
         return Ok(None);
     }
     let quick_hash = shuku_archive::quick_hash(path)?;
-    let pages = shuku_archive::list_pages(path)?
+    let (pages, broken) = shuku_archive::list_pages_with_broken(path)?;
+    for page in broken {
+        tracing::warn!(path = %path.display(), entry = page.entry_name, reason = page.reason, "页面读不出尺寸，按坏页入库");
+    }
+    let pages = pages
         .into_iter()
         .map(|page| Page {
             entry_name: page.entry_name,
