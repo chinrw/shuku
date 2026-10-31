@@ -20,7 +20,9 @@ impl IntoResponse for Error {
         let status = match &self {
             Self::Http { status, .. } => *status,
             Self::Store(
-                shuku_store::Error::ArchiveNotFound(_) | shuku_store::Error::CategoryNotFound(_),
+                shuku_store::Error::ArchiveNotFound(_)
+                | shuku_store::Error::CategoryNotFound(_)
+                | shuku_store::Error::TagNotFound(_),
             ) => StatusCode::NOT_FOUND,
             Self::Store(
                 shuku_store::Error::DynamicCategory(_) | shuku_store::Error::CategoryKindChange(_),
@@ -42,7 +44,6 @@ impl App {
             .route("/api/tags", get(suggest_tags))
             .route("/api/recent", get(recent))
             .route("/api/random", get(random))
-            .route("/api/archives/{id}", get(detail))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
             .route(
@@ -55,6 +56,7 @@ impl App {
             )
             .route("/api/archives/{id}/file", get(crate::download::file))
             .route("/api/archives/{id}/progress", put(write_progress))
+            .merge(self.edit_router())
             .merge(self.categories_router())
             .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
@@ -467,26 +469,39 @@ fn tag_counts(tags: Vec<shuku_index::TagCount>) -> Value {
     json!({"tags": tags})
 }
 
-async fn detail(
+pub(crate) async fn detail(
     State(app): State<App>,
     id: std::result::Result<Path<i64>, PathRejection>,
 ) -> Result<Json<Value>> {
     let Path(id) = id.map_err(Error::bad_request)?;
-    app.blocking(move |app| {
-        let reader = app.reader()?;
-        let archive = require_archive(&reader, id)?;
-        let categories = reader.archive_categories(id)?;
-        let tags = tag_groups(&archive.tags);
-        Ok(Json(json!({
-            "id": archive.id, "title": archive.metadata.title,
-            "summary": archive.metadata.summary, "page_count": archive.page_count,
-            "is_new": archive.metadata.is_new, "date_added": archive.metadata.date_added,
-            "source_url": archive.metadata.source_url, "file_size": archive.metadata.file_size,
-            "progress": progress(archive.progress.as_ref()), "tags": tags,
-            "categories": categories, "cover_url": cover_url(id, &archive.metadata.quick_hash),
-        })))
-    })
-    .await
+    app.blocking(move |app| detail_json(&app, id).map(Json))
+        .await
+}
+
+/// 详情直接读库。`missing` 表示文件已经不在内容目录里，网页端据此提供删除记录；
+/// 无法确认时（例如目录没有读权限）按还在处理。
+pub(crate) fn detail_json(app: &App, id: i64) -> Result<Value> {
+    let reader = app.reader()?;
+    let archive = require_archive(&reader, id)?;
+    let categories = reader.archive_categories(id)?;
+    let tags = tag_groups(&archive.tags);
+    let missing = matches!(
+        app.0
+            .config
+            .content_dir
+            .join(&archive.metadata.path)
+            .try_exists(),
+        Ok(false)
+    );
+    Ok(json!({
+        "id": archive.id, "title": archive.metadata.title,
+        "summary": archive.metadata.summary, "page_count": archive.page_count,
+        "is_new": archive.metadata.is_new, "date_added": archive.metadata.date_added,
+        "source_url": archive.metadata.source_url, "file_size": archive.metadata.file_size,
+        "path": archive.metadata.path, "missing": missing,
+        "progress": progress(archive.progress.as_ref()), "tags": tags,
+        "categories": categories, "cover_url": cover_url(id, &archive.metadata.quick_hash),
+    }))
 }
 
 async fn pages(

@@ -56,6 +56,8 @@ pub enum Error {
     DynamicCategory(i64),
     #[error("分类 {0} 不能在静态分类和动态分类之间转换")]
     CategoryKindChange(i64),
+    #[error("标签 {0} 不存在")]
+    TagNotFound(String),
     #[error("SQLite 已经回滚了整个事务")]
     TransactionAborted,
     #[error("页面清单编码错误：{0}")]

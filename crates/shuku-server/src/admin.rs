@@ -87,6 +87,16 @@ impl<T> Capped<T> {
     }
 }
 
+impl Capped<MissingArchive> {
+    /// 问题页列出的失踪记录删掉以后，从列表里拿掉，总数跟着减。超出列表上限、
+    /// 没有列出的那些删掉时总数不变，下次扫描重新统计。
+    pub(crate) fn remove(&mut self, ids: &[i64]) {
+        let before = self.items.len();
+        self.items.retain(|archive| !ids.contains(&archive.id));
+        self.total -= before - self.items.len();
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct FileIssue {
     /// 相对内容目录。

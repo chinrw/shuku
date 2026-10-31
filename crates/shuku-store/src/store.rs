@@ -225,10 +225,138 @@ impl Writer<'_> {
     }
 
     /// 标签按完整名称的 Unicode 小写形式去重，显示形式保留首次写入的大小写。
+    /// 换下来的标签不再被任何归档和 Tankoubon 用到时一并删除。
     pub fn replace_tags(&mut self, id: i64, tags: &[Tag]) -> Result<()> {
-        let transaction = self.connection;
-        set_archive_tags(transaction, id, tags)?;
+        require_archive(self.connection, id)?;
+        set_archive_tags(self.connection, id, tags)
+    }
+
+    /// 改标题或简介，`None` 的不变。
+    pub fn edit_archive(
+        &mut self,
+        id: i64,
+        title: Option<&str>,
+        summary: Option<&str>,
+    ) -> Result<()> {
+        let updated = self.connection.execute(
+            "UPDATE archive SET title = coalesce(?2, title), summary = coalesce(?3, summary)
+             WHERE id = ?1",
+            params![id, title, summary],
+        )?;
+        if updated == 0 {
+            return Err(Error::ArchiveNotFound(id));
+        }
         Ok(())
+    }
+
+    /// 设置或清除来源 URL。
+    pub fn set_source_url(&mut self, id: i64, source_url: Option<&str>) -> Result<()> {
+        let updated = self.connection.execute(
+            "UPDATE archive SET source_url = ?2 WHERE id = ?1",
+            params![id, source_url],
+        )?;
+        if updated == 0 {
+            return Err(Error::ArchiveNotFound(id));
+        }
+        Ok(())
+    }
+
+    /// 给归档加上标签，已经有的不变。
+    pub fn add_tags(&mut self, id: i64, tags: &[Tag]) -> Result<()> {
+        require_archive(self.connection, id)?;
+        let mut associate = self.connection.prepare_cached(
+            "INSERT INTO archive_tag (tag_id, archive_id) VALUES (?1, ?2)
+             ON CONFLICT(tag_id, archive_id) DO NOTHING",
+        )?;
+        for tag in tags {
+            associate.execute([ensure_tag(self.connection, tag)?, id])?;
+        }
+        Ok(())
+    }
+
+    /// 从归档上去掉标签，按小写完整名匹配，归档没有的标签跳过。
+    pub fn remove_tags(&mut self, id: i64, tags: &[Tag]) -> Result<()> {
+        require_archive(self.connection, id)?;
+        let mut remove = self.connection.prepare_cached(
+            "DELETE FROM archive_tag WHERE archive_id = ?1
+                AND tag_id = (SELECT id FROM tag WHERE full = ?2)
+             RETURNING tag_id",
+        )?;
+        let mut removed = Vec::new();
+        for tag in tags {
+            removed.extend(
+                remove
+                    .query_map(params![id, full_name(tag)], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?,
+            );
+        }
+        prune_tags(self.connection, &removed)
+    }
+
+    /// 把标签 `from` 改名为 `to`，返回用到它的归档数。`to` 已经存在时合并进去：
+    /// 原来带 `from` 的归档和 Tankoubon 改带 `to`，`from` 删除。两个名字只差大小写时
+    /// 只改显示形式。
+    pub fn rename_tag(&mut self, from: &Tag, to: &Tag) -> Result<u64> {
+        let connection = self.connection;
+        let from_full = full_name(from);
+        let from_id: i64 = connection
+            .query_row("SELECT id FROM tag WHERE full = ?1", [&from_full], |row| {
+                row.get(0)
+            })
+            .optional()?
+            .ok_or(Error::TagNotFound(from_full))?;
+        let uses: u64 = connection.query_row(
+            "SELECT count(*) FROM archive_tag WHERE tag_id = ?1",
+            [from_id],
+            |row| row.get(0),
+        )?;
+        let to_full = full_name(to);
+        let to_id: Option<i64> = connection
+            .query_row(
+                "SELECT id FROM tag WHERE full = ?1 AND id != ?2",
+                params![to_full, from_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match to_id {
+            None => {
+                connection.execute(
+                    "UPDATE tag SET namespace = ?2, value = ?3, full = ?4 WHERE id = ?1",
+                    params![from_id, to.namespace, to.value, to_full],
+                )?;
+            }
+            Some(to_id) => {
+                connection.execute(
+                    "INSERT INTO archive_tag (tag_id, archive_id)
+                     SELECT ?2, archive_id FROM archive_tag WHERE tag_id = ?1
+                     ON CONFLICT(tag_id, archive_id) DO NOTHING",
+                    [from_id, to_id],
+                )?;
+                connection.execute(
+                    "INSERT INTO tankoubon_tag (tankoubon_id, tag_id)
+                     SELECT tankoubon_id, ?2 FROM tankoubon_tag WHERE tag_id = ?1
+                     ON CONFLICT DO NOTHING",
+                    [from_id, to_id],
+                )?;
+                // 旧标签的关联由外键级联删除。
+                connection.execute("DELETE FROM tag WHERE id = ?1", [from_id])?;
+            }
+        }
+        Ok(uses)
+    }
+
+    /// 删除归档记录和它的标签关联、页面清单、阅读进度、分类和 Tankoubon 成员关系。
+    /// 原始文件不动；只剩这本用到的标签一并删除。
+    pub fn delete_archive(&mut self, id: i64) -> Result<()> {
+        let tags = archive_tag_ids(self.connection, id)?;
+        if self
+            .connection
+            .execute("DELETE FROM archive WHERE id = ?1", [id])?
+            == 0
+        {
+            return Err(Error::ArchiveNotFound(id));
+        }
+        prune_tags(self.connection, &tags)
     }
 
     /// 用 LRR 的元数据和标签覆盖一本已入库的归档。
@@ -506,6 +634,7 @@ pub(crate) fn pack_page_lists(connection: &Connection) -> Result<()> {
 }
 
 fn set_archive_tags(connection: &Connection, id: i64, tags: &[Tag]) -> Result<()> {
+    let old = archive_tag_ids(connection, id)?;
     connection.execute("DELETE FROM archive_tag WHERE archive_id = ?1", [id])?;
     let mut associate = connection.prepare_cached(
         "INSERT INTO archive_tag (tag_id, archive_id) VALUES (?1, ?2)
@@ -514,16 +643,42 @@ fn set_archive_tags(connection: &Connection, id: i64, tags: &[Tag]) -> Result<()
     for tag in tags {
         associate.execute([ensure_tag(connection, tag)?, id])?;
     }
+    prune_tags(connection, &old)
+}
+
+fn archive_tag_ids(connection: &Connection, id: i64) -> Result<Vec<i64>> {
+    Ok(connection
+        .prepare_cached("SELECT tag_id FROM archive_tag WHERE archive_id = ?1")?
+        .query_map([id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+/// 删除 `ids` 里已经没有归档和 Tankoubon 用到的标签。没人用的标签留着会出现在
+/// 搜索框的补全里，改错的标签也就一直删不掉。
+fn prune_tags(connection: &Connection, ids: &[i64]) -> Result<()> {
+    let mut prune = connection.prepare_cached(
+        "DELETE FROM tag WHERE id = ?1
+            AND NOT EXISTS (SELECT 1 FROM archive_tag WHERE tag_id = ?1)
+            AND NOT EXISTS (SELECT 1 FROM tankoubon_tag WHERE tag_id = ?1)",
+    )?;
+    for id in ids {
+        prune.execute([id])?;
+    }
     Ok(())
+}
+
+/// 小写的完整名，标签表按它去重。
+fn full_name(tag: &Tag) -> String {
+    if tag.namespace.is_empty() {
+        tag.value.to_lowercase()
+    } else {
+        format!("{}:{}", tag.namespace, tag.value).to_lowercase()
+    }
 }
 
 /// 返回标签 ID，没有时新建。冲突时的空更新只是为了让 RETURNING 在已有标签上也返回 ID。
 fn ensure_tag(connection: &Connection, tag: &Tag) -> Result<i64> {
-    let full = if tag.namespace.is_empty() {
-        tag.value.to_lowercase()
-    } else {
-        format!("{}:{}", tag.namespace, tag.value).to_lowercase()
-    };
+    let full = full_name(tag);
     Ok(connection
         .prepare_cached(
             "INSERT INTO tag (namespace, value, full) VALUES (?1, ?2, ?3)
