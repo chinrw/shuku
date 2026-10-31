@@ -3,15 +3,22 @@ use std::path::Path;
 
 use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
 
+use crate::reader::read_archive;
 use crate::{
-    ArchiveMetadata, Error, LrrArchive, LrrCategory, LrrTankoubon, Page, Reader, Result, ScanEntry,
-    Tag, open_connection,
+    Archive, ArchiveMetadata, Error, LrrArchive, LrrCategory, LrrTankoubon, Page, Reader, Result,
+    ScanEntry, Tag, open_connection,
 };
 
 /// 读写连接，打开时完成迁移。读方法通过 [`Deref`] 来自 [`Reader`]，
 /// 和写入用同一个连接，所以能读到自己刚提交的数据。
 pub struct Store {
     reader: Reader,
+}
+
+/// 一个写事务里的操作。方法出错时不回滚已经做过的修改，由调用方决定：
+/// 用 `?` 把错误传出 [`Store::write`] 回滚整个事务，或者用 [`Writer::savepoint`] 只撤销一步。
+pub struct Writer<'a> {
+    connection: &'a Connection,
 }
 
 impl Deref for Store {
@@ -23,10 +30,120 @@ impl Deref for Store {
 }
 
 impl Store {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            reader: Reader {
+                connection: open_connection(path)?,
+            },
+        })
+    }
+
+    /// 在一个 IMMEDIATE 事务里执行 `work`，返回 `Ok` 时提交，出错或 panic 时整个回滚。
+    pub fn write<T, E: From<Error>>(
+        &mut self,
+        work: impl FnOnce(&mut Writer<'_>) -> std::result::Result<T, E>,
+    ) -> std::result::Result<T, E> {
+        let transaction = self
+            .reader
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(Error::from)?;
+        let value = work(&mut Writer {
+            connection: &transaction,
+        })?;
+        transaction.commit().map_err(Error::from)?;
+        Ok(value)
+    }
+
+    /// 关掉提交时的自动 checkpoint，改由调用方在空闲时调用 [`Store::checkpoint`]。
+    /// 自动 checkpoint 在提交它的那次写入里同步执行，btrfs 上的 fsync 会让那次写入停顿几十毫秒。
+    pub fn disable_auto_checkpoint(&self) -> Result<()> {
+        self.reader
+            .connection
+            .pragma_update(None, "wal_autocheckpoint", 0)?;
+        Ok(())
+    }
+
+    /// 把 WAL 里已提交的页写回数据库文件，返回是否全部写回。PASSIVE 模式不等读者，
+    /// 比仍在读的快照更新的页留到下次。
+    pub fn checkpoint(&self) -> Result<bool> {
+        let (log, checkpointed): (i64, i64) =
+            self.reader
+                .connection
+                .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
+                    Ok((row.get(1)?, row.get(2)?))
+                })?;
+        Ok(checkpointed == log)
+    }
+
+    pub fn save_archive(
+        &mut self,
+        id: Option<i64>,
+        metadata: &ArchiveMetadata,
+        pages: &[Page],
+    ) -> Result<i64> {
+        self.write(|writer| writer.save_archive(id, metadata, pages))
+    }
+
+    pub fn replace_tags(&mut self, id: i64, tags: &[Tag]) -> Result<()> {
+        self.write(|writer| writer.replace_tags(id, tags))
+    }
+
+    pub fn import_lrr_archive(&mut self, id: i64, lrr: &LrrArchive) -> Result<()> {
+        self.write(|writer| writer.import_lrr_archive(id, lrr))
+    }
+
+    pub fn import_lrr_category(&mut self, category: &LrrCategory) -> Result<()> {
+        self.write(|writer| writer.import_lrr_category(category))
+    }
+
+    pub fn import_lrr_tankoubon(&mut self, tankoubon: &LrrTankoubon) -> Result<()> {
+        self.write(|writer| writer.import_lrr_tankoubon(tankoubon))
+    }
+
+    pub fn write_progress(&mut self, id: i64, page: u32, client_time: i64) -> Result<bool> {
+        self.write(|writer| writer.write_progress(id, page, client_time))
+    }
+
+    pub fn set_content_hash(&mut self, entry: &ScanEntry, hash: &str) -> Result<bool> {
+        self.write(|writer| writer.set_content_hash(entry, hash))
+    }
+}
+
+impl Writer<'_> {
+    /// 在保存点里执行 `work`，出错时只撤销这一步，事务里其余的修改保留。
+    pub fn savepoint<T, E: From<Error>>(
+        &mut self,
+        work: impl FnOnce(&mut Self) -> std::result::Result<T, E>,
+    ) -> std::result::Result<T, E> {
+        self.connection
+            .execute_batch("SAVEPOINT step")
+            .map_err(Error::from)?;
+        match work(self) {
+            Ok(value) => {
+                self.connection
+                    .execute_batch("RELEASE step")
+                    .map_err(Error::from)?;
+                Ok(value)
+            }
+            Err(error) => {
+                self.connection
+                    .execute_batch("ROLLBACK TO step; RELEASE step")
+                    .map_err(Error::from)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// 读到的是本事务里已经做过的修改。
+    pub fn archive(&self, id: i64) -> Result<Option<Archive>> {
+        read_archive(self.connection, id)
+    }
+
     /// 只在归档的文件身份仍与 `entry` 一致时写入完整指纹，返回是否写入。
     /// 指纹在锁外计算，期间扫描可能已经换了文件，那时算出的指纹已经过时。
     pub fn set_content_hash(&mut self, entry: &ScanEntry, hash: &str) -> Result<bool> {
-        Ok(self.reader.connection.execute(
+        Ok(self.connection.execute(
             "UPDATE archive SET content_hash = ?1
              WHERE id = ?2 AND path = ?3 AND file_size = ?4 AND mtime = ?5 AND quick_hash = ?6
                 AND content_hash IS NULL",
@@ -41,14 +158,6 @@ impl Store {
         )? > 0)
     }
 
-    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Ok(Self {
-            reader: Reader {
-                connection: open_connection(path)?,
-            },
-        })
-    }
-
     /// `None` 插入新归档，`Some(id)` 更新已有归档并保留其身份。
     /// 页面清单整体替换，page_no 和 page_count 由清单顺序和长度生成。
     pub fn save_archive(
@@ -57,10 +166,7 @@ impl Store {
         metadata: &ArchiveMetadata,
         pages: &[Page],
     ) -> Result<i64> {
-        let transaction = self
-            .reader
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.connection;
         let values = params![
             metadata.path,
             metadata.title,
@@ -105,27 +211,19 @@ impl Store {
              ON CONFLICT(archive_id) DO UPDATE SET pages = excluded.pages",
             params![id, postcard::to_stdvec(pages)?],
         )?;
-        transaction.commit()?;
         Ok(id)
     }
 
     /// 标签按完整名称的 Unicode 小写形式去重，显示形式保留首次写入的大小写。
     pub fn replace_tags(&mut self, id: i64, tags: &[Tag]) -> Result<()> {
-        let transaction = self
-            .reader
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        set_archive_tags(&transaction, id, tags)?;
-        transaction.commit()?;
+        let transaction = self.connection;
+        set_archive_tags(transaction, id, tags)?;
         Ok(())
     }
 
     /// 用 LRR 的元数据和标签覆盖一本已入库的归档。
     pub fn import_lrr_archive(&mut self, id: i64, lrr: &LrrArchive) -> Result<()> {
-        let transaction = self
-            .reader
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.connection;
         let updated = transaction.execute(
             "UPDATE archive SET title = ?1, summary = ?2, date_added = COALESCE(?3, date_added),
                 source_url = ?4, is_new = ?5, lrr_id = ?6
@@ -143,17 +241,13 @@ impl Store {
         if updated == 0 {
             return Err(Error::ArchiveNotFound(id));
         }
-        set_archive_tags(&transaction, id, &lrr.tags)?;
-        transaction.commit()?;
+        set_archive_tags(transaction, id, &lrr.tags)?;
         Ok(())
     }
 
     /// 按 LRR ID 新建或更新分类，归档成员整体替换。
     pub fn import_lrr_category(&mut self, category: &LrrCategory) -> Result<()> {
-        let transaction = self
-            .reader
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.connection;
         let id: i64 = transaction.query_row(
             "INSERT INTO category (lrr_id, name, search, pinned) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(lrr_id) DO UPDATE SET name = excluded.name, search = excluded.search,
@@ -177,16 +271,12 @@ impl Store {
                 insert.execute([id, *archive])?;
             }
         }
-        transaction.commit()?;
         Ok(())
     }
 
     /// 按 LRR ID 新建或更新 Tankoubon，标签和归档成员整体替换，position 从 1 开始。
     pub fn import_lrr_tankoubon(&mut self, tankoubon: &LrrTankoubon) -> Result<()> {
-        let transaction = self
-            .reader
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.connection;
         let id: i64 = transaction.query_row(
             "INSERT INTO tankoubon (lrr_id, name, summary) VALUES (?1, ?2, ?3)
              ON CONFLICT(lrr_id) DO UPDATE SET name = excluded.name, summary = excluded.summary
@@ -205,7 +295,7 @@ impl Store {
                  ON CONFLICT DO NOTHING",
             )?;
             for value in &tankoubon.tags {
-                tag.execute([id, ensure_tag(&transaction, value)?])?;
+                tag.execute([id, ensure_tag(transaction, value)?])?;
             }
             let mut archive = transaction.prepare_cached(
                 "INSERT INTO tankoubon_archive (tankoubon_id, archive_id, position)
@@ -215,17 +305,13 @@ impl Store {
                 archive.execute(params![id, member, index as i64 + 1])?;
             }
         }
-        transaction.commit()?;
         Ok(())
     }
 
     /// 仅接受翻页时间严格更新的上报，返回是否写入。
     pub fn write_progress(&mut self, id: i64, page: u32, client_time: i64) -> Result<bool> {
-        let transaction = self
-            .reader
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_archive(&transaction, id)?;
+        let transaction = self.connection;
+        require_archive(transaction, id)?;
         let accepted = transaction.execute(
             "INSERT INTO progress (archive_id, page, client_time, updated_at)
              VALUES (?1, ?2, ?3, CAST(unixepoch('subsec') * 1000 AS INTEGER))
@@ -234,7 +320,6 @@ impl Store {
              WHERE excluded.client_time > progress.client_time",
             params![id, page, client_time],
         )? > 0;
-        transaction.commit()?;
         Ok(accepted)
     }
 }

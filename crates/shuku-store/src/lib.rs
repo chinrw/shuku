@@ -11,7 +11,7 @@ pub use models::{
 };
 pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;
-pub use store::Store;
+pub use store::{Store, Writer};
 
 use std::{path::Path, time::Duration};
 

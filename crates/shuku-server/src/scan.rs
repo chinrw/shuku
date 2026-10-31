@@ -73,74 +73,62 @@ impl App {
                     prepare(path, relative, existing.get(relative))
                 })
                 .collect();
+            let mut saves = Vec::new();
             for (path, prepared) in batch.iter().zip(prepared) {
-                let prepared = match prepared {
-                    Ok(Some(prepared)) => prepared,
-                    Ok(None) => {
-                        report.unchanged += 1;
-                        continue;
-                    }
+                match prepared {
+                    Ok(Some(prepared)) => saves.push(prepared),
+                    Ok(None) => report.unchanged += 1,
                     Err(Error::Archive(shuku_archive::Error::UnsupportedFormat)) => {
                         tracing::info!(path = %path.display(), "跳过不支持的格式");
                         report.skipped += 1;
-                        continue;
                     }
                     Err(error) => {
                         tracing::warn!(path = %path.display(), %error, "扫描文件失败");
                         report.failed += 1;
-                        continue;
                     }
-                };
-                let existing_id = existing.get(&prepared.path).map(|entry| entry.id);
-                let moved_id = if existing_id.is_none() {
-                    missing
-                        .get_mut(&prepared.quick_hash)
-                        .and_then(VecDeque::pop_front)
-                } else {
-                    None
-                };
-                let id = existing_id.or(moved_id);
-                let mut store = self.store()?;
-                let mut metadata = match id {
-                    Some(id) => {
-                        store
-                            .archive(id)?
-                            .ok_or(shuku_store::Error::ArchiveNotFound(id))?
-                            .metadata
-                    }
-                    None => ArchiveMetadata {
-                        path: prepared.path.clone(),
-                        title: Path::new(&prepared.path)
-                            .file_stem()
-                            .ok_or_else(|| Error::File(prepared.path.clone()))?
-                            .to_string_lossy()
-                            .into_owned(),
-                        summary: String::new(),
-                        file_size: prepared.file_size,
-                        mtime: prepared.mtime,
-                        quick_hash: prepared.quick_hash.clone(),
-                        content_hash: None,
-                        date_added: unix_seconds(std::time::SystemTime::now())?,
-                        source_url: None,
-                        is_new: true,
-                        lrr_id: None,
-                    },
-                };
-                metadata.path = prepared.path;
-                metadata.file_size = prepared.file_size;
-                metadata.mtime = prepared.mtime;
-                metadata.quick_hash = prepared.quick_hash;
-                // 完整指纹要读整个文件，改由以后的后台任务计算。内容变了，旧值也随之作废。
-                metadata.content_hash = None;
-                store.save_archive(id, &metadata, &prepared.pages)?;
-                if moved_id.is_some() {
-                    report.moved += 1;
-                } else if existing_id.is_some() {
-                    report.updated += 1;
-                } else {
-                    report.added += 1;
                 }
             }
+            if saves.is_empty() {
+                continue;
+            }
+            // 一批一个事务。已有记录的元数据在同一个事务里读出，迁移工具同时改了标题也不会被覆盖。
+            self.write(|writer| {
+                for prepared in saves {
+                    let existing_id = existing.get(&prepared.path).map(|entry| entry.id);
+                    let moved_id = if existing_id.is_none() {
+                        missing
+                            .get_mut(&prepared.quick_hash)
+                            .and_then(VecDeque::pop_front)
+                    } else {
+                        None
+                    };
+                    let id = existing_id.or(moved_id);
+                    let mut metadata = match id {
+                        Some(id) => {
+                            writer
+                                .archive(id)?
+                                .ok_or(shuku_store::Error::ArchiveNotFound(id))?
+                                .metadata
+                        }
+                        None => new_metadata(&prepared)?,
+                    };
+                    metadata.path = prepared.path;
+                    metadata.file_size = prepared.file_size;
+                    metadata.mtime = prepared.mtime;
+                    metadata.quick_hash = prepared.quick_hash;
+                    // 完整指纹要读整个文件，由后台任务计算。内容变了，旧值也随之作废。
+                    metadata.content_hash = None;
+                    writer.save_archive(id, &metadata, &prepared.pages)?;
+                    if moved_id.is_some() {
+                        report.moved += 1;
+                    } else if existing_id.is_some() {
+                        report.updated += 1;
+                    } else {
+                        report.added += 1;
+                    }
+                }
+                Ok(())
+            })?;
         }
         // 在写锁外构建，期间进度上报照常写入。
         let index = build_index(&*self.reader()?)?;
@@ -148,6 +136,26 @@ impl App {
         tracing::info!(?report, "扫描完成");
         Ok(report)
     }
+}
+
+fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
+    Ok(ArchiveMetadata {
+        path: prepared.path.clone(),
+        title: Path::new(&prepared.path)
+            .file_stem()
+            .ok_or_else(|| Error::File(prepared.path.clone()))?
+            .to_string_lossy()
+            .into_owned(),
+        summary: String::new(),
+        file_size: prepared.file_size,
+        mtime: prepared.mtime,
+        quick_hash: prepared.quick_hash.clone(),
+        content_hash: None,
+        date_added: unix_seconds(std::time::SystemTime::now())?,
+        source_url: None,
+        is_new: true,
+        lrr_id: None,
+    })
 }
 
 fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<Option<Prepared>> {

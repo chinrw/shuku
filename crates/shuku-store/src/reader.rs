@@ -72,46 +72,9 @@ impl Reader {
     /// 元数据、标签和进度从同一个 SQLite 读取快照中取得。
     pub fn archive(&self, id: i64) -> Result<Option<Archive>> {
         let transaction = self.connection.unchecked_transaction()?;
-        let archive = transaction
-            .query_row("SELECT * FROM archive WHERE id = ?1", [id], |row| {
-                Ok(Archive {
-                    id: row.get("id")?,
-                    metadata: ArchiveMetadata {
-                        path: row.get("path")?,
-                        title: row.get("title")?,
-                        summary: row.get("summary")?,
-                        file_size: row.get("file_size")?,
-                        mtime: row.get("mtime")?,
-                        quick_hash: row.get("quick_hash")?,
-                        content_hash: row.get("content_hash")?,
-                        date_added: row.get("date_added")?,
-                        source_url: row.get("source_url")?,
-                        is_new: row.get("is_new")?,
-                        lrr_id: row.get("lrr_id")?,
-                    },
-                    page_count: row.get("page_count")?,
-                    tags: Vec::new(),
-                    progress: None,
-                })
-            })
-            .optional()?;
-        let Some(mut archive) = archive else {
-            return Ok(None);
-        };
-        archive.tags = transaction.prepare_cached(
-            "SELECT tag.namespace, tag.value FROM tag JOIN archive_tag ON tag.id = archive_tag.tag_id
-             WHERE archive_tag.archive_id = ?1 ORDER BY tag.full"
-        )?.query_map([id], |row| Ok(Tag { namespace: row.get(0)?, value: row.get(1)? }))?
-            .collect::<rusqlite::Result<_>>()?;
-        archive.progress = transaction
-            .query_row(
-                "SELECT page, client_time, updated_at FROM progress WHERE archive_id = ?1",
-                [id],
-                read_progress,
-            )
-            .optional()?;
+        let archive = read_archive(&transaction, id)?;
         transaction.commit()?;
-        Ok(Some(archive))
+        Ok(archive)
     }
 
     /// 返回按 page_no 升序排列的清单；不存在的归档返回空清单。
@@ -232,4 +195,47 @@ fn read_progress(row: &rusqlite::Row<'_>) -> rusqlite::Result<Progress> {
         client_time: row.get("client_time")?,
         updated_at: row.get("updated_at")?,
     })
+}
+
+/// 不自己开事务，调用方要在一个事务里调用，元数据、标签和进度才来自同一个快照。
+pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Archive>> {
+    let archive = connection
+        .query_row("SELECT * FROM archive WHERE id = ?1", [id], |row| {
+            Ok(Archive {
+                id: row.get("id")?,
+                metadata: ArchiveMetadata {
+                    path: row.get("path")?,
+                    title: row.get("title")?,
+                    summary: row.get("summary")?,
+                    file_size: row.get("file_size")?,
+                    mtime: row.get("mtime")?,
+                    quick_hash: row.get("quick_hash")?,
+                    content_hash: row.get("content_hash")?,
+                    date_added: row.get("date_added")?,
+                    source_url: row.get("source_url")?,
+                    is_new: row.get("is_new")?,
+                    lrr_id: row.get("lrr_id")?,
+                },
+                page_count: row.get("page_count")?,
+                tags: Vec::new(),
+                progress: None,
+            })
+        })
+        .optional()?;
+    let Some(mut archive) = archive else {
+        return Ok(None);
+    };
+    archive.tags = connection.prepare_cached(
+        "SELECT tag.namespace, tag.value FROM tag JOIN archive_tag ON tag.id = archive_tag.tag_id
+         WHERE archive_tag.archive_id = ?1 ORDER BY tag.full"
+    )?.query_map([id], |row| Ok(Tag { namespace: row.get(0)?, value: row.get(1)? }))?
+        .collect::<rusqlite::Result<_>>()?;
+    archive.progress = connection
+        .query_row(
+            "SELECT page, client_time, updated_at FROM progress WHERE archive_id = ?1",
+            [id],
+            read_progress,
+        )
+        .optional()?;
+    Ok(Some(archive))
 }

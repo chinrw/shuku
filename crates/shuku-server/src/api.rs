@@ -1,4 +1,4 @@
-use crate::{App, Error, Result};
+use crate::{App, Error, Result, db};
 use axum::{
     Json, Router,
     extract::{
@@ -74,19 +74,20 @@ async fn write_progress(
 ) -> Result<Json<Value>> {
     let Path(id) = id.map_err(Error::bad_request)?;
     let Json(body) = body.map_err(Error::bad_request)?;
+    let (reply, outcome) = tokio::sync::oneshot::channel();
     app.blocking(move |app| {
-        let mut store = app.store()?;
-        let archive = require_archive(&store, id)?;
-        if body.page >= archive.page_count {
-            return Err(Error::bad_request("page 超出归档页数"));
-        }
-        let accepted = store.write_progress(id, body.page, body.client_time)?;
-        let current = require_archive(&store, id)?;
-        Ok(Json(
-            json!({"accepted": accepted, "progress": progress(current.progress.as_ref())}),
-        ))
+        app.enqueue(db::Request::Progress(db::ProgressRequest {
+            id,
+            page: body.page,
+            client_time: body.client_time,
+            reply,
+        }))
     })
-    .await
+    .await?;
+    let outcome = outcome.await.map_err(|_| db::queue_stopped())??;
+    Ok(Json(
+        json!({"accepted": outcome.accepted, "progress": progress(outcome.progress.as_ref())}),
+    ))
 }
 
 #[derive(Default, Deserialize)]

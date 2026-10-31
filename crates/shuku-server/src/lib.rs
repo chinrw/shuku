@@ -1,6 +1,7 @@
 //! Shuku 的扫描和 HTTP 服务。
 
 mod api;
+mod db;
 mod decode;
 mod hash;
 mod images;
@@ -8,13 +9,14 @@ mod scan;
 
 use arc_swap::ArcSwap;
 use shuku_index::Index;
-use shuku_store::{PooledReader, Reader, ReaderPool, Store};
+use shuku_store::{PooledReader, Reader, Writer};
 use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc::SyncSender,
     },
     time::Instant,
 };
@@ -57,6 +59,8 @@ pub enum Error {
     Task(#[from] tokio::task::JoinError),
     #[error("数据库锁已损坏")]
     Lock,
+    #[error("写入失败：{0}")]
+    Write(String),
     #[error("配置错误：{0}")]
     Config(String),
     #[error("文件不可用：{0}")]
@@ -83,9 +87,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 struct Inner {
     config: Config,
-    /// 唯一的写连接。读走 `readers`，不和写争这把锁。
-    store: Mutex<Store>,
-    readers: ReaderPool,
+    database: Arc<db::Database>,
+    /// 进度上报和指纹补算经这里合并提交；扫描直接调用 [`db::Database::write`]。
+    writes: SyncSender<db::Request>,
     index: ArcSwap<Index>,
     scan_lock: Mutex<()>,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
@@ -111,14 +115,13 @@ impl App {
                 ));
             }
             std::fs::create_dir_all(&config.data_dir)?;
-            let database = config.data_dir.join("shuku.sqlite");
-            let store = Store::open(&database)?;
-            let readers = ReaderPool::new(database);
-            let index = build_index(&*readers.get()?)?;
+            let database = Arc::new(db::Database::open(&config.data_dir.join("shuku.sqlite"))?);
+            let index = build_index(&*database.reader()?)?;
+            let writes = db::spawn_writer(database.clone())?;
             Ok(Self(Arc::new(Inner {
                 config,
-                store: Mutex::new(store),
-                readers,
+                database,
+                writes,
                 index: ArcSwap::from_pointee(index),
                 scan_lock: Mutex::new(()),
                 stopping: AtomicBool::new(false),
@@ -137,12 +140,17 @@ impl App {
         self.0.index.load_full()
     }
 
-    fn store(&self) -> Result<MutexGuard<'_, Store>> {
-        self.0.store.lock().map_err(|_| Error::Lock)
+    fn reader(&self) -> Result<PooledReader<'_>> {
+        self.0.database.reader()
     }
 
-    fn reader(&self) -> Result<PooledReader<'_>> {
-        Ok(self.0.readers.get()?)
+    fn write<T>(&self, work: impl FnOnce(&mut Writer<'_>) -> Result<T>) -> Result<T> {
+        self.0.database.write(work)
+    }
+
+    /// 写队列满时阻塞，所以只在阻塞线程里调用。
+    fn enqueue(&self, request: db::Request) -> Result<()> {
+        self.0.writes.send(request).map_err(|_| db::queue_stopped())
     }
 
     async fn blocking<T: Send + 'static>(

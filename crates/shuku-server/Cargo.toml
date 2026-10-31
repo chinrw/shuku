@@ -27,7 +27,7 @@ shuku-index = { path = "../shuku-index" }
 shuku-store = { path = "../shuku-store" }
 tempfile = "3"
 thiserror.workspace = true
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync"] }
 tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"

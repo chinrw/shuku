@@ -97,6 +97,66 @@ async fn progress_rejects_stale_equal_and_out_of_range_reports() {
 }
 
 #[tokio::test]
+async fn concurrent_progress_reports_commit_together_and_fail_one_by_one() {
+    let fixture = Fixture::new();
+    let names: Vec<_> = (0..8).map(|number| format!("{number}.cbz")).collect();
+    for name in &names {
+        fixture.archive(name, 10, 20);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let store = Store::open(fixture.database()).unwrap();
+    let ids: Vec<_> = names
+        .iter()
+        .map(|name| store.find_by_path(name).unwrap().unwrap())
+        .collect();
+    // 第一条立即提交，其余在同一秒里到达，合并进下一次提交。越界的那条单独失败。
+    let reports = ids.clone().into_iter().enumerate().map(|(number, id)| {
+        let router = router.clone();
+        let page = if number == 3 { 5 } else { 1 };
+        async move {
+            request(
+                &router,
+                "PUT",
+                &format!("/api/archives/{id}/progress"),
+                Some(value!({"page": page, "client_time": 1000})),
+                &[],
+            )
+            .await
+            .0
+        }
+    });
+    let statuses = futures_join_all(reports).await;
+    for (number, status) in statuses.into_iter().enumerate() {
+        let expected = if number == 3 {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::OK
+        };
+        assert_eq!(status, expected, "{number}");
+    }
+    for (number, id) in ids.iter().enumerate() {
+        let progress = store.archive(*id).unwrap().unwrap().progress;
+        assert_eq!(
+            progress.map(|progress| progress.page),
+            (number != 3).then_some(1)
+        );
+    }
+}
+
+async fn futures_join_all<F: std::future::Future<Output = StatusCode> + Send + 'static>(
+    futures: impl Iterator<Item = F>,
+) -> Vec<StatusCode> {
+    let tasks: Vec<_> = futures.map(tokio::spawn).collect();
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap());
+    }
+    statuses
+}
+
+#[tokio::test]
 async fn search_paginates_and_returns_details_pages_and_query_errors() {
     let fixture = Fixture::new();
     for title in ["漫画 10", "漫画 2", "other"] {

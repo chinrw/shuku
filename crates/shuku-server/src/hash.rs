@@ -1,6 +1,11 @@
-use crate::{App, Result, scan::unix_seconds};
+use crate::{App, Result, db, scan::unix_seconds};
 use shuku_store::ScanEntry;
-use std::{fs::File, io::ErrorKind, path::Path, sync::atomic::Ordering};
+use std::{
+    fs::File,
+    io::ErrorKind,
+    path::Path,
+    sync::{atomic::Ordering, mpsc},
+};
 
 /// 每次从数据库取这么多本，取的时候不持有锁太久，也不把 30 万条一次读进内存。
 const BATCH: usize = 256;
@@ -15,7 +20,7 @@ pub struct HashReport {
 
 impl App {
     /// 给还没有完整指纹的归档补算整文件 BLAKE3。逐本顺序读，不和读页争抢磁盘；
-    /// 计算时不持有数据库锁，写入时再核对文件身份。调用 [`App::stop`] 后在
+    /// 结果经写队列合并提交，写入时再核对文件身份。调用 [`App::stop`] 后在
     /// 当前文件算完时返回，所以可以随时中断，下次从没算过的归档继续。
     pub async fn hash_contents(&self) -> Result<HashReport> {
         self.blocking(|app| app.hash_contents_blocking()).await
@@ -23,6 +28,9 @@ impl App {
 
     fn hash_contents_blocking(&self) -> Result<HashReport> {
         let mut report = HashReport::default();
+        // 算好的指纹交给写队列合并提交，不等它写完就算下一本；回复在这里清点。
+        let (reply, replies) = mpsc::channel();
+        let mut queued = 0;
         let mut after = 0;
         while !self.0.stopping.load(Ordering::Relaxed) {
             let batch = self.reader()?.missing_content_hashes(after, BATCH)?;
@@ -34,19 +42,46 @@ impl App {
                 }
                 let path = self.0.config.content_dir.join(&entry.path);
                 match hash_unchanged(&path, &entry) {
-                    Ok(Some(hash)) if self.store()?.set_content_hash(&entry, &hash)? => {
-                        report.hashed += 1
+                    Ok(Some(hash)) => {
+                        self.enqueue(db::Request::ContentHash(db::HashRequest {
+                            entry,
+                            hash,
+                            reply: reply.clone(),
+                        }))?;
+                        queued += 1;
                     }
-                    Ok(_) => report.skipped += 1,
+                    Ok(None) => report.skipped += 1,
                     Err(error) => {
                         tracing::warn!(path = %path.display(), %error, "计算完整指纹失败");
                         report.failed += 1;
                     }
                 }
             }
+            for written in replies.try_iter() {
+                count(&mut report, written?);
+                queued -= 1;
+            }
+        }
+        drop(reply);
+        for written in replies {
+            count(&mut report, written?);
+            queued -= 1;
+        }
+        // 写队列线程退出时会丢掉没回复的请求。
+        if queued > 0 {
+            return Err(db::queue_stopped());
         }
         tracing::info!(?report, "完整指纹计算结束");
         Ok(report)
+    }
+}
+
+/// 写入时文件身份已经和算指纹时不同，说明期间扫描换了文件，算作跳过。
+fn count(report: &mut HashReport, written: bool) {
+    if written {
+        report.hashed += 1;
+    } else {
+        report.skipped += 1;
     }
 }
 
