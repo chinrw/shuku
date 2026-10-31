@@ -538,4 +538,40 @@ async fn extra_skip_ignores_single_folder_pages_and_hidden_zips_are_still_archiv
     app.scan().await.unwrap();
     let issues = common::json(&router, "/api/admin/issues").await;
     assert_eq!(issues["missing"]["total"], 0);
+
+    // 规则也命中图片扩展名的 ZIP 时，它照样算入库的书：改名后保留原来的记录。
+    let zip = store.find_by_path(".book.jpg").unwrap().unwrap();
+    std::fs::rename(content.join(".book.jpg"), content.join("book.cbz")).unwrap();
+    assert_eq!(app.scan().await.unwrap().moved, 1);
+    assert_eq!(store.find_by_path("book.cbz").unwrap(), Some(zip));
+}
+
+#[tokio::test]
+async fn a_skipped_folder_with_an_image_like_name_is_left_alone_after_it_disappears() {
+    let fixture = Fixture::new();
+    let png = fixture.archive("unused.cbz", 30, 40);
+    std::fs::remove_file(fixture.config.content_dir.join("unused.cbz")).unwrap();
+    let folder = fixture.config.content_dir.join("cover.jpg");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("1.png"), &png).unwrap();
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let store = Store::open(fixture.database()).unwrap();
+    let id = store.find_by_path("cover.jpg").unwrap().unwrap();
+    let router = app.router();
+    common::request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"extra_skip": ["cover.jpg"]})),
+        &[],
+    )
+    .await;
+    std::fs::rename(&folder, fixture.config.content_dir.join("other")).unwrap();
+    let report = app.scan().await.unwrap();
+    // other 作为新书入库，不认领被跳过的那条记录，那条记录也不算失踪。
+    assert_eq!((report.added, report.moved), (1, 0));
+    assert_eq!(store.find_by_path("cover.jpg").unwrap(), Some(id));
+    let issues = common::json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["missing"]["total"], 0);
 }

@@ -100,6 +100,7 @@ impl App {
             }
         }
         let mut missing: HashMap<String, VecDeque<(i64, String)>> = HashMap::new();
+        let reader = self.reader()?;
         for entry in &entries {
             let path = content.join(&entry.path);
             // 读不了的目录里的记录无法判断还在不在，不当作失踪，免得被同内容的新文件顶替。
@@ -107,10 +108,16 @@ impl App {
                 continue;
             }
             // 按设置跳过的路径（隐藏条目、额外跳过的名字）里的记录也无法判断，同样不动。
-            if Path::new(&entry.path)
-                .components()
-                .any(|component| excluded(&settings, component.as_os_str()))
-            {
+            if record_excluded(&settings, &entry.path, || {
+                // 路径还在就看它现在是不是文件；已经不在了就看页面清单：ZIP 的第一页前面总有
+                // 本地文件头，偏移不会是 0，文件夹书的页面偏移都是 0。
+                if path.exists() {
+                    Ok(path.is_file())
+                } else {
+                    let pages = reader.pages(entry.id)?;
+                    Ok(pages.first().is_some_and(|page| page.data_offset > 0))
+                }
+            })? {
                 continue;
             }
             // 文件夹里的图片都删了、只剩空目录时也算失踪。
@@ -129,6 +136,7 @@ impl App {
                 }
             }
         }
+        drop(reader);
         let existing: HashMap<_, _> = entries
             .into_iter()
             .map(|entry| (entry.path.clone(), entry))
@@ -270,6 +278,32 @@ impl App {
 fn excluded(settings: &crate::settings::ScanSettings, name: &std::ffi::OsStr) -> bool {
     let hidden = name.as_encoded_bytes().starts_with(b".");
     (hidden && !settings.scan_hidden) || name.to_str().is_some_and(|name| settings.skips(name))
+}
+
+/// 已入库的记录是否在按设置跳过的地方，规则和 [`skipped_entry`] 一致：路径里的目录按名字，
+/// 最后一段是图片扩展名的 ZIP 文件只看隐藏规则。`is_zip_file` 只在最后一段是图片扩展名、
+/// 需要分清它是 ZIP 文件还是文件夹书时才调用。
+fn record_excluded(
+    settings: &crate::settings::ScanSettings,
+    relative: &str,
+    is_zip_file: impl FnOnce() -> Result<bool>,
+) -> Result<bool> {
+    let components: Vec<_> = Path::new(relative).components().collect();
+    let Some((last, parents)) = components.split_last() else {
+        return Ok(false);
+    };
+    if parents
+        .iter()
+        .any(|component| excluded(settings, component.as_os_str()))
+    {
+        return Ok(true);
+    }
+    let name = last.as_os_str();
+    if name.to_str().is_some_and(shuku_archive::is_image) && is_zip_file()? {
+        Ok(name.as_encoded_bytes().starts_with(b".") && !settings.scan_hidden)
+    } else {
+        Ok(excluded(settings, name))
+    }
 }
 
 /// 遍历时跳过的条目。“额外跳过”不作用于单张图片：文件夹书的页面清单和指纹总是包含其中全部
