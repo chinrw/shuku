@@ -8,7 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{BrokenPage, CompressionMethod, Error, MAX_PAGE_SIZE, Page, Result, is_image, jpeg};
 
-/// 文件夹直接包含的图片，按文件名的自然序。以 `.` 开头的文件不算页面。
+/// 文件夹直接包含的图片，按文件名的自然序。以 `.` 开头的文件和改成图片扩展名的 ZIP 不算页面，
+/// 后者由扫描当作单独的归档，和扫描找书时的规则一致。
 fn images(dir: &Path) -> Result<Vec<(String, fs::Metadata)>> {
     let mut images = Vec::new();
     for entry in fs::read_dir(dir)? {
@@ -20,7 +21,7 @@ fn images(dir: &Path) -> Result<Vec<(String, fs::Metadata)>> {
             continue;
         }
         let metadata = entry.metadata()?;
-        if metadata.is_file() {
+        if metadata.is_file() && !crate::has_zip_magic(entry.path())? {
             images.push((name, metadata));
         }
     }
@@ -50,12 +51,19 @@ fn open_image(path: &Path) -> Result<File> {
 pub struct Identity {
     /// 文件大小；文件夹是其中图片的总大小。
     pub size: u64,
-    /// Unix 秒。文件是修改时间；文件夹是文件夹本身和每张图修改时间之和：任何一张图被改、
-    /// 页面改名或增删（文件夹本身的修改时间会变）都会让它变，即使有的图带着未来的时间戳。
-    /// 只用来比较，不是一个时刻。
+    /// 文件是修改时间（Unix 秒）。文件夹是文件夹本身的修改时间和每张图的文件名、大小、
+    /// 修改时间（都到纳秒）的 64 位摘要：页面被改、改名、互换名字或增删都会让它变，
+    /// 即使发生在同一秒、或者有的图带着未来的时间戳。只用来比较，不是一个时刻。
     pub modified: i64,
     /// 最新的修改时间，文件夹里也算上文件夹本身。新书的加入时间用它。
     pub newest: SystemTime,
+}
+
+fn unix_nanos(time: SystemTime) -> i128 {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => elapsed.as_nanos() as i128,
+        Err(before) => -(before.duration().as_nanos() as i128),
+    }
 }
 
 fn unix_seconds(time: SystemTime) -> i64 {
@@ -77,18 +85,26 @@ pub fn identity(path: impl AsRef<Path>) -> Result<Identity> {
             newest: own,
         });
     }
-    let mut identity = Identity {
-        size: 0,
-        modified: unix_seconds(own),
-        newest: own,
-    };
-    for (_, metadata) in images(path)? {
+    let mut size = 0;
+    let mut newest = own;
+    let mut digest = blake3::Hasher::new();
+    digest.update(&unix_nanos(own).to_le_bytes());
+    for (name, metadata) in images(path)? {
         let modified = metadata.modified()?;
-        identity.size += metadata.len();
-        identity.modified = identity.modified.wrapping_add(unix_seconds(modified));
-        identity.newest = identity.newest.max(modified);
+        size += metadata.len();
+        newest = newest.max(modified);
+        digest.update(&(name.len() as u64).to_le_bytes());
+        digest.update(name.as_bytes());
+        digest.update(&metadata.len().to_le_bytes());
+        digest.update(&unix_nanos(modified).to_le_bytes());
     }
-    Ok(identity)
+    let mut bytes = [0_u8; 8];
+    bytes.copy_from_slice(&digest.finalize().as_bytes()[..8]);
+    Ok(Identity {
+        size,
+        modified: i64::from_le_bytes(bytes),
+        newest,
+    })
 }
 
 /// 和 [`crate::list_pages_with_broken`] 一样，坏页的宽和高记为 0。
@@ -172,7 +188,13 @@ pub fn folder_content_hash(dir: impl AsRef<Path>) -> Result<String> {
 /// 文件名只能是扫描时记下的单层文件名，不能带路径分隔符。
 pub(crate) fn read_folder_page(dir: &Path, page: &Page) -> Result<Vec<u8>> {
     let name = &page.entry_name;
-    if name.is_empty() || name.contains(['/', '\\']) || name == ".." {
+    // 只接受恰好一段普通的文件名，排除路径分隔符、`.` 和 `..`。Unix 文件名里的反斜杠是普通字符。
+    let mut components = Path::new(name).components();
+    let single = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(part)), None) if part == name.as_str()
+    );
+    if !single {
         return Err(Error::CorruptEntry {
             entry_name: name.clone(),
             reason: "文件夹页面的文件名无效",

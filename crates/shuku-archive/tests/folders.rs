@@ -49,12 +49,6 @@ fn folder_pages_are_its_images_in_natural_order() {
         .map(|name| fs::metadata(book.join(name)).unwrap().modified().unwrap())
         .collect();
     assert_eq!(identity.newest, *times.iter().max().unwrap());
-    let seconds = |time: &std::time::SystemTime| {
-        time.duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-    };
-    assert_eq!(identity.modified, times.iter().map(seconds).sum::<i64>());
 }
 
 #[test]
@@ -97,7 +91,7 @@ fn folder_pages_only_read_plain_file_names_of_the_recorded_size() {
         read_page(&book, &page),
         Err(Error::CorruptEntry { .. })
     ));
-    for name in ["../secret.bmp", "..", ""] {
+    for name in ["../secret.bmp", "..", ".", "", "./1.bmp", "1.bmp/"] {
         page.entry_name = name.into();
         assert!(
             matches!(read_page(&book, &page), Err(Error::CorruptEntry { .. })),
@@ -160,4 +154,60 @@ fn names_equal_in_natural_order_are_ordered_by_their_exact_spelling() {
     let (pages, _) = list_folder_pages_with_broken(&book).unwrap();
     let names: Vec<_> = pages.iter().map(|page| page.entry_name.as_str()).collect();
     assert_eq!(names, ["01.bmp", "1.bmp", "A.bmp", "a.bmp"]);
+}
+
+#[test]
+fn identity_changes_when_pages_are_renamed_or_swapped_within_the_same_second() {
+    let directory = tempfile::tempdir().unwrap();
+    let book = directory.path().join("book");
+    fs::create_dir(&book).unwrap();
+    fs::write(book.join("1.bmp"), bmp(4, 6)).unwrap();
+    fs::write(book.join("2.bmp"), bmp(6, 4)).unwrap();
+    // 把文件夹和图片的修改时间都钉在同一个时刻，只剩文件名能区分。
+    let pin = |book: &std::path::Path| {
+        let moment = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for name in ["1.bmp", "2.bmp", ""] {
+            fs::File::open(book.join(name))
+                .unwrap()
+                .set_modified(moment)
+                .unwrap();
+        }
+    };
+    pin(&book);
+    let before = identity(&book).unwrap();
+    fs::rename(book.join("1.bmp"), book.join("tmp.bmp")).unwrap();
+    fs::rename(book.join("2.bmp"), book.join("1.bmp")).unwrap();
+    fs::rename(book.join("tmp.bmp"), book.join("2.bmp")).unwrap();
+    pin(&book);
+    let after = identity(&book).unwrap();
+    assert_eq!(after.size, before.size);
+    assert_ne!(after.modified, before.modified);
+}
+
+#[test]
+fn zips_named_like_images_are_not_folder_pages() {
+    let directory = tempfile::tempdir().unwrap();
+    let book = directory.path().join("book");
+    fs::create_dir(&book).unwrap();
+    fs::write(book.join("1.bmp"), bmp(4, 6)).unwrap();
+    common::write_zip(
+        &book.join("cover.jpg"),
+        &[("1.bmp", zip::CompressionMethod::Stored, &bmp(1, 1))],
+    );
+    let (pages, broken) = list_folder_pages_with_broken(&book).unwrap();
+    assert_eq!(pages.len(), 1);
+    assert!(broken.is_empty());
+    assert_eq!(identity(&book).unwrap().size, bmp(4, 6).len() as u64);
+}
+
+#[cfg(unix)]
+#[test]
+fn backslashes_are_ordinary_characters_in_unix_page_names() {
+    let directory = tempfile::tempdir().unwrap();
+    let book = directory.path().join("book");
+    fs::create_dir(&book).unwrap();
+    fs::write(book.join("a\\b.bmp"), bmp(4, 6)).unwrap();
+    let (pages, _) = list_folder_pages_with_broken(&book).unwrap();
+    assert_eq!(pages[0].entry_name, "a\\b.bmp");
+    assert_eq!(read_page(&book, &pages[0]).unwrap(), bmp(4, 6));
 }
