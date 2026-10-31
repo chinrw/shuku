@@ -12,6 +12,7 @@ mod hosts;
 mod images;
 mod logs;
 mod scan;
+mod settings;
 mod snapshot;
 mod webtoon;
 
@@ -39,9 +40,6 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub web_dir: PathBuf,
     pub listen: SocketAddr,
-    /// 也扫描以 `.` 开头的目录和文件。默认跳过：它们通常是下载工具的临时目录，
-    /// 往往只有那个程序自己能读。
-    pub scan_hidden: bool,
     /// 按页面宽高比判断条漫，让网页端自动改用上下连续滚动。判断错得多时可以关掉，
     /// 关掉后只认阅读器里手动打开的条漫开关。
     pub detect_webtoons: bool,
@@ -123,6 +121,10 @@ struct Inner {
     started_at: std::time::SystemTime,
     /// 图片缓存的大小要遍历目录才知道，控制台每 5 秒问一次，结果缓存一会儿。
     cache_usage: Mutex<Option<(std::time::Instant, admin::CacheUsage)>>,
+    /// 控制台里改的设置，启动时从库里读出。
+    settings: Mutex<settings::Settings>,
+    /// 设置改了时通知定时扫描重新计时。
+    settings_changed: Arc<Notify>,
     /// 单元测试用：扫描每提交一批后调用，让扫描停在中途。
     #[cfg(test)]
     scan_batch_hook: Mutex<Option<Box<dyn FnMut() + Send>>>,
@@ -151,6 +153,7 @@ impl App {
             std::fs::create_dir_all(&config.data_dir)?;
             let database = Arc::new(db::Database::open(&config.data_dir.join("shuku.sqlite"))?);
             let snapshot = snapshot::Snapshot::load(&*database.reader()?)?;
+            let settings = settings::Settings::load(database.reader()?.setting(settings::KEY));
             let changed = Arc::new(Notify::new());
             let writes = db::spawn_writer(database.clone(), changed.clone())?;
             Ok(Self(Arc::new(Inner {
@@ -166,6 +169,8 @@ impl App {
                 tasks: Mutex::new(admin::Tasks::default()),
                 started_at: std::time::SystemTime::now(),
                 cache_usage: Mutex::new(None),
+                settings: Mutex::new(settings),
+                settings_changed: Arc::new(Notify::new()),
                 #[cfg(test)]
                 scan_batch_hook: Mutex::new(None),
                 stopping: AtomicBool::new(false),

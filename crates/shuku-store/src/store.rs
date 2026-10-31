@@ -514,6 +514,26 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 整组写入一组设置，存成 JSON。
+    pub fn set_setting<T: serde::Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
+        let value = serde_json::to_string(value).map_err(|source| Error::Setting {
+            key: key.into(),
+            source,
+        })?;
+        self.connection.execute(
+            "INSERT INTO setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_setting(&mut self, key: &str) -> Result<()> {
+        self.connection
+            .execute("DELETE FROM setting WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     /// 删除全部暂存的 LRR 元数据。迁移工具每次运行先清空再按 LRR 的现状重新暂存。
     pub fn clear_lrr_pending(&mut self) -> Result<()> {
         self.connection.execute("DELETE FROM lrr_pending", [])?;

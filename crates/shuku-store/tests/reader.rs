@@ -265,3 +265,41 @@ fn archives_with_zero_sized_pages_are_listed_as_broken() {
         .unwrap();
     assert_eq!(store.broken_archives(10).unwrap().0, 0);
 }
+
+#[test]
+fn settings_are_stored_as_json_per_group() {
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Scan {
+        hidden: bool,
+        hours: u32,
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = Store::open(directory.path().join("shuku.sqlite")).unwrap();
+    assert_eq!(store.setting::<Scan>("scan").unwrap(), None);
+    let scan = Scan {
+        hidden: true,
+        hours: 24,
+    };
+    store
+        .write(|writer| {
+            writer.set_setting(
+                "scan",
+                &Scan {
+                    hidden: false,
+                    hours: 1,
+                },
+            )?;
+            writer.set_setting("scan", &scan)?;
+            writer.set_setting("other", &"x")
+        })
+        .unwrap();
+    assert_eq!(store.setting::<Scan>("scan").unwrap(), Some(scan));
+    assert!(matches!(
+        store.setting::<u32>("other"),
+        Err(Error::Setting { key, .. }) if key == "other"
+    ));
+    store
+        .write(|writer| writer.delete_setting("other"))
+        .unwrap();
+    assert_eq!(store.setting::<String>("other").unwrap(), None);
+}

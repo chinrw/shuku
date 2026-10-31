@@ -2171,6 +2171,7 @@ dependencies = [
  "rand",
  "rusqlite",
  "serde",
+ "serde_json",
  "shuku-index",
  "tempfile",
  "thiserror",

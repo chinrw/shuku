@@ -54,7 +54,7 @@ impl App {
         let mut folders = std::collections::BTreeSet::new();
         let mut unreadable = Vec::new();
         let mut report = ScanReport::default();
-        let scan_hidden = self.0.config.scan_hidden;
+        let scan_hidden = self.settings().scan_hidden;
         let walk = walkdir::WalkDir::new(content)
             .into_iter()
             .filter_entry(|entry| scan_hidden || entry.depth() == 0 || !is_hidden(entry));
@@ -379,7 +379,6 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            scan_hidden: false,
             detect_webtoons: true,
             allowed_hosts: Vec::new(),
         };

@@ -261,7 +261,7 @@ async fn new_archives_get_lrr_metadata_staged_before_the_scan() {
 
 #[tokio::test]
 async fn hidden_entries_are_skipped_unless_enabled() {
-    let mut fixture = Fixture::new();
+    let fixture = Fixture::new();
     fixture.archive("book.cbz", 80, 120);
     fixture.archive(".partial/download.cbz", 80, 120);
     fixture.archive("sub/.hidden.cbz", 80, 120);
@@ -269,11 +269,30 @@ async fn hidden_entries_are_skipped_unless_enabled() {
     let report = app.scan().await.unwrap();
     // 隐藏的目录和文件直接跳过，不算失败也不算不支持的格式。
     assert_eq!((report.added, report.failed, report.skipped), (1, 0, 0));
-    drop(app);
 
-    fixture.config.scan_hidden = true;
-    let report = fixture.app().await.scan().await.unwrap();
+    // 在控制台里打开后，下一次扫描就带上隐藏的条目。
+    let router = app.router();
+    let (status, _, body) = common::request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"scan_hidden": true})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({"scan_hidden": true, "scan_interval_hours": 0})
+    );
+    let report = app.scan().await.unwrap();
     assert_eq!((report.added, report.unchanged), (2, 1));
+    drop(router);
+    drop(app);
+    // 设置存在库里，重启后还在。
+    let reopened = fixture.app().await;
+    let settings = common::json(&reopened.router(), "/api/admin/settings/scan").await;
+    assert_eq!(settings["scan_hidden"], true);
 }
 
 #[tokio::test]

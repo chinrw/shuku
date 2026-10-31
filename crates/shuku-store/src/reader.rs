@@ -98,6 +98,24 @@ impl Reader {
         find_by_path(&self.connection, path)
     }
 
+    /// 一组设置。每个功能一个键（例如 `scan`），值是那组设置的 JSON；没存过时返回 `None`。
+    pub fn setting<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        let value: Option<String> = self
+            .connection
+            .query_row("SELECT value FROM setting WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        value
+            .map(|value| {
+                serde_json::from_str(&value).map_err(|source| Error::Setting {
+                    key: key.into(),
+                    source,
+                })
+            })
+            .transpose()
+    }
+
     /// 暂存着、等扫描到时套用的 LRR 记录数。
     pub fn lrr_pending_count(&self) -> Result<u64> {
         Ok(self

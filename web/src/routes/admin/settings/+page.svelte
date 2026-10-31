@@ -1,9 +1,41 @@
 <script lang="ts">
+	import { serverSettings, updateServerSettings, type ServerSettings } from '#lib/admin.ts';
 	import { adminStatus } from '#lib/adminStatus.svelte.ts';
 	import { settings, type Direction, type LibraryView, type ReaderMode } from '#lib/settings.svelte.ts';
 
 	const prefs = settings();
 	let server = $derived(adminStatus.current?.server);
+
+	let stored = $state<ServerSettings | null>(null);
+	let saving = $state(false);
+	let error = $state<string | null>(null);
+
+	$effect(() => {
+		serverSettings()
+			.then((loaded) => (stored = loaded))
+			.catch((cause) => (error = cause instanceof Error ? cause.message : String(cause)));
+	});
+
+	// 点一下立即保存；失败时保留原值并显示原因。
+	async function change(patch: Partial<ServerSettings>) {
+		saving = true;
+		error = null;
+		try {
+			stored = await updateServerSettings(patch);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			saving = false;
+		}
+	}
+
+	const intervals: [number, string][] = [
+		[0, '不定时'],
+		[6, '每 6 小时'],
+		[24, '每天'],
+		[72, '每 3 天'],
+		[168, '每周']
+	];
 
 	function set<K extends 'view' | 'mode' | 'direction' | 'spread'>(key: K, value: (typeof prefs)[K]) {
 		prefs[key] = value;
@@ -26,10 +58,50 @@
 
 <div class="adm-head">
 	<h1>设置</h1>
-	<span class="adm-sub">M2 起可以在这里改服务端设置、管理设备令牌和插件</span>
+	<span class="adm-sub">设备令牌和插件在 M2 加到这里</span>
 </div>
 
 <div class="adm-stack">
+	<section class="adm-card">
+		<h2>扫描</h2>
+		<p class="adm-note">存在服务端，所有设备共用，改了立即生效，下一次扫描起按新设置。</p>
+		{#if error}<p class="error">保存失败：{error}</p>{/if}
+		{#if stored}
+			<div class="option">
+				<span class="adm-label">隐藏目录</span>
+				<div class="adm-tabs" role="group" aria-label="隐藏目录">
+					<button
+						class="adm-tab"
+						aria-pressed={!stored.scan_hidden}
+						disabled={saving}
+						onclick={() => change({ scan_hidden: false })}>跳过</button
+					>
+					<button
+						class="adm-tab"
+						aria-pressed={stored.scan_hidden}
+						disabled={saving}
+						onclick={() => change({ scan_hidden: true })}>扫描</button
+					>
+				</div>
+			</div>
+			<p class="adm-note">以 . 开头的目录和文件通常是下载工具的临时目录，往往只有那个程序自己能读。</p>
+			<div class="option">
+				<span class="adm-label">定时扫描</span>
+				<div class="adm-tabs" role="group" aria-label="定时扫描">
+					{#each intervals as [hours, label] (hours)}
+						<button
+							class="adm-tab"
+							aria-pressed={stored.scan_interval_hours === hours}
+							disabled={saving}
+							onclick={() => change({ scan_interval_hours: hours })}>{label}</button
+						>
+					{/each}
+				</div>
+			</div>
+			<p class="adm-note">从上一次扫描结束算起。服务启动时总会扫描一次，扫描结束后接着补算指纹。</p>
+		{/if}
+	</section>
+
 	<section class="adm-card">
 		<h2>服务端</h2>
 		<p class="adm-note">用命令行参数或环境变量设置，改了要重启服务。</p>
@@ -48,8 +120,6 @@
 					IP、localhost 和不带点的主机名{#if server.allowed_hosts.length > 0}，以及
 						<span class="adm-mono">{server.allowed_hosts.join('、')}</span>{/if}（<code>--allowed-host</code>）
 				</dd>
-				<dt>隐藏目录</dt>
-				<dd>{server.scan_hidden ? '扫描' : '跳过以 . 开头的目录和文件'}（<code>--scan-hidden</code>）</dd>
 				<dt>条漫判断</dt>
 				<dd>
 					{server.detect_webtoons ? '按页面宽高比自动判断' : '关闭，只认阅读器里的手动开关'}（<code

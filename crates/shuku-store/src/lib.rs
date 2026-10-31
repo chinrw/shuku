@@ -39,6 +39,7 @@ const MIGRATIONS: &[Migration] = &[
     (include_str!("migrations/004_lrr_pending.sql"), None),
     (include_str!("migrations/005_category_ids.sql"), None),
     (include_str!("migrations/006_broken_pages.sql"), None),
+    (include_str!("migrations/007_settings.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -63,6 +64,12 @@ pub enum Error {
     TransactionAborted,
     #[error("页面清单编码错误：{0}")]
     PageList(#[from] postcard::Error),
+    #[error("设置 {key} 的值无法解析：{source}")]
+    Setting {
+        key: String,
+        #[source]
+        source: serde_json::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

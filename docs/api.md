@@ -332,6 +332,16 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 `seq` 每次启动从 1 开始；`started_at` 标识服务端进程，和上次不同时说明服务重启过，客户端要丢掉旧的 `after` 从头取。
 
+`GET /api/admin/settings/scan`、`PUT /api/admin/settings/scan`
+
+控制台设置页改的扫描设置，存在数据库的 `setting` 表里（键 `scan`），所有设备共用：
+
+```json
+{ "scan_hidden": false, "scan_interval_hours": 24 }
+```
+
+`scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0 表示不定时，最大 720。PUT 只需带要改的项，未知字段或超出范围返回 400，响应是改后的全部设置。
+
 `POST /api/admin/scan`、`POST /api/admin/hash`
 
 在后台开始扫描（结束后接着补算指纹，和服务启动时一样）或补算指纹，立即返回 202 和 `{"started": true}`。同一种任务已经在运行时返回 409。进度从状态接口看。

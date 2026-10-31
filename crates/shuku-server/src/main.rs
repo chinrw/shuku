@@ -39,13 +39,6 @@ struct Cli {
     listen: SocketAddr,
     #[arg(
         long,
-        env = "SHUKU_SCAN_HIDDEN",
-        global = true,
-        help = "也扫描以 . 开头的隐藏目录和文件（默认跳过）"
-    )]
-    scan_hidden: bool,
-    #[arg(
-        long,
         env = "SHUKU_NO_WEBTOON_DETECTION",
         global = true,
         help = "不按页面宽高比自动判断条漫（默认判断）"
@@ -92,7 +85,6 @@ async fn main() -> Result<()> {
             .context("请设置 --data-dir 或 SHUKU_DATA_DIR")?,
         web_dir: cli.web_dir,
         listen: cli.listen,
-        scan_hidden: cli.scan_hidden,
         detect_webtoons: !cli.no_webtoon_detection,
         allowed_hosts: cli.allowed_hosts,
     };
@@ -108,6 +100,7 @@ async fn main() -> Result<()> {
     }
     let listener = tokio::net::TcpListener::bind(cli.listen).await?;
     tracing::info!(listen = %listener.local_addr()?, "HTTP 服务已启动");
+    app.spawn_scheduler();
     let background = app.clone();
     tokio::spawn(async move {
         if let Err(error) = background.scan().await {

@@ -44,7 +44,6 @@ export interface Status {
 		data_dir: string;
 		web_dir: string;
 		listen: string;
-		scan_hidden: boolean;
 		detect_webtoons: boolean;
 		allowed_hosts: string[];
 	};
@@ -114,7 +113,21 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 	return response.json();
 }
 
+/** 在控制台里改、存在服务端数据库里的设置。 */
+export interface ServerSettings {
+	scan_hidden: boolean;
+	/** 0 表示不定时扫描。 */
+	scan_interval_hours: number;
+}
+
 export const status = () => call<Status>('/api/admin/status');
+export const serverSettings = () => call<ServerSettings>('/api/admin/settings/scan');
+export const updateServerSettings = (patch: Partial<ServerSettings>) =>
+	call<ServerSettings>('/api/admin/settings/scan', {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(patch)
+	});
 export const issues = () => call<Issues>('/api/admin/issues');
 export const duplicates = (limit = 100) =>
 	call<{ total: number; groups: { files: DuplicateFile[] }[] }>(

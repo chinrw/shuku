@@ -118,6 +118,11 @@ pub(crate) struct CacheUsage {
 }
 
 impl ScanTask {
+    /// 是否在运行，以及上一次结束的时间（Unix 毫秒）。
+    pub(crate) fn timing(&self) -> (bool, Option<i64>) {
+        (self.running, self.finished_at)
+    }
+
     pub(crate) fn start(&mut self) {
         *self = Self {
             running: true,
@@ -225,6 +230,10 @@ impl App {
             .route("/api/admin/duplicates", get(duplicates))
             .route("/api/admin/namespaces", get(namespaces))
             .route("/api/admin/logs", get(logs))
+            .route(
+                "/api/admin/settings/scan",
+                get(read_settings).put(write_settings),
+            )
             .route("/api/admin/scan", post(start_scan))
             .route("/api/admin/hash", post(start_hash))
             .route("/api/admin/refresh", post(refresh))
@@ -353,7 +362,7 @@ async fn status(State(app): State<App>) -> Result<Json<Value>> {
                 "started_at": unix_ms(app.0.started_at),
                 "content_dir": config.content_dir, "data_dir": config.data_dir,
                 "web_dir": config.web_dir, "listen": config.listen.to_string(),
-                "scan_hidden": config.scan_hidden, "detect_webtoons": config.detect_webtoons,
+                "detect_webtoons": config.detect_webtoons,
                 "allowed_hosts": config.allowed_hosts,
             },
             "library": {
@@ -532,30 +541,55 @@ fn already_running(task: &str) -> Error {
     }
 }
 
-/// 在后台扫描，结束后接着补算指纹，和服务启动时一样。立即返回。
-async fn start_scan(State(app): State<App>) -> Result<(StatusCode, Json<Value>)> {
-    let claimed = app.tasks(|tasks| {
-        if tasks.scan.running {
-            return false;
+impl App {
+    /// 在后台扫描，结束后接着补算指纹，和服务启动时一样。已经在扫描时返回 `false`。
+    pub(crate) fn start_background_scan(&self) -> bool {
+        let claimed = self.tasks(|tasks| {
+            if tasks.scan.running {
+                return false;
+            }
+            // 先占住，连续点两次时第二次就会被拒绝，不必等后台任务真正开始。
+            tasks.scan.running = true;
+            true
+        });
+        if claimed {
+            let app = self.clone();
+            tokio::spawn(async move {
+                match app.scan().await {
+                    Ok(_) => {
+                        if let Err(error) = app.hash_contents().await {
+                            tracing::error!(%error, "计算完整指纹失败");
+                        }
+                    }
+                    Err(error) => tracing::error!(%error, "扫描失败"),
+                }
+            });
         }
-        // 先占住，连续点两次时第二次就会被拒绝，不必等后台任务真正开始。
-        tasks.scan.running = true;
-        true
-    });
-    if !claimed {
+        claimed
+    }
+}
+
+async fn start_scan(State(app): State<App>) -> Result<(StatusCode, Json<Value>)> {
+    if !app.start_background_scan() {
         return Err(already_running("扫描"));
     }
-    tokio::spawn(async move {
-        match app.scan().await {
-            Ok(_) => {
-                if let Err(error) = app.hash_contents().await {
-                    tracing::error!(%error, "计算完整指纹失败");
-                }
-            }
-            Err(error) => tracing::error!(%error, "扫描失败"),
-        }
-    });
     Ok((StatusCode::ACCEPTED, Json(json!({"started": true}))))
+}
+
+async fn read_settings(State(app): State<App>) -> Json<crate::settings::Settings> {
+    Json(app.settings())
+}
+
+async fn write_settings(
+    State(app): State<App>,
+    body: std::result::Result<
+        Json<crate::settings::SettingsPatch>,
+        axum::extract::rejection::JsonRejection,
+    >,
+) -> Result<Json<crate::settings::Settings>> {
+    let Json(patch) = body.map_err(Error::bad_request)?;
+    app.blocking(move |app| Ok(Json(app.update_settings(&patch)?)))
+        .await
 }
 
 async fn start_hash(State(app): State<App>) -> Result<(StatusCode, Json<Value>)> {
@@ -623,7 +657,6 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            scan_hidden: false,
             detect_webtoons: true,
             allowed_hosts: Vec::new(),
         };
