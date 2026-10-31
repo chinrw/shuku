@@ -44,7 +44,8 @@ fn folder_pages_are_its_images_in_natural_order() {
 
     let (size, modified) = identity(&book).unwrap();
     assert_eq!(size, (bmp(4, 6).len() + bmp(5, 7).len()) as u64);
-    let newest = ["10.bmp", "2.BMP", "empty.jpg"]
+    // 文件夹本身的修改时间也算进去，页面改名时总大小不变，靠它发现变化。
+    let newest = ["10.bmp", "2.BMP", "empty.jpg", ""]
         .iter()
         .map(|name| fs::metadata(book.join(name)).unwrap().modified().unwrap())
         .max()
@@ -67,12 +68,13 @@ fn quick_fingerprint_follows_names_and_sizes_and_survives_moving_the_folder() {
     assert_eq!(folder_quick_hash(&moved).unwrap(), quick);
     assert_eq!(folder_content_hash(&moved).unwrap(), full);
 
-    // 同样大小、内容不同：快速指纹不变，完整指纹变。
+    // 同名等长、内容不同：两种指纹都变，图片 URL 的版本号跟着变。
     let mut changed = bmp(5, 7);
     *changed.last_mut().unwrap() = 0xff;
     fs::write(moved.join("2.bmp"), changed).unwrap();
-    assert_eq!(folder_quick_hash(&moved).unwrap(), quick);
+    assert_ne!(folder_quick_hash(&moved).unwrap(), quick);
     assert_ne!(folder_content_hash(&moved).unwrap(), full);
+    let quick = folder_quick_hash(&moved).unwrap();
     fs::write(moved.join("3.bmp"), bmp(1, 1)).unwrap();
     assert_ne!(folder_quick_hash(&moved).unwrap(), quick);
 }

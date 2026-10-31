@@ -264,7 +264,10 @@ async fn hidden_entries_are_skipped_unless_enabled() {
     let fixture = Fixture::new();
     fixture.archive("book.cbz", 80, 120);
     fixture.archive(".partial/download.cbz", 80, 120);
-    fixture.archive("sub/.hidden.cbz", 80, 120);
+    let png = fixture.archive("sub/.hidden.cbz", 80, 120);
+    let pictures = fixture.config.content_dir.join(".partial/pictures");
+    std::fs::create_dir_all(&pictures).unwrap();
+    std::fs::write(pictures.join("1.png"), &png).unwrap();
     let app = fixture.app().await;
     let report = app.scan().await.unwrap();
     // 隐藏的目录和文件直接跳过，不算失败也不算不支持的格式。
@@ -286,13 +289,44 @@ async fn hidden_entries_are_skipped_unless_enabled() {
         serde_json::json!({"scan_hidden": true, "scan_interval_hours": 0})
     );
     let report = app.scan().await.unwrap();
-    assert_eq!((report.added, report.unchanged), (2, 1));
+    assert_eq!((report.added, report.unchanged), (3, 1));
+
+    // 再关掉：隐藏目录里的书留在库里，不算失踪，同内容的可见副本作为新书入库而不是顶替它。
+    common::request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"scan_hidden": false, "scan_interval_hours": 24})),
+        &[],
+    )
+    .await;
+    std::fs::copy(
+        fixture.config.content_dir.join(".partial/download.cbz"),
+        fixture.config.content_dir.join("copy.cbz"),
+    )
+    .unwrap();
+    let visible = fixture.config.content_dir.join("pictures");
+    std::fs::create_dir(&visible).unwrap();
+    std::fs::write(visible.join("1.png"), &png).unwrap();
+    let report = app.scan().await.unwrap();
+    assert_eq!((report.added, report.moved), (2, 0));
+    let store = Store::open(fixture.database()).unwrap();
+    assert!(
+        store
+            .find_by_path(".partial/download.cbz")
+            .unwrap()
+            .is_some()
+    );
+    assert!(store.find_by_path(".partial/pictures").unwrap().is_some());
     drop(router);
     drop(app);
     // 设置存在库里，重启后还在。
     let reopened = fixture.app().await;
     let settings = common::json(&reopened.router(), "/api/admin/settings/scan").await;
-    assert_eq!(settings["scan_hidden"], true);
+    assert_eq!(
+        settings,
+        serde_json::json!({"scan_hidden": false, "scan_interval_hours": 24})
+    );
 }
 
 #[tokio::test]
@@ -368,15 +402,30 @@ async fn folders_of_loose_images_are_read_as_books() {
     assert_eq!(app.scan().await.unwrap().unchanged, 2);
     assert_eq!(app.hash_contents().await.unwrap().hashed, 2);
 
+    // 页面改名时总大小和图片的修改时间都不变，靠文件夹本身的修改时间发现，重新读清单。
+    std::fs::rename(book.join("10.png"), book.join("20.png")).unwrap();
+    let dir = std::fs::File::open(&book).unwrap();
+    dir.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(app.scan().await.unwrap().updated, 1);
+    let (_, renamed) = store.archive_with_pages(id).unwrap().unwrap();
+    let names: Vec<_> = renamed
+        .iter()
+        .map(|page| page.entry_name.as_str())
+        .collect();
+    assert_eq!(names, ["2.png", "20.png"]);
+
     // 加一页算更新；整个文件夹移走保留原来的记录。
     std::fs::write(book.join("11.png"), &png).unwrap();
+    dir.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(10))
+        .unwrap();
     assert_eq!(app.scan().await.unwrap().updated, 1);
     std::fs::rename(&book, content.join("series/Vol.01")).unwrap();
     assert_eq!(app.scan().await.unwrap().moved, 1);
     assert_eq!(store.find_by_path("series/Vol.01").unwrap(), Some(id));
 
     // 图片都删了，只剩空目录：算失踪，不再当书。
-    for name in ["2.png", "10.png", "11.png"] {
+    for name in ["2.png", "20.png", "11.png"] {
         std::fs::remove_file(content.join("series/Vol.01").join(name)).unwrap();
     }
     app.scan().await.unwrap();

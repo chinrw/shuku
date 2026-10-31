@@ -45,8 +45,8 @@ fn open_image(path: &Path) -> Result<File> {
     Ok(file)
 }
 
-/// 归档文件的大小和修改时间；文件夹是其中图片的总大小和最新的修改时间。
-/// 扫描和读页都用它判断内容是否变过。
+/// 归档文件的大小和修改时间；文件夹是其中图片的总大小，和图片与文件夹本身里最新的修改时间。
+/// 算上文件夹本身，页面改名、增删时修改时间也会变（总大小可能不变）。扫描和读页都用它判断内容是否变过。
 pub fn identity(path: impl AsRef<Path>) -> Result<(u64, SystemTime)> {
     let path = path.as_ref();
     let metadata = fs::metadata(path)?;
@@ -54,7 +54,7 @@ pub fn identity(path: impl AsRef<Path>) -> Result<(u64, SystemTime)> {
         return Ok((metadata.len(), metadata.modified()?));
     }
     let mut size = 0;
-    let mut newest = SystemTime::UNIX_EPOCH;
+    let mut newest = metadata.modified()?;
     for (_, metadata) in images(path)? {
         size += metadata.len();
         newest = newest.max(metadata.modified()?);
@@ -107,15 +107,19 @@ pub fn list_folder_pages_with_broken(
     Ok((pages, broken))
 }
 
-/// 由文件名和大小算出的快速指纹，不读图片内容。内容不变的文件夹移动或改名后指纹不变，
-/// 扫描靠它认出原来的记录；和 ZIP 的快速指纹不会撞上，因为开头写了固定的前缀。
+/// 由每张图片的文件名和 ZIP 同样算法的快速指纹（大小加首尾各 64 KiB）合成。内容不变的文件夹
+/// 移动或改名后指纹不变，扫描靠它认出原来的记录；开头的固定前缀让它和 ZIP 的指纹不会撞上。
 pub fn folder_quick_hash(dir: impl AsRef<Path>) -> Result<String> {
+    let dir = dir.as_ref();
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"shuku-folder-v1");
-    for (name, metadata) in images(dir.as_ref())? {
+    hasher.update(b"shuku-folder-v2");
+    for (name, _) in images(dir)? {
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name.as_bytes());
-        hasher.update(&metadata.len().to_le_bytes());
+        // 和 ZIP 的快速指纹一样带上大小和首尾各一段内容：它也是图片 URL 的版本号，
+        // 同名等长的图片换了内容时 URL 要跟着变，不能让浏览器继续用缓存的旧图。
+        let sample = crate::fingerprint::quick_hash_file(&mut open_image(&dir.join(&name))?)?;
+        hasher.update(sample.as_bytes());
     }
     Ok(hasher.finalize().to_hex().to_string())
 }

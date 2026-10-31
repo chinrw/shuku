@@ -101,6 +101,10 @@ impl App {
             if unreadable.iter().any(|dir| path.starts_with(dir)) {
                 continue;
             }
+            // 按设置跳过的隐藏目录里的记录也无法判断，同样不动。
+            if !scan_hidden && has_hidden_component(&entry.path) {
+                continue;
+            }
             // 文件夹里的图片都删了、只剩空目录时也算失踪。
             match path.try_exists() {
                 Ok(true) if !path.is_dir() || folders.contains(&path) => {}
@@ -241,6 +245,13 @@ impl App {
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry.file_name().as_encoded_bytes().starts_with(b".")
+}
+
+/// 相对内容目录的路径里有没有以 `.` 开头的一段，也就是扫描时会被跳过。
+fn has_hidden_component(relative: &str) -> bool {
+    Path::new(relative)
+        .components()
+        .any(|component| component.as_os_str().as_encoded_bytes().starts_with(b"."))
 }
 
 /// 问题列表里显示相对内容目录的路径，和数据库里一致。
