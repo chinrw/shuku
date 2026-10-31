@@ -43,6 +43,15 @@ export interface PageInfo {
 
 export type Sort = 'title' | 'date';
 
+export interface Category {
+	id: number;
+	name: string;
+	pinned: boolean;
+	/** 动态分类的成员是一条搜索语句的结果。 */
+	dynamic: boolean;
+	count: number;
+}
+
 /** `tag` 是小写的完整标签名，例如 `artist:某某`。 */
 export interface TagCount {
 	tag: string;
@@ -72,12 +81,18 @@ async function request<T>(fetch: Fetch, path: string, init?: RequestInit): Promi
 
 export function search(
 	fetch: Fetch,
-	params: { q: string; sort: Sort; after?: number; limit?: number }
+	params: { q: string; sort: Sort; category?: number | null; after?: number; limit?: number }
 ): Promise<SearchResult> {
 	const query = new URLSearchParams({ q: params.q, sort: params.sort });
+	if (params.category != null) query.set('category', String(params.category));
 	if (params.after !== undefined) query.set('after', String(params.after));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	return request(fetch, `/api/search?${query}`);
+}
+
+/** 书库页的分类按钮，置顶的在前。 */
+export async function categories(fetch: Fetch): Promise<Category[]> {
+	return (await request<{ categories: Category[] }>(fetch, '/api/categories')).categories;
 }
 
 /** 最近读过的归档，按翻页时间从新到旧。 */

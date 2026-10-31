@@ -182,7 +182,7 @@ fn random_query(rng: &mut StdRng, tags: &[String], naive: &Naive) -> Query {
 }
 
 fn random_term(rng: &mut StdRng, tags: &[String], naive: &Naive, depth: u32) -> Term {
-    let kinds = if depth == 0 { 4 } else { 5 };
+    let kinds = if depth == 0 { 5 } else { 6 };
     match rng.random_range(0..kinds) {
         0 if rng.random_bool(0.1) => Term::Tag("missing:tag".into()),
         0 => Term::Tag(random_tag(rng, tags)),
@@ -208,6 +208,17 @@ fn random_term(rng: &mut StdRng, tags: &[String], naive: &Naive, depth: u32) -> 
                 rng,
                 &title[start..end].iter().collect::<String>(),
             ))
+        }
+        4 => {
+            // 一部分归档，外加一个索引里没有的 ID。
+            let mut ids: Vec<ArchiveId> = naive
+                .records
+                .iter()
+                .filter(|_| rng.random_bool(0.2))
+                .map(|record| record.id)
+                .collect();
+            ids.push(ArchiveId::MAX);
+            Term::Archives(ids)
         }
         _ => {
             let children = rng.random_range(0..=3);
@@ -338,6 +349,7 @@ fn matches(record: &NaiveRecord, term: &Term) -> bool {
         }
         Term::TitleContains(needle) => record.title.contains(&needle.to_lowercase()),
         Term::Any(terms) => terms.iter().any(|t| matches(record, t)),
+        Term::Archives(ids) => ids.contains(&record.id),
     }
 }
 

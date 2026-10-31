@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { search, suggestTags, type ArchiveItem, type TagCount } from '#lib/api.ts';
+	import { search, suggestTags, type ArchiveItem, type Sort, type TagCount } from '#lib/api.ts';
 	import Icon from '#lib/Icon.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { addTerm, completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
+	import { libraryHref } from '#lib/libraryUrl.ts';
+	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
 	import { namespaceClass, tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
 
@@ -30,11 +31,8 @@
 		}
 	};
 
-	function navigate(q: string, sort: string) {
-		const params = new URLSearchParams();
-		if (q) params.set('q', q);
-		if (sort !== 'title') params.set('sort', sort);
-		goto(params.size ? `/?${params}` : '/');
+	function navigate(q: string, sort: Sort) {
+		goto(libraryHref({ q, sort, category: data.category }));
 	}
 
 	function submit(event: SubmitEvent) {
@@ -98,16 +96,12 @@
 		}
 	}
 
-	// 和整个结果都带的标签（比如搜索条件本身）点了也不会缩小范围，不列出来。
-	let narrowing = $derived(
-		(data.facets ?? []).filter((facet) => facet.count < (data.result?.total ?? 0))
-	);
-
-	function facetHref(tag: string) {
-		const params = new URLSearchParams({ q: addTerm(data.q, tag) });
-		if (data.sort !== 'title') params.set('sort', data.sort);
-		return `/?${params}`;
+	// 和 LRR 首页一样，搜索框下面是用户自己的分类，再点一次取消筛选。
+	function categoryHref(id: number) {
+		return libraryHref({ q: data.q, sort: data.sort, category: data.category === id ? null : id });
 	}
+
+	let currentCategory = $derived(data.categories.find((category) => category.id === data.category));
 
 	function splitTag(tag: string) {
 		const colon = tag.indexOf(':');
@@ -126,7 +120,12 @@
 		loading = true;
 		loadError = null;
 		try {
-			const result = await search(fetch, { q: data.q, sort: data.sort, after: next });
+			const result = await search(fetch, {
+				q: data.q,
+				sort: data.sort,
+				category: data.category,
+				after: next
+			});
 			items = [...items, ...result.items];
 			next = result.next_after;
 		} catch (error) {
@@ -238,7 +237,7 @@
 	<div class="controls">
 		<select
 			value={data.sort}
-			onchange={(event) => navigate(data.q, event.currentTarget.value)}
+			onchange={(event) => navigate(data.q, event.currentTarget.value as Sort)}
 			aria-label="排序"
 		>
 			<option value="title">标题</option>
@@ -261,20 +260,23 @@
 	<p class="status error">{data.queryError}</p>
 {:else if data.result}
 	<p class="status">
-		共 {data.result.total} 本{#if data.q}，搜索“{data.q}”{/if}
+		共 {data.result.total} 本{#if currentCategory}，分类“{currentCategory.name}”{/if}{#if data.q}，搜索“{data.q}”{/if}
 		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
 	</p>
-	{#if narrowing.length > 0}
-		<nav class="facets" aria-label="结果里常见的标签">
-			{#each narrowing as facet (facet.tag)}
-				{@const tag = splitTag(facet.tag)}
-				<a href={facetHref(facet.tag)} title={facet.tag}>
-					<span class={namespaceClass(tag.namespace)}>{tag.value}</span>
-					<span class="count">{facet.count}</span>
-				</a>
-			{/each}
-		</nav>
-	{/if}
+{/if}
+{#if data.categories.length > 0}
+	<nav class="facets" aria-label="分类">
+		{#each data.categories as category (category.id)}
+			<a
+				href={categoryHref(category.id)}
+				aria-current={data.category === category.id ? 'true' : undefined}
+				title={category.dynamic ? '动态分类' : undefined}
+			>
+				<span>{category.pinned ? '📌' : ''}{category.name}</span>
+				<span class="count">{category.count}</span>
+			</a>
+		{/each}
+	</nav>
 {/if}
 
 {#if data.recent.length > 0}
@@ -507,6 +509,17 @@
 
 	.facets a:hover {
 		color: var(--link);
+	}
+
+	.facets a[aria-current='true'] {
+		background: var(--fg);
+		border-color: var(--fg);
+		color: var(--bg);
+	}
+
+	.facets a[aria-current='true'] .count {
+		color: inherit;
+		opacity: 0.7;
 	}
 
 	@media (min-width: 1024px) {

@@ -3,7 +3,7 @@
 
 use crate::{App, Result};
 use shuku_index::Index;
-use shuku_store::{LibraryArchive, LibraryTag, Progress, Reader, Tag};
+use shuku_store::{Category, LibraryArchive, LibraryTag, Progress, Reader, Tag};
 use std::{
     collections::HashMap,
     sync::{Arc, PoisonError, atomic::Ordering},
@@ -46,6 +46,8 @@ pub(crate) struct NamespaceCount {
 
 struct Listing {
     tags: Vec<LibraryTag>,
+    /// 置顶在前，再按名字。
+    categories: Vec<Category>,
     /// 按 ID 升序，按 ID 二分查找。
     archives: Vec<LibraryArchive>,
 }
@@ -93,10 +95,15 @@ impl Snapshot {
             index: Arc::new(index),
             listing: Arc::new(Listing {
                 tags: library.tags,
+                categories: library.categories,
                 archives: library.archives,
             }),
             progress: Arc::new(library.progress),
         })
+    }
+
+    pub(crate) fn categories(&self) -> &[Category] {
+        &self.listing.categories
     }
 
     pub(crate) fn timing(&self) -> Timing {

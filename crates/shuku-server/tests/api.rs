@@ -471,3 +471,117 @@ async fn recent_lists_read_archives_newest_first_and_validates_limit() {
         );
     }
 }
+
+#[tokio::test]
+async fn categories_are_listed_pinned_first_and_filter_search() {
+    let fixture = Fixture::new();
+    for name in ["a.cbz", "b.cbz", "c.cbz"] {
+        fixture.archive(name, 10, 20);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let mut store = Store::open(fixture.database()).unwrap();
+    let id = |store: &Store, name: &str| store.find_by_path(name).unwrap().unwrap();
+    let (a, b, c) = (
+        id(&store, "a.cbz"),
+        id(&store, "b.cbz"),
+        id(&store, "c.cbz"),
+    );
+    store
+        .replace_tags(
+            c,
+            &[Tag {
+                namespace: "artist".into(),
+                value: "alpha".into(),
+            }],
+        )
+        .unwrap();
+    for (lrr_id, name, search, pinned, archives) in [
+        ("SET_1", "收藏", "", false, vec![a, b]),
+        ("SET_2", "动态", "artist:alpha", true, vec![]),
+        ("SET_3", "空的", "", true, vec![]),
+    ] {
+        store
+            .import_lrr_category(&shuku_store::LrrCategory {
+                lrr_id: lrr_id.into(),
+                name: name.into(),
+                search: search.into(),
+                pinned,
+                archives,
+            })
+            .unwrap();
+    }
+    app.refresh().await.unwrap();
+    let router = app.router();
+
+    let listed = json(&router, "/api/categories").await;
+    let summary: Vec<(String, bool, bool, u64)> = listed["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|category| {
+            (
+                category["name"].as_str().unwrap().to_owned(),
+                category["pinned"].as_bool().unwrap(),
+                category["dynamic"].as_bool().unwrap(),
+                category["count"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("动态".to_owned(), true, true, 1),
+            ("空的".to_owned(), true, false, 0),
+            ("收藏".to_owned(), false, false, 2),
+        ]
+    );
+    let category_id = |name: &str| {
+        listed["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|category| category["name"] == name)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap()
+    };
+    let ids = |body: Value| -> Vec<i64> {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect()
+    };
+    let favorites = category_id("收藏");
+    assert_eq!(
+        ids(json(&router, &format!("/api/search?category={favorites}")).await),
+        [a, b]
+    );
+    // 分类和搜索语句同时生效。
+    assert_eq!(
+        ids(json(
+            &router,
+            &format!("/api/search?category={favorites}&q=artist:alpha")
+        )
+        .await),
+        Vec::<i64>::new()
+    );
+    let dynamic = category_id("动态");
+    assert_eq!(
+        ids(json(&router, &format!("/api/search?category={dynamic}")).await),
+        [c]
+    );
+    assert_eq!(
+        json(&router, &format!("/api/facets?category={dynamic}")).await["tags"],
+        value!([{"tag": "artist:alpha", "count": 1}])
+    );
+    for uri in ["/api/search?category=999999", "/api/facets?category=999999"] {
+        assert_eq!(
+            request(&router, "GET", uri, None, &[]).await.0,
+            StatusCode::BAD_REQUEST,
+            "{uri}"
+        );
+    }
+}

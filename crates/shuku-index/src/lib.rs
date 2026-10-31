@@ -58,6 +58,8 @@ pub enum Term {
     TitleContains(String),
     /// 子条件取并集；空列表不匹配任何归档。
     Any(Vec<Term>),
+    /// 这些归档，例如一个静态分类的成员。索引里没有的 ID 忽略。搜索语句不会产生它。
+    Archives(Vec<ArchiveId>),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -401,6 +403,11 @@ impl Index {
                     docs
                 }))
             }
+            Term::Archives(ids) => Cow::Owned(
+                ids.iter()
+                    .filter_map(|id| self.doc_of.get(id).copied())
+                    .collect(),
+            ),
         }
     }
 

@@ -6,7 +6,7 @@ mod reader;
 mod store;
 
 pub use models::{
-    Archive, ArchiveMetadata, CompressionMethod, DuplicateFile, Library, LibraryArchive,
+    Archive, ArchiveMetadata, Category, CompressionMethod, DuplicateFile, Library, LibraryArchive,
     LibraryStats, LibraryTag, LrrArchive, LrrCategory, LrrPending, LrrTankoubon, Page, Progress,
     ScanEntry, Tag,
 };

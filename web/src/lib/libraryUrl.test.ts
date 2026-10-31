@@ -1,0 +1,23 @@
+import { describe, expect, it } from 'vitest';
+import { libraryHref, parseCategory } from './libraryUrl';
+
+describe('libraryHref', () => {
+	it('omits defaults and keeps the rest', () => {
+		expect(libraryHref({ q: '', sort: 'title', category: null })).toBe('/');
+		expect(libraryHref({ q: 'artist:a', sort: 'date', category: 3 })).toBe(
+			'/?q=artist%3Aa&sort=date&c=3'
+		);
+		expect(libraryHref({ q: '', sort: 'title', category: 7 })).toBe('/?c=7');
+	});
+});
+
+describe('parseCategory', () => {
+	it('accepts positive integers only', () => {
+		expect(parseCategory('12')).toBe(12);
+		expect(parseCategory(null)).toBeNull();
+		expect(parseCategory('')).toBeNull();
+		expect(parseCategory('0')).toBeNull();
+		expect(parseCategory('1.5')).toBeNull();
+		expect(parseCategory('abc')).toBeNull();
+	});
+});

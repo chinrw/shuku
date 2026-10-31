@@ -98,6 +98,19 @@ pub struct Library {
     /// 按 ID 升序。
     pub archives: Vec<LibraryArchive>,
     pub progress: HashMap<i64, Progress>,
+    /// 按置顶在前、再按名字排序。
+    pub categories: Vec<Category>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Category {
+    pub id: i64,
+    pub name: String,
+    /// 非空表示动态分类：成员是这条搜索语句的结果，`archives` 为空。
+    pub search: String,
+    pub pinned: bool,
+    /// 静态分类的成员，按 ID 升序。
+    pub archives: Vec<i64>,
 }
 
 impl Library {

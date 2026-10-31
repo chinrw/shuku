@@ -36,6 +36,7 @@ impl App {
             .route("/api/facets", get(facets))
             .route("/api/tags", get(suggest_tags))
             .route("/api/recent", get(recent))
+            .route("/api/categories", get(categories))
             .route("/api/archives/{id}", get(detail))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
@@ -96,6 +97,7 @@ async fn write_progress(
 struct SearchParams {
     #[serde(default)]
     q: String,
+    category: Option<i64>,
     sort: Option<String>,
     after: Option<i64>,
     limit: Option<usize>,
@@ -121,6 +123,9 @@ async fn search(
         parsed.query.after = params.after;
         parsed.query.limit = limit;
         let snapshot = app.snapshot();
+        if let Some(id) = params.category {
+            parsed.degraded |= restrict_to_category(&snapshot, &mut parsed.query, id)?;
+        }
         let result = snapshot.index.search(&parsed.query).map_err(Error::bad_request)?;
         // 结果和列表元数据来自同一个快照，结果里的每本都查得到。
         let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&item)).collect();
@@ -152,6 +157,65 @@ async fn recent(
     .await
 }
 
+/// 把搜索限制在一个分类里：静态分类按成员，动态分类再加上它的搜索语句。
+/// 返回动态分类的语句是否被降级（见搜索接口的 `degraded`）。
+fn restrict_to_category(
+    snapshot: &crate::snapshot::Snapshot,
+    query: &mut shuku_index::Query,
+    id: i64,
+) -> Result<bool> {
+    let category = snapshot
+        .categories()
+        .iter()
+        .find(|category| category.id == id)
+        .ok_or_else(|| Error::bad_request(format!("分类 {id} 不存在")))?;
+    if category.search.is_empty() {
+        query
+            .include
+            .push(shuku_index::Term::Archives(category.archives.clone()));
+        return Ok(false);
+    }
+    // 分类的语句来自 LRR，写法 Shuku 还不支持时当作这个分类是空的，不让整个请求失败。
+    match shuku_index::parse_query(&category.search) {
+        Ok(parsed) => {
+            query.include.extend(parsed.query.include);
+            query.exclude.extend(parsed.query.exclude);
+            Ok(parsed.degraded)
+        }
+        Err(error) => {
+            tracing::warn!(id, search = %category.search, %error, "分类的搜索语句无法解析");
+            query.include.push(shuku_index::Term::Archives(Vec::new()));
+            Ok(false)
+        }
+    }
+}
+
+/// 书库页的分类按钮。`count` 是分类里在快照中的本数。
+async fn categories(State(app): State<App>) -> Result<Json<Value>> {
+    app.blocking(|app| {
+        let snapshot = app.snapshot();
+        let mut categories = Vec::new();
+        for category in snapshot.categories() {
+            let mut query = shuku_index::Query {
+                limit: 1,
+                ..Default::default()
+            };
+            restrict_to_category(&snapshot, &mut query, category.id)?;
+            let count = snapshot
+                .index
+                .search(&query)
+                .map_err(Error::bad_request)?
+                .total;
+            categories.push(json!({
+                "id": category.id, "name": category.name, "pinned": category.pinned,
+                "dynamic": !category.search.is_empty(), "count": count,
+            }));
+        }
+        Ok(Json(json!({ "categories": categories })))
+    })
+    .await
+}
+
 /// 搜索结果和最近阅读里的一项。
 fn list_item(item: &crate::snapshot::Item<'_>) -> Value {
     json!({
@@ -167,6 +231,7 @@ fn list_item(item: &crate::snapshot::Item<'_>) -> Value {
 struct FacetParams {
     #[serde(default)]
     q: String,
+    category: Option<i64>,
     limit: Option<usize>,
 }
 
@@ -177,9 +242,13 @@ async fn facets(
     let Query(params) = params.map_err(Error::bad_request)?;
     let limit = tag_limit(params.limit, 20)?;
     app.blocking(move |app| {
-        let parsed = shuku_index::parse_query(&params.q).map_err(Error::bad_request)?;
+        let mut parsed = shuku_index::parse_query(&params.q).map_err(Error::bad_request)?;
+        let snapshot = app.snapshot();
+        if let Some(id) = params.category {
+            restrict_to_category(&snapshot, &mut parsed.query, id)?;
+        }
         Ok(Json(tag_counts(
-            app.snapshot().index.facets(&parsed.query, limit),
+            snapshot.index.facets(&parsed.query, limit),
         )))
     })
     .await

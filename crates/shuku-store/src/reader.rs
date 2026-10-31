@@ -4,8 +4,8 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
-    Archive, ArchiveMetadata, DuplicateFile, Error, Library, LibraryArchive, LibraryStats,
-    LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry, Tag, configure,
+    Archive, ArchiveMetadata, Category, DuplicateFile, Error, Library, LibraryArchive,
+    LibraryStats, LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry, Tag, configure,
 };
 
 /// 只读连接。WAL 模式下读不挡写，写也不挡读；每个读取方法看到的是调用开始时已提交的数据。
@@ -177,11 +177,13 @@ impl Reader {
             archive.tags.shrink_to_fit();
         }
         let progress = read_all_progress(&transaction)?;
+        let categories = read_categories(&transaction)?;
         transaction.commit()?;
         Ok(Library {
             tags,
             archives,
             progress,
+            categories,
         })
     }
 
@@ -336,4 +338,33 @@ pub(crate) fn find_by_path(connection: &Connection, path: &str) -> Result<Option
             row.get(0)
         })
         .optional()?)
+}
+
+fn read_categories(connection: &Connection) -> Result<Vec<Category>> {
+    let mut categories = connection
+        .prepare("SELECT id, name, search, pinned FROM category ORDER BY pinned DESC, name, id")?
+        .query_map([], |row| {
+            Ok(Category {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                search: row.get(2)?,
+                pinned: row.get(3)?,
+                archives: Vec::new(),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let positions: HashMap<i64, usize> = categories
+        .iter()
+        .enumerate()
+        .map(|(position, category)| (category.id, position))
+        .collect();
+    let mut members = connection
+        .prepare("SELECT category_id, archive_id FROM category_archive ORDER BY archive_id")?;
+    let mut rows = members.query([])?;
+    while let Some(row) = rows.next()? {
+        if let Some(&position) = positions.get(&row.get::<_, i64>(0)?) {
+            categories[position].archives.push(row.get(1)?);
+        }
+    }
+    Ok(categories)
 }

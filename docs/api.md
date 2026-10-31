@@ -39,9 +39,10 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 ## 搜索
 
-`GET /api/search?q=&sort=&after=&limit=`
+`GET /api/search?q=&category=&sort=&after=&limit=`
 
 - `q`：LRR 风格的搜索语句，语法见 `docs/plan/m1-backend.md` 的 T3。为空时返回全部。
+- `category`：分类 ID（见下面的分类接口），只返回这个分类里的归档，和 `q` 同时生效。静态分类按成员筛选；动态分类按它的搜索语句筛选，语句 Shuku 还不能解析时这个分类为空。分类不存在时返回 400。
 - `sort`：`title`（默认，标题自然序）或 `date`（最新加入在前）。
 - `after`：上一页响应里的 `next_after`，第一页不传。
 - `limit`：默认 50，上限 200。
@@ -61,11 +62,21 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 搜索结果和列表项来自服务端的内存快照。上报阅读进度后，列表项里的 `progress` 约 10 秒后才更新；归档详情直接读数据库，立即反映新进度。
 
+## 分类
+
+`GET /api/categories`
+
+书库页搜索框下面的一排按钮，和 LRR 首页一样是用户自己的分类（从 LRR 导入），置顶的在前，再按名字排。`count` 是分类里的本数，和搜索结果一样来自内存快照。
+
+```json
+{ "categories": [{ "id": 2, "name": "收藏", "pinned": true, "dynamic": false, "count": 812 }] }
+```
+
 ## 标签统计和补全
 
-`GET /api/facets?q=&limit=`
+`GET /api/facets?q=&category=&limit=`
 
-返回搜索语句 `q` 的结果里出现最多的标签，用来逐步缩小范围。`q` 的语法和错误处理与搜索相同。`limit` 默认 20，范围 1 到 100。
+返回搜索语句 `q` 的结果里出现最多的标签。`q`、`category` 的语法和错误处理与搜索相同。`limit` 默认 20，范围 1 到 100。网页端的书库页现在显示分类，不再用这个接口。
 
 `GET /api/tags?prefix=&limit=`
 
