@@ -125,6 +125,8 @@ impl Library {
                 .iter()
                 .map(|&position| self.tags[position as usize].full.clone())
                 .collect(),
+            page_count: archive.page_count,
+            is_new: archive.is_new,
         })
     }
 }

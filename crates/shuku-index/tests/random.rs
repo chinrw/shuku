@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
-use shuku_index::{ArchiveId, ArchiveRecord, Index, Query, Sort, TagCount, Term};
+use shuku_index::{ArchiveId, ArchiveRecord, Comparison, Index, Query, Sort, TagCount, Term};
 
 const SEED: u64 = 0x5348_554b_5500;
 /// 2000 本时，匹配数达到 32 本就走沿排列遍历的分支，随机查询两个分支都会碰到。
@@ -151,6 +151,8 @@ fn random_library(rng: &mut StdRng, tags: &[String]) -> Vec<ArchiveRecord> {
                 // 日期取值很少，大量并列，用来检查按 ID 打破并列。
                 date_added: rng.random_range(0..50),
                 tags: (0..tag_count).map(|_| random_tag(rng, tags)).collect(),
+                page_count: rng.random_range(0..30),
+                is_new: rng.random_bool(0.3),
             }
         })
         .collect()
@@ -182,7 +184,7 @@ fn random_query(rng: &mut StdRng, tags: &[String], naive: &Naive) -> Query {
 }
 
 fn random_term(rng: &mut StdRng, tags: &[String], naive: &Naive, depth: u32) -> Term {
-    let kinds = if depth == 0 { 5 } else { 6 };
+    let kinds = if depth == 0 { 8 } else { 9 };
     match rng.random_range(0..kinds) {
         0 if rng.random_bool(0.1) => Term::Tag("missing:tag".into()),
         0 => Term::Tag(random_tag(rng, tags)),
@@ -220,6 +222,18 @@ fn random_term(rng: &mut StdRng, tags: &[String], naive: &Naive, depth: u32) -> 
             ids.push(ArchiveId::MAX);
             Term::Archives(ids)
         }
+        5 => {
+            let bound = rng.random_range(0..32);
+            Term::Pages(match rng.random_range(0..5) {
+                0 => Comparison::Less(bound),
+                1 => Comparison::AtMost(bound),
+                2 => Comparison::Equal(bound),
+                3 => Comparison::AtLeast(bound),
+                _ => Comparison::Greater(bound),
+            })
+        }
+        6 => Term::New,
+        7 => Term::Untagged,
         _ => {
             let children = rng.random_range(0..=3);
             Term::Any(
@@ -254,6 +268,8 @@ struct NaiveRecord {
     id: ArchiveId,
     title: String,
     tags: BTreeSet<String>,
+    page_count: u32,
+    is_new: bool,
 }
 
 /// 逐本检查每个条件，排序直接比较标题，不使用位图和预先算好的排列。
@@ -281,6 +297,8 @@ impl Naive {
                     id: r.id,
                     title: r.title.to_lowercase(),
                     tags: r.tags.iter().map(|t| normalize(t)).collect(),
+                    page_count: r.page_count,
+                    is_new: r.is_new,
                 })
                 .collect(),
             title_rank: rank(&by_title),
@@ -350,6 +368,15 @@ fn matches(record: &NaiveRecord, term: &Term) -> bool {
         Term::TitleContains(needle) => record.title.contains(&needle.to_lowercase()),
         Term::Any(terms) => terms.iter().any(|t| matches(record, t)),
         Term::Archives(ids) => ids.contains(&record.id),
+        Term::Pages(comparison) => match *comparison {
+            Comparison::Less(bound) => record.page_count < bound,
+            Comparison::AtMost(bound) => record.page_count <= bound,
+            Comparison::Equal(bound) => record.page_count == bound,
+            Comparison::AtLeast(bound) => record.page_count >= bound,
+            Comparison::Greater(bound) => record.page_count > bound,
+        },
+        Term::New => record.is_new,
+        Term::Untagged => record.tags.is_empty(),
     }
 }
 

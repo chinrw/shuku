@@ -1,4 +1,4 @@
-use crate::{Query, Term};
+use crate::{Comparison, Query, Term};
 
 /// 解析后的搜索条件沿用 [`Query`] 的默认排序和分页参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6,6 +6,25 @@ pub struct ParsedQuery {
     pub query: Query,
     /// 至少一个词条中的通配符已降级为子串匹配。
     pub degraded: bool,
+    /// `read:` 条件。阅读进度不在索引里，调用方按进度把它们换成 [`Term::Archives`]
+    /// 加进 `query` 以后再搜索。
+    pub read: Vec<ReadCondition>,
+}
+
+/// 一个 `read:` 条件。和 LRR 一样，已读页数是读到的页码（从 1 开始），没读过是 0。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadCondition {
+    pub comparison: Comparison,
+    /// 来自 `-read:...`。
+    pub excluded: bool,
+}
+
+/// 一个词条是不是 `pages:`、`read:` 数值条件。
+enum Numeric {
+    No,
+    Pages(Comparison),
+    Read(Comparison),
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -47,11 +66,13 @@ impl Piece {
 /// 词条末尾孤立的反斜杠按字面保留；`:` 无论是否转义都是命名空间分隔符。
 /// 通配符规则优先于精确标记：单个末尾 `*`/`%` 转为前缀；其他位置的
 /// 通配符把词条切成几段，每段按子串匹配，并标记为已降级。
-/// `pages`、`read` 的整数条件以及任意命名空间的比较运算均不支持。
+/// `pages:`、`read:` 后面跟 `>`、`<`、`>=`、`<=`、`=` 或不带运算符的非负整数是数值条件；
+/// `!=`、带正负号的数和其他命名空间的比较运算不支持。
 pub fn parse_query(input: &str) -> Result<ParsedQuery, ParseError> {
     let mut parsed = ParsedQuery {
         query: Query::default(),
         degraded: false,
+        read: Vec::new(),
     };
     let (mut quoted, mut escaped) = (false, false);
     let terms = input.split(|ch| {
@@ -107,16 +128,52 @@ fn text(pieces: &[Piece]) -> String {
 }
 
 /// `pages:>20`、`read:0` 这类数值条件按原文判断，转义不影响它。
-fn is_numeric_condition(text: &str) -> bool {
+fn numeric_condition(text: &str) -> Numeric {
     let Some((namespace, value)) = text.split_once(':') else {
-        return false;
+        return Numeric::No;
     };
     let value = value.trim_start();
-    let digits = value.trim_start_matches(['+', '-']);
-    let integer = !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit());
-    ((namespace.eq_ignore_ascii_case("pages") || namespace.eq_ignore_ascii_case("read")) && integer)
-        || value.starts_with(['<', '>', '='])
-        || value.starts_with("!=")
+    let operator = ["!=", ">=", "<=", ">", "<", "="]
+        .into_iter()
+        .find(|operator| value.starts_with(operator));
+    let digits = &value[operator.map_or(0, str::len)..];
+    let pages = namespace.eq_ignore_ascii_case("pages");
+    if !pages && !namespace.eq_ignore_ascii_case("read") {
+        return if operator.is_some() {
+            Numeric::Unsupported
+        } else {
+            Numeric::No
+        };
+    }
+    let unsigned = digits.trim_start_matches(['+', '-']);
+    let integer = !unsigned.is_empty() && unsigned.bytes().all(|byte| byte.is_ascii_digit());
+    if !integer {
+        // `pages:color` 这类值是普通标签；带了运算符却不是整数的写错了。
+        return if operator.is_some() {
+            Numeric::Unsupported
+        } else {
+            Numeric::No
+        };
+    }
+    let Ok(bound) = digits.parse::<u32>() else {
+        return Numeric::Unsupported;
+    };
+    if digits.len() != unsigned.len() {
+        return Numeric::Unsupported;
+    }
+    let comparison = match operator {
+        None | Some("=") => Comparison::Equal(bound),
+        Some(">") => Comparison::Greater(bound),
+        Some(">=") => Comparison::AtLeast(bound),
+        Some("<") => Comparison::Less(bound),
+        Some("<=") => Comparison::AtMost(bound),
+        Some(_) => return Numeric::Unsupported,
+    };
+    if pages {
+        Numeric::Pages(comparison)
+    } else {
+        Numeric::Read(comparison)
+    }
 }
 
 /// `raw` 是未经修剪的原文：先解码再去空白，转义的空白（`foo\ `）才能留在词条里。
@@ -149,8 +206,27 @@ fn parse_term(raw: &str, parsed: &mut ParsedQuery) -> Result<(), ParseError> {
     if pieces.is_empty() || pieces.iter().any(|piece| piece.is('"')) {
         return Err(ParseError::InvalidTerm(raw.into()));
     }
-    if is_numeric_condition(&text(pieces)) {
-        return Err(ParseError::UnsupportedNumericCondition(raw.into()));
+    match numeric_condition(&text(pieces)) {
+        Numeric::No => {}
+        Numeric::Unsupported => {
+            return Err(ParseError::UnsupportedNumericCondition(raw.into()));
+        }
+        Numeric::Pages(comparison) => {
+            let terms = if excluded {
+                &mut parsed.query.exclude
+            } else {
+                &mut parsed.query.include
+            };
+            terms.push(Term::Pages(comparison));
+            return Ok(());
+        }
+        Numeric::Read(comparison) => {
+            parsed.read.push(ReadCondition {
+                comparison,
+                excluded,
+            });
+            return Ok(());
+        }
     }
 
     let trailing_wildcard = pieces

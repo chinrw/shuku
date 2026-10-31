@@ -39,13 +39,17 @@ fn exports_index_records_with_and_without_tags() {
                 id: first,
                 title: "漫画 10".into(),
                 date_added: 1_700_000_000,
-                tags: vec!["artist:älpha,\nbeta".into(), "独立".into()]
+                tags: vec!["artist:älpha,\nbeta".into(), "独立".into()],
+                page_count: 2,
+                is_new: true,
             },
             ArchiveRecord {
                 id: second,
                 title: "漫画 10".into(),
                 date_added: 1_700_000_000,
-                tags: Vec::new()
+                tags: Vec::new(),
+                page_count: 0,
+                is_new: true,
             },
         ]
     );
@@ -101,6 +105,7 @@ fn ten_thousand_archives_with_ten_tags_build_the_same_index() {
                     }
                 })
                 .collect(),
+            ..Default::default()
         });
     }
 

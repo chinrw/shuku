@@ -7,20 +7,21 @@ import {
 	type Category,
 	type Sort
 } from '#lib/api.ts';
-import { parseCategory } from '#lib/libraryUrl.ts';
+import { parseCategory, parseFilter } from '#lib/libraryUrl.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, url }) => {
 	const q = url.searchParams.get('q') ?? '';
 	const sort: Sort = url.searchParams.get('sort') === 'date' ? 'date' : 'title';
 	const category = parseCategory(url.searchParams.get('c'));
+	const filter = parseFilter(url.searchParams.get('f'));
 	// 分类按钮加载失败不影响列表，只是不显示这一排。
 	const shelves: Promise<Category[]> = categories(fetch).catch((error) => {
 		console.warn('加载分类失败', error);
 		return [];
 	});
 	// 最近阅读只在书库首页显示。它加载失败不影响列表，只是不显示这一栏。
-	const reading: Promise<ArchiveItem[]> = q || category !== null
+	const reading: Promise<ArchiveItem[]> = q || category !== null || filter !== null
 		? Promise.resolve([])
 		: recent(fetch).catch((error) => {
 				console.warn('加载最近阅读失败', error);
@@ -29,11 +30,20 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	try {
 		// 几个请求互不依赖，并行发出；语句写错或分类不存在时搜索返回 400。
 		const [result, categoryList, recentItems] = await Promise.all([
-			search(fetch, { q, sort, category }),
+			search(fetch, { q, sort, category, filter }),
 			shelves,
 			reading
 		]);
-		return { q, sort, category, result, categories: categoryList, recent: recentItems, queryError: null };
+		return {
+			q,
+			sort,
+			category,
+			filter,
+			result,
+			categories: categoryList,
+			recent: recentItems,
+			queryError: null
+		};
 	} catch (error) {
 		// 搜索语句写错时留在列表页显示原因，方便直接改；其他错误交给错误页。
 		if (error instanceof ApiError && error.status === 400) {
@@ -41,6 +51,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				q,
 				sort,
 				category,
+				filter,
 				result: null,
 				categories: await shelves,
 				recent: [],

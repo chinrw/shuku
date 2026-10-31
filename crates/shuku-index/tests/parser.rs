@@ -65,6 +65,7 @@ fn parses_terms_exclusions_exact_markers_and_empty_queries() {
                 ..Query::default()
             },
             degraded: false,
+            read: Vec::new(),
         });
         assert_eq!(parse_query(input), expected, "{input:?}");
     }
@@ -96,6 +97,7 @@ fn parses_trailing_wildcards_as_prefixes() {
                     ..Query::default()
                 },
                 degraded: false,
+                read: Vec::new(),
             };
             assert_eq!(parse_query(&input), Ok(expected), "{input:?}");
         }
@@ -144,6 +146,7 @@ fn splits_inner_wildcards_into_required_fragments_and_marks_degradation() {
                 ..Query::default()
             },
             degraded: true,
+            read: Vec::new(),
         };
         assert_eq!(parse_query(input), Ok(expected), "{input:?}");
         let excluded = format!("-{input}");
@@ -166,34 +169,64 @@ fn splits_inner_wildcards_into_required_fragments_and_marks_degradation() {
 }
 
 #[test]
-fn rejects_numeric_conditions_instead_of_treating_them_as_tags() {
+fn pages_and_read_conditions_become_comparisons() {
+    use shuku_index::{Comparison, ReadCondition};
+    let pages = |comparison| Ok((vec![Term::Pages(comparison)], vec![], vec![]));
+    let read = |comparison, excluded| {
+        Ok((
+            vec![],
+            vec![],
+            vec![ReadCondition {
+                comparison,
+                excluded,
+            }],
+        ))
+    };
     let cases = [
-        ("pages:>20", "pages:>20"),
-        ("read:>0", "read:>0"),
-        ("pages:<20", "pages:<20"),
-        ("pages:>=20", "pages:>=20"),
-        ("pages:<=20", "pages:<=20"),
-        ("pages:=20", "pages:=20"),
-        ("pages:!=20", "pages:!=20"),
-        ("pages:20", "pages:20"),
-        ("read:0", "read:0"),
-        ("PAGES:>20", "PAGES:>20"),
-        ("pages: >20", "pages: >20"),
-        ("rating:>=3", "rating:>=3"),
-        ("rating:!=3", "rating:!=3"),
-        ("-read:>0", "-read:>0"),
-        ("\"pages:>20\"", "\"pages:>20\""),
-        ("read:>0$", "read:>0$"),
-        ("artist:Alpha, pages:>20", "pages:>20"),
-        ("Al?pha, read:>0", "read:>0"),
+        ("pages:>20", pages(Comparison::Greater(20))),
+        ("pages:<20", pages(Comparison::Less(20))),
+        ("pages:>=20", pages(Comparison::AtLeast(20))),
+        ("pages:<=20", pages(Comparison::AtMost(20))),
+        ("pages:=20", pages(Comparison::Equal(20))),
+        ("pages:20", pages(Comparison::Equal(20))),
+        ("PAGES:>20", pages(Comparison::Greater(20))),
+        ("pages: >20", pages(Comparison::Greater(20))),
+        ("\"pages:>20\"", pages(Comparison::Greater(20))),
+        (
+            "-pages:<5",
+            Ok((vec![], vec![Term::Pages(Comparison::Less(5))], vec![])),
+        ),
+        ("read:0", read(Comparison::Equal(0), false)),
+        ("read:>0$", read(Comparison::Greater(0), false)),
+        ("-read:>0", read(Comparison::Greater(0), true)),
+        ("pages:!=20", Err("pages:!=20")),
+        ("rating:>=3", Err("rating:>=3")),
+        ("rating:!=3", Err("rating:!=3")),
+        ("pages:>", Err("pages:>")),
+        ("pages:>abc", Err("pages:>abc")),
+        ("read:>-1", Err("read:>-1")),
     ];
-    for (input, unsupported) in cases {
-        assert_eq!(
-            parse_query(input),
-            Err(ParseError::UnsupportedNumericCondition(unsupported.into())),
-            "{input:?}",
-        );
+    for (input, expected) in cases {
+        let actual = parse_query(input)
+            .map(|parsed| (parsed.query.include, parsed.query.exclude, parsed.read));
+        let expected =
+            expected.map_err(|raw: &str| ParseError::UnsupportedNumericCondition(raw.into()));
+        assert_eq!(actual, expected, "{input:?}");
     }
+
+    let parsed = parse_query("artist:Alpha, pages:>20, read:0").unwrap();
+    assert_eq!(
+        parsed.query.include,
+        vec![
+            Term::TagPrefix("artist:Alpha".into()),
+            Term::Pages(Comparison::Greater(20))
+        ]
+    );
+    assert_eq!(parsed.read.len(), 1);
+    assert_eq!(
+        parse_query("Al?pha, pages:!=20"),
+        Err(ParseError::UnsupportedNumericCondition("pages:!=20".into()))
+    );
 
     assert_eq!(
         parse_query("volume:20, volume:30$").unwrap().query.include,
@@ -274,6 +307,7 @@ fn backslash_makes_the_next_character_literal() {
                 ..Query::default()
             },
             degraded: false,
+            read: Vec::new(),
         };
         assert_eq!(parse_query(input), Ok(expected), "{input:?}");
     }

@@ -293,7 +293,7 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
         "/api/search?limit=oops",
         "/api/search?after=999999",
         "/api/search?sort=bad",
-        "/api/search?q=pages:%3E20",
+        "/api/search?q=pages:!%3D20",
         "/api/search?q=-a*b",
         "/api/archives/invalid",
     ] {
@@ -372,7 +372,7 @@ async fn facets_and_tag_suggestions_count_archives_per_tag() {
     for uri in [
         "/api/facets?limit=0",
         "/api/facets?limit=101",
-        "/api/facets?q=pages:%3E20",
+        "/api/facets?q=pages:!%3D20",
         "/api/tags",
         "/api/tags?prefix=a&limit=0",
     ] {

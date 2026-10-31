@@ -8,7 +8,7 @@
 mod natural;
 mod parser;
 
-pub use parser::{ParseError, ParsedQuery, parse_query};
+pub use parser::{ParseError, ParsedQuery, ReadCondition, parse_query};
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -35,7 +35,7 @@ const DENSE_DIVISOR: u64 = 64;
 const FACET_DIVISOR: u64 = 16;
 
 /// One archive as the index needs it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArchiveRecord {
     pub id: ArchiveId,
     pub title: String,
@@ -43,6 +43,31 @@ pub struct ArchiveRecord {
     pub date_added: i64,
     /// Full tag names such as `artist:alpha`.
     pub tags: Vec<String>,
+    pub page_count: u32,
+    /// 入库后还没打开过。扫描新增的归档为真，LRR 导入的沿用 LRR 的 isnew。
+    pub is_new: bool,
+}
+
+/// `pages:` 和 `read:` 条件里的比较，例如 `pages:>=20` 是 `AtLeast(20)`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Comparison {
+    Less(u32),
+    AtMost(u32),
+    Equal(u32),
+    AtLeast(u32),
+    Greater(u32),
+}
+
+impl Comparison {
+    pub fn matches(self, value: u32) -> bool {
+        match self {
+            Self::Less(bound) => value < bound,
+            Self::AtMost(bound) => value <= bound,
+            Self::Equal(bound) => value == bound,
+            Self::AtLeast(bound) => value >= bound,
+            Self::Greater(bound) => value > bound,
+        }
+    }
 }
 
 /// A single search condition. Tag names and titles match case-insensitively.
@@ -60,6 +85,12 @@ pub enum Term {
     Any(Vec<Term>),
     /// 这些归档，例如一个静态分类的成员。索引里没有的 ID 忽略。搜索语句不会产生它。
     Archives(Vec<ArchiveId>),
+    /// 页数满足比较的归档，搜索语句里的 `pages:`。
+    Pages(Comparison),
+    /// [`ArchiveRecord::is_new`] 为真的归档。搜索语句不会产生它。
+    New,
+    /// 一个标签都没有的归档。搜索语句不会产生它。
+    Untagged,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -167,6 +198,9 @@ pub struct Index {
     title_start: Vec<usize>,
     by_title: SortOrder,
     by_date: SortOrder,
+    page_counts: Vec<u32>,
+    new_docs: RoaringBitmap,
+    untagged_docs: RoaringBitmap,
 }
 
 impl Index {
@@ -178,6 +212,8 @@ impl Index {
         let mut title_start = Vec::new();
         let mut title_keys = Vec::new();
         let mut dates = Vec::new();
+        let mut page_counts = Vec::new();
+        let mut new_docs = RoaringBitmap::new();
 
         for record in records {
             let doc = u32::try_from(ids.len()).map_err(|_| BuildError::TooManyArchives)?;
@@ -186,6 +222,10 @@ impl Index {
             }
             ids.push(record.id);
             dates.push(record.date_added);
+            page_counts.push(record.page_count);
+            if record.is_new {
+                new_docs.insert(doc);
+            }
             title_keys.push(natural::natural_key(&record.title));
             title_start.push(titles.len());
             titles.extend_from_slice(scan_text(&record.title).as_bytes());
@@ -205,6 +245,9 @@ impl Index {
         let mut tags_by_size: Vec<u32> = (0..tag_count).collect();
         tags_by_size.sort_by_key(|&tag| Reverse(tag_docs[tag as usize].len()));
         let (doc_tag_start, doc_tags) = doc_tag_table(ids.len(), &tag_docs);
+        let untagged_docs = (0..ids.len() as u32)
+            .filter(|&doc| doc_tag_start[doc as usize] == doc_tag_start[doc as usize + 1])
+            .collect();
 
         let count = ids.len() as u32;
         let mut by_title: Vec<u32> = (0..count).collect();
@@ -230,6 +273,9 @@ impl Index {
             title_start,
             by_title: SortOrder::new(by_title),
             by_date: SortOrder::new(by_date),
+            page_counts,
+            new_docs,
+            untagged_docs,
         })
     }
 
@@ -408,6 +454,16 @@ impl Index {
                     .filter_map(|id| self.doc_of.get(id).copied())
                     .collect(),
             ),
+            // 30 万本逐个比较不到 1 ms，不值得为页数另建排好序的结构。
+            Term::Pages(comparison) => Cow::Owned(
+                (0u32..)
+                    .zip(&self.page_counts)
+                    .filter(|&(_, &pages)| comparison.matches(pages))
+                    .map(|(doc, _)| doc)
+                    .collect(),
+            ),
+            Term::New => Cow::Borrowed(&self.new_docs),
+            Term::Untagged => Cow::Borrowed(&self.untagged_docs),
         }
     }
 

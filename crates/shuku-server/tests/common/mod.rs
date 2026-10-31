@@ -81,6 +81,23 @@ impl Fixture {
         Self { root, config }
     }
 
+    /// 一个有 `pages` 页的归档，每页是 1×1 的 PNG。
+    pub fn archive_with_pages(&self, name: &str, pages: usize) {
+        let path = self.config.content_dir.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(RgbImage::new(1, 1))
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
+        let mut zip = ZipWriter::new(File::create(path).unwrap());
+        for page in 0..pages {
+            zip.start_file(format!("{page:03}.png"), SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes.get_ref()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
     pub fn archive(&self, name: &str, width: u32, height: u32) -> Vec<u8> {
         let path = self.config.content_dir.join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();

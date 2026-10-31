@@ -291,6 +291,8 @@ fn generate() -> (Vec<ArchiveRecord>, usize) {
                 // 约 6 年内随机的加入时间，大致对应真实书库的跨度。
                 date_added: 1_600_000_000 + rng.random_range(0..200_000_000),
                 tags,
+                page_count: rng.random_range(8..400),
+                is_new: rng.random_bool(0.3),
             }
         })
         .collect();

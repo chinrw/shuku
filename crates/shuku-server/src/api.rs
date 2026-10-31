@@ -103,6 +103,8 @@ struct SearchParams {
     #[serde(default)]
     q: String,
     category: Option<i64>,
+    #[serde(default)]
+    filter: String,
     sort: Option<String>,
     after: Option<i64>,
     limit: Option<usize>,
@@ -122,19 +124,17 @@ async fn search(
         Some("date") => Sort::DateAddedNewest,
         _ => return Err(Error::bad_request("sort 必须是 title 或 date")),
     };
+    let filters = parse_filters(&params.filter)?;
     app.blocking(move |app| {
-        let mut parsed = shuku_index::parse_query(&params.q).map_err(Error::bad_request)?;
-        parsed.query.sort = sort;
-        parsed.query.after = params.after;
-        parsed.query.limit = limit;
         let snapshot = app.snapshot();
-        if let Some(id) = params.category {
-            parsed.degraded |= restrict_to_category(&snapshot, &mut parsed.query, id)?;
-        }
-        let result = snapshot.index.search(&parsed.query).map_err(Error::bad_request)?;
+        let (mut query, degraded) = build_query(&snapshot, &params.q, params.category, &filters)?;
+        query.sort = sort;
+        query.after = params.after;
+        query.limit = limit;
+        let result = snapshot.index.search(&query).map_err(Error::bad_request)?;
         // 结果和列表元数据来自同一个快照，结果里的每本都查得到。
         let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&item)).collect();
-        Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": parsed.degraded, "items": items})))
+        Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": degraded, "items": items})))
     }).await
 }
 
@@ -185,6 +185,9 @@ fn restrict_to_category(
         Ok(parsed) => {
             query.include.extend(parsed.query.include);
             query.exclude.extend(parsed.query.exclude);
+            for condition in &parsed.read {
+                restrict_by_read(snapshot, query, *condition);
+            }
             Ok(parsed.degraded)
         }
         Err(error) => {
@@ -192,6 +195,114 @@ fn restrict_to_category(
             query.include.push(shuku_index::Term::Archives(Vec::new()));
             Ok(false)
         }
+    }
+}
+
+/// 书库页的快捷筛选，搜索和标签统计的 `filter` 参数，逗号分隔，同时生效。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Filter {
+    /// 新入库、还没读过。
+    New,
+    Untagged,
+    Unread,
+    /// 有进度、还没读到最后一页。
+    Reading,
+    /// 读到了最后一页。
+    Finished,
+}
+
+fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| match name {
+            "new" => Ok(Filter::New),
+            "untagged" => Ok(Filter::Untagged),
+            "unread" => Ok(Filter::Unread),
+            "reading" => Ok(Filter::Reading),
+            "finished" => Ok(Filter::Finished),
+            _ => Err(Error::bad_request(format!(
+                "filter 只能是 new、untagged、unread、reading、finished：{name}"
+            ))),
+        })
+        .collect()
+}
+
+/// 把搜索语句、分类和快捷筛选合成一个查询，返回查询和语句是否被降级。
+fn build_query(
+    snapshot: &crate::snapshot::Snapshot,
+    q: &str,
+    category: Option<i64>,
+    filters: &[Filter],
+) -> Result<(shuku_index::Query, bool)> {
+    let parsed = shuku_index::parse_query(q).map_err(Error::bad_request)?;
+    let mut query = parsed.query;
+    let mut degraded = parsed.degraded;
+    for condition in parsed.read {
+        restrict_by_read(snapshot, &mut query, condition);
+    }
+    if let Some(id) = category {
+        degraded |= restrict_to_category(snapshot, &mut query, id)?;
+    }
+    for filter in filters {
+        restrict_by_filter(snapshot, &mut query, *filter);
+    }
+    Ok((query, degraded))
+}
+
+/// `read:` 条件按快照里的进度换成归档列表。已读页数是读到的页码，从 1 开始，没读过是 0，
+/// 和 LRR 一样。读过的书只有几百本，所以只列出有进度的归档：没读过的书满足条件时，
+/// 改成排除不满足条件的那些有进度的归档，不用列出几十万本没读过的书。
+fn restrict_by_read(
+    snapshot: &crate::snapshot::Snapshot,
+    query: &mut shuku_index::Query,
+    condition: shuku_index::ReadCondition,
+) {
+    let unread_matches = condition.comparison.matches(0);
+    let ids: Vec<i64> = snapshot
+        .progress()
+        .iter()
+        .filter(|(_, progress)| condition.comparison.matches(progress.page + 1) != unread_matches)
+        .map(|(id, _)| *id)
+        .collect();
+    let term = shuku_index::Term::Archives(ids);
+    // 没读过的书满足条件时，`ids` 是不满足条件的有进度归档。
+    if unread_matches == condition.excluded {
+        query.include.push(term);
+    } else {
+        query.exclude.push(term);
+    }
+}
+
+fn restrict_by_filter(
+    snapshot: &crate::snapshot::Snapshot,
+    query: &mut shuku_index::Query,
+    filter: Filter,
+) {
+    use shuku_index::Term;
+    let read_ids = |finished: Option<bool>| -> Vec<i64> {
+        snapshot
+            .progress()
+            .iter()
+            .filter(|(id, progress)| {
+                finished.is_none_or(|finished| {
+                    snapshot.item(**id).is_some_and(|item| {
+                        (progress.page + 1 >= item.archive.page_count) == finished
+                    })
+                })
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    };
+    match filter {
+        Filter::New => {
+            query.include.push(Term::New);
+            query.exclude.push(Term::Archives(read_ids(None)));
+        }
+        Filter::Untagged => query.include.push(Term::Untagged),
+        Filter::Unread => query.exclude.push(Term::Archives(read_ids(None))),
+        Filter::Reading => query.include.push(Term::Archives(read_ids(Some(false)))),
+        Filter::Finished => query.include.push(Term::Archives(read_ids(Some(true)))),
     }
 }
 
@@ -237,6 +348,8 @@ struct FacetParams {
     #[serde(default)]
     q: String,
     category: Option<i64>,
+    #[serde(default)]
+    filter: String,
     limit: Option<usize>,
 }
 
@@ -246,15 +359,11 @@ async fn facets(
 ) -> Result<Json<Value>> {
     let Query(params) = params.map_err(Error::bad_request)?;
     let limit = tag_limit(params.limit, 20)?;
+    let filters = parse_filters(&params.filter)?;
     app.blocking(move |app| {
-        let mut parsed = shuku_index::parse_query(&params.q).map_err(Error::bad_request)?;
         let snapshot = app.snapshot();
-        if let Some(id) = params.category {
-            restrict_to_category(&snapshot, &mut parsed.query, id)?;
-        }
-        Ok(Json(tag_counts(
-            snapshot.index.facets(&parsed.query, limit),
-        )))
+        let (query, _) = build_query(&snapshot, &params.q, params.category, &filters)?;
+        Ok(Json(tag_counts(snapshot.index.facets(&query, limit))))
     })
     .await
 }

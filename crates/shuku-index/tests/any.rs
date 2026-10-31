@@ -14,6 +14,7 @@ fn any_unions_children_and_composes_with_inclusion_and_exclusion() {
             title: title.into(),
             date_added: id,
             tags: tags.into_iter().map(String::from).collect(),
+            ..Default::default()
         }),
     )
     .unwrap();

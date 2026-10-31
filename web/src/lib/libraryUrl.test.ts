@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { libraryHref, parseCategory } from './libraryUrl';
+import { libraryHref, parseCategory, parseFilter } from './libraryUrl';
 
 describe('libraryHref', () => {
 	it('omits defaults and keeps the rest', () => {
@@ -19,5 +19,19 @@ describe('parseCategory', () => {
 		expect(parseCategory('0')).toBeNull();
 		expect(parseCategory('1.5')).toBeNull();
 		expect(parseCategory('abc')).toBeNull();
+	});
+});
+
+describe('parseFilter', () => {
+	it('accepts the known filters and ignores anything else', () => {
+		expect(parseFilter('reading')).toBe('reading');
+		expect(parseFilter(null)).toBeNull();
+		expect(parseFilter('Reading')).toBeNull();
+		expect(parseFilter('bogus')).toBeNull();
+	});
+
+	it('round-trips through libraryHref', () => {
+		expect(libraryHref({ q: '', sort: 'title', category: null, filter: 'new' })).toBe('/?f=new');
+		expect(libraryHref({ q: 'a', sort: 'title', category: 2, filter: null })).toBe('/?q=a&c=2');
 	});
 });

@@ -45,6 +45,9 @@ export interface PageInfo {
 
 export type Sort = 'title' | 'date';
 
+/** 书库页的快捷筛选，见 docs/api.md 的搜索接口。 */
+export type Filter = 'new' | 'unread' | 'reading' | 'finished' | 'untagged';
+
 export interface Category {
 	id: number;
 	name: string;
@@ -87,10 +90,18 @@ async function request<T>(fetch: Fetch, path: string, init?: RequestInit): Promi
 
 export function search(
 	fetch: Fetch,
-	params: { q: string; sort: Sort; category?: number | null; after?: number; limit?: number }
+	params: {
+		q: string;
+		sort: Sort;
+		category?: number | null;
+		filter?: Filter | null;
+		after?: number;
+		limit?: number;
+	}
 ): Promise<SearchResult> {
 	const query = new URLSearchParams({ q: params.q, sort: params.sort });
 	if (params.category != null) query.set('category', String(params.category));
+	if (params.filter != null) query.set('filter', params.filter);
 	if (params.after !== undefined) query.set('after', String(params.after));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	return request(fetch, `/api/search?${query}`);

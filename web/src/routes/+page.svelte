@@ -7,7 +7,7 @@
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { libraryHref } from '#lib/libraryUrl.ts';
+	import { FILTERS, libraryHref } from '#lib/libraryUrl.ts';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
 	import { namespaceClass, tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
@@ -32,7 +32,7 @@
 	};
 
 	function navigate(q: string, sort: Sort) {
-		goto(libraryHref({ q, sort, category: data.category }));
+		goto(libraryHref({ q, sort, category: data.category, filter: data.filter }));
 	}
 
 	function submit(event: SubmitEvent) {
@@ -98,8 +98,25 @@
 
 	// 和 LRR 首页一样，搜索框下面是用户自己的分类，再点一次取消筛选。
 	function categoryHref(id: number) {
-		return libraryHref({ q: data.q, sort: data.sort, category: data.category === id ? null : id });
+		return libraryHref({
+			q: data.q,
+			sort: data.sort,
+			category: data.category === id ? null : id,
+			filter: data.filter
+		});
 	}
+
+	// 新书、阅读状态和未打标签的快捷筛选，一次只选一个，再点一次取消。
+	function filterHref(filter: (typeof FILTERS)[number][0]) {
+		return libraryHref({
+			q: data.q,
+			sort: data.sort,
+			category: data.category,
+			filter: data.filter === filter ? null : filter
+		});
+	}
+
+	let currentFilter = $derived(FILTERS.find(([filter]) => filter === data.filter)?.[1]);
 
 	let currentCategory = $derived(data.categories.find((category) => category.id === data.category));
 
@@ -124,6 +141,7 @@
 				q: data.q,
 				sort: data.sort,
 				category: data.category,
+				filter: data.filter,
 				after: next
 			});
 			items = [...items, ...result.items];
@@ -260,10 +278,15 @@
 	<p class="status error">{data.queryError}</p>
 {:else if data.result}
 	<p class="status">
-		共 {data.result.total} 本{#if currentCategory}，分类“{currentCategory.name}”{/if}{#if data.q}，搜索“{data.q}”{/if}
+		共 {data.result.total} 本{#if currentFilter}，{currentFilter}{/if}{#if currentCategory}，分类“{currentCategory.name}”{/if}{#if data.q}，搜索“{data.q}”{/if}
 		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
 	</p>
 {/if}
+<nav class="facets" aria-label="筛选">
+	{#each FILTERS as [filter, label] (filter)}
+		<a href={filterHref(filter)} aria-current={data.filter === filter ? 'true' : undefined}>{label}</a>
+	{/each}
+</nav>
 {#if data.categories.length > 0}
 	<nav class="facets" aria-label="分类">
 		{#each data.categories as category (category.id)}

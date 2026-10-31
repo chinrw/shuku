@@ -102,6 +102,11 @@ impl Snapshot {
         })
     }
 
+    /// 全部阅读进度，按归档 ID。
+    pub(crate) fn progress(&self) -> &HashMap<i64, Progress> {
+        &self.progress
+    }
+
     pub(crate) fn categories(&self) -> &[Category] {
         &self.categories
     }

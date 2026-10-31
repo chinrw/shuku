@@ -6,6 +6,7 @@ fn record(id: i64, title: &str, date_added: i64, tags: &[&str]) -> ArchiveRecord
         title: title.to_string(),
         date_added,
         tags: tags.iter().map(|t| t.to_string()).collect(),
+        ..Default::default()
     }
 }
 

@@ -146,7 +146,7 @@ async fn category_writes_reject_bad_input_and_cross_site_requests() {
     for body in [
         value!({"name": "   "}),
         value!({"name": "字".repeat(101)}),
-        value!({"name": "坏语句", "search": "pages:>20"}),
+        value!({"name": "坏语句", "search": "pages:!=20"}),
         value!({"search": "artist:alpha"}),
     ] {
         let code = status(&router, "POST", "/api/categories", Some(body.clone())).await;
