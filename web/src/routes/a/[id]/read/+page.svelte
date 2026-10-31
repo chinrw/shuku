@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { afterNavigate, replaceState } from '$app/navigation';
+	import { onMount, tick, untrack } from 'svelte';
+	import { afterNavigate, pushState, replaceState } from '$app/navigation';
+	import { page as route } from '$app/state';
 	import { downloadUrl } from '#lib/api.ts';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { bytes } from '#lib/format.ts';
 	import PageGrid from '#lib/PageGrid.svelte';
+	import RelatedRow from '#lib/RelatedRow.svelte';
 	import { ProgressReporter } from '#lib/progress.ts';
 	import { settings, WEBTOON_WIDTH } from '#lib/settings.svelte.ts';
 	import { buildSpreads } from '#lib/spreads.ts';
@@ -28,7 +30,62 @@
 	let immersive = $state(false);
 	let overlay = $state(false);
 	// “详情”面板就是这本书的详情页：标签、分类、下载和全部页面的缩略图。
-	let panel = $state<'detail' | 'settings' | null>(untrack(() => data.detail) ? 'detail' : null);
+	type Panel = 'detail' | 'settings';
+	let panel = $state<Panel | null>(null);
+	let detailPages = $state<HTMLElement>();
+
+	// 打开面板时加一条历史记录，手机的返回手势和浏览器的后退只关面板，不离开阅读器。
+	function openPanel(kind: Panel) {
+		if (panel === kind) return;
+		if (panel === null) pushState('', { panel: kind });
+		else replaceState('', { panel: kind });
+		panel = kind;
+	}
+
+	// 关面板时退掉那条历史记录；`then` 等退完再做，免得翻页写的地址被后退冲掉。
+	let afterClose: (() => void) | null = null;
+	function closePanel(then?: () => void) {
+		if (panel === null) {
+			then?.();
+			return;
+		}
+		panel = null;
+		if (route.state.panel) {
+			afterClose = then ?? null;
+			history.back();
+		} else {
+			then?.();
+		}
+	}
+
+	// 面板跟着历史记录走：后退弹掉面板那条记录（返回手势、浏览器后退，或者 closePanel
+	// 自己退的）时关上，前进回到那条记录时再打开。只在记录里的状态变了时同步，
+	// openPanel 自己先改了 panel 再压记录，不会被这里关掉。
+	let panelInHistory: Panel | undefined = undefined;
+	$effect(() => {
+		const state = route.state.panel;
+		if (state === panelInHistory) return;
+		panelInHistory = state;
+		untrack(() => {
+			panel = state ?? null;
+			if (state !== undefined) return;
+			const then = afterClose;
+			afterClose = null;
+			then?.();
+		});
+	});
+
+	// 书库抽屉的“详情”按钮打开阅读器时直接弹出详情面板。
+	onMount(() => {
+		if (untrack(() => data.detail)) openPanel('detail');
+	});
+
+	// 详情面板里的页面缩略图停在正在看的那一页，不从第一页开始。
+	$effect(() => {
+		if (panel !== 'detail' || !detailPages) return;
+		const box = detailPages;
+		tick().then(() => box.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'center' }));
+	});
 	let progressError = $state<string | null>(null);
 	// 关闭了 SSR，这里一定在浏览器里运行。先取一次真实值，免得第一次渲染按宽度 0 请求图片。
 	let innerWidth = $state(window.innerWidth);
@@ -43,18 +100,19 @@
 	const detectedWebtoon = untrack(() => data.webtoon);
 	let webtoon = $derived(prefs.webtoon[book.id] ?? detectedWebtoon);
 	let mode = $derived(webtoon ? 'scroll' : prefs.mode);
-	// 滚动视图那一栏的最大宽度。条漫在电脑和 iPad 横屏上用设置里的宽度，两侧留黑；
-	// 竖屏（手机、iPad 竖放）占满宽度。
-	let columnWidth = $derived(
-		!webtoon ? SCROLL_MAX_WIDTH : innerHeight > innerWidth ? Infinity : prefs.webtoonWidth
-	);
 
-	// 手机和 iPad 上可以把页面转 90 度看横跨两页的图，不用转设备方向锁。只在翻页模式下有。
+	// 手机和 iPad 上可以把整个阅读器（连工具栏和面板）转 90 度看横跨两页的图，不用转设备方向锁。
 	const touchDevice = window.matchMedia('(pointer: coarse)').matches;
 	let rotated = $state(false);
 
 	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。页面转了 90 度时横竖对调。
 	let landscape = $derived(rotated ? innerHeight > innerWidth : innerWidth > innerHeight);
+	// 滚动视图那一栏的最大宽度。条漫在电脑和 iPad 横屏上用设置里的宽度，两侧留黑；
+	// 竖屏（手机、iPad 竖放）占满宽度。
+	let columnWidth = $derived(
+		!webtoon ? SCROLL_MAX_WIDTH : !landscape ? Infinity : prefs.webtoonWidth
+	);
+
 	let spreads = $derived(
 		prefs.spread && landscape ? buildSpreads(pages) : pages.map((_, index) => [index])
 	);
@@ -68,6 +126,8 @@
 	// 从书库或详情页进来时用浏览器返回，书库的滚动位置才会恢复。
 	let cameFromList = false;
 	afterNavigate(({ from }) => {
+		// 阅读器里的历史前进后退（关面板时退掉的那条记录）不算换了来源，保留进来时的判断。
+		if (from?.route.id === '/a/[id]/read') return;
 		cameFromList = from?.route.id === '/' || from?.route.id === '/a/[id]';
 	});
 
@@ -122,7 +182,8 @@
 		current = page;
 		progressError = null;
 		reporter.turn(page);
-		replaceState(`?page=${page}`, {});
+		// 保留浅层路由的状态，面板开着时换页不会把面板那条历史记录冲掉。
+		replaceState(`?page=${page}`, route.state);
 	}
 
 	function go(page: number) {
@@ -319,7 +380,7 @@
 	function key(event: KeyboardEvent) {
 		if (event.key === 'Escape') {
 			// 浏览器全屏时 Esc 由浏览器处理，这里只管面板和只收起工具栏的情况。
-			if (panel) panel = null;
+			if (panel) closePanel();
 			else if (immersive && !document.fullscreenElement) exitFullscreen();
 			return;
 		}
@@ -462,7 +523,7 @@
 
 <svelte:window bind:innerWidth bind:innerHeight onkeydown={key} />
 
-<div class="reader" class:immersive>
+<div class="reader" class:immersive class:rotated>
 	{#if !immersive}
 		<header class="top">
 			<a class="bar-button" href="/" onclick={back} aria-label="返回书库"><Icon name="back" /></a>
@@ -471,17 +532,31 @@
 				{#if pageInfo}<span class="page-info">{pageInfo}</span>{/if}
 			</div>
 			{#if pages.length > 0}
+				<button
+					class="bar-button arrow ends"
+					onclick={() => jump(rtlPaged ? pages.length - 1 : 0)}
+					aria-label={rtlPaged ? '最后一页' : '第一页'}
+				>
+					<Icon name="chevrons-left" />
+				</button>
 				<button class="bar-button arrow" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
 					<Icon name="chevron-left" />
 				</button>
-				<button class="counter" onclick={() => (panel = 'detail')} aria-label="详情和页面">
+				<button class="counter" onclick={() => openPanel('detail')} aria-label="详情和页面">
 					{pageLabel} / {pages.length}
 				</button>
 				<button class="bar-button arrow" onclick={stepRight} aria-label={rtlPaged ? '上一页' : '下一页'}>
 					<Icon name="chevron-right" />
 				</button>
+				<button
+					class="bar-button arrow ends"
+					onclick={() => jump(rtlPaged ? 0 : pages.length - 1)}
+					aria-label={rtlPaged ? '第一页' : '最后一页'}
+				>
+					<Icon name="chevrons-right" />
+				</button>
 			{/if}
-			{#if touchDevice && mode === 'paged' && pages.length > 0}
+			{#if touchDevice && (mode === 'paged' || rotated) && pages.length > 0}
 				<button
 					class="bar-button"
 					class:on={rotated}
@@ -493,10 +568,10 @@
 				</button>
 			{/if}
 			<BookmarkButton archive={book.id} {members} bind:categories={categoryList} bar />
-			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
+			<button class="bar-button" onclick={() => openPanel('detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
-			<button class="bar-button" onclick={() => (panel = 'settings')} aria-label="阅读设置">
+			<button class="bar-button" onclick={() => openPanel('settings')} aria-label="阅读设置">
 				<Icon name="settings" />
 			</button>
 			<!-- 空书没有能点的图片区域，全屏后在 iPhone 上就叫不回工具栏。 -->
@@ -513,8 +588,6 @@
 		bind:this={stage}
 		bind:clientWidth={stageWidth}
 		bind:clientHeight={stageHeight}
-		style:--stage-width="{stageWidth}px"
-		style:--stage-height="{stageHeight}px"
 	>
 		{#if pages.length === 0}
 			<p class="empty">这本书没有可显示的页面。</p>
@@ -524,7 +597,6 @@
 				class="paged"
 				class:rtl={prefs.direction === 'rtl'}
 				class:fit-width={fitWidth}
-				class:rotated
 				bind:this={pagedView}
 				onclick={tap}
 				ontouchstart={touchStart}
@@ -587,7 +659,7 @@
 				aria-label="跳到页"
 			/>
 			<span class="counter">{pageLabel} / {pages.length}</span>
-			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
+			<button class="bar-button" onclick={() => openPanel('detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
 		</footer>
@@ -595,7 +667,7 @@
 
 	{#if panel}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div class="scrim" onclick={() => (panel = null)}></div>
+		<div class="scrim" onclick={() => closePanel()}></div>
 		<aside
 			class="panel"
 			class:wide={panel === 'detail'}
@@ -603,7 +675,7 @@
 		>
 			<div class="panel-head">
 				<h2>{panel === 'detail' ? book.title : '阅读设置'}</h2>
-				<button class="bar-button" onclick={() => (panel = null)} aria-label="关闭">
+				<button class="bar-button" onclick={() => closePanel()} aria-label="关闭">
 					<Icon name="close" />
 				</button>
 			</div>
@@ -674,30 +746,36 @@
 					{/if}
 				</div>
 			{:else}
-				<div class="actions">
-					<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
-					<a href="/a/{book.id}">相关作品</a>
-					{#if book.series}
-						<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>
-					{/if}
-					{#if nextVolume !== null}
-						<a href="/a/{nextVolume}/read" data-sveltekit-reload>下一卷</a>
-					{/if}
-					<a href={downloadUrl(book.id)} download>下载</a>
+				<!-- 上面是标签和操作，下面是相似作品，都固定不动；中间的页面缩略图单独滚动。 -->
+				<div class="detail-top">
+					<div class="actions">
+						<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
+						<button onclick={() => closePanel(() => jump(0))}>回到第一页</button>
+						<button onclick={() => closePanel(() => jump(pages.length - 1))}>最后一页</button>
+						<a href="/a/{book.id}">相关作品</a>
+						{#if book.series}
+							<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>
+						{/if}
+						{#if nextVolume !== null}
+							<a href="/a/{nextVolume}/read" data-sveltekit-reload>下一卷</a>
+						{/if}
+						<a href={downloadUrl(book.id)} download>下载</a>
+					</div>
+					<CategoryPicker archive={book.id} bind:categories={categoryList} {members} />
+					<TagTable rows={tagRows(book)} saveable />
+					{#if book.summary}<p class="summary">{book.summary}</p>{/if}
 				</div>
-				<CategoryPicker archive={book.id} bind:categories={categoryList} {members} />
-				<TagTable rows={tagRows(book)} saveable />
-				{#if book.summary}<p class="summary">{book.summary}</p>{/if}
-				<div class="overview-pages">
+				<div class="overview-pages" bind:this={detailPages}>
 					<PageGrid
 						archive={book.id}
 						{pages}
 						{current}
-						onpick={(page) => {
-							panel = null;
-							jump(page);
-						}}
+						onpick={(page) => closePanel(() => jump(page))}
 					/>
+				</div>
+				<!-- 阅读器的状态只在打开时读一次，换到别的书要整页重新加载，和“下一卷”一样。 -->
+				<div class="detail-bottom" data-sveltekit-reload>
+					<RelatedRow label="相似作品" archive={book.id} compact />
 				</div>
 			{/if}
 		</aside>
@@ -727,10 +805,21 @@
 		inset: 0;
 		display: flex;
 		flex-direction: column;
+		container: reader / inline-size;
 		background: var(--bg);
 		color: var(--fg);
 		user-select: none;
 		-webkit-user-select: none;
+	}
+
+	/* 转 90 度：整个阅读器按横屏的宽高排版，再顺时针转过去，工具栏、面板和图一起转。 */
+	.reader.rotated {
+		inset: auto;
+		top: 50%;
+		left: 50%;
+		width: 100dvh;
+		height: 100dvw;
+		transform: translate(-50%, -50%) rotate(90deg);
 	}
 
 	/* 全屏时四周全黑；平时用和书库一样的底色，不让整页黑着。 */
@@ -782,7 +871,9 @@
 	}
 
 	/* 320px 宽的手机上要放下六个按钮和三位数页码，按钮收窄、标题让位。 */
-	@media (max-width: 400px) {
+	/* 下面几条按阅读器自己的宽度算（容器查询），不按浏览器窗口：转 90 度后阅读器的宽度是
+	   窗口的高度。 */
+	@container reader (max-width: 400px) {
 		.top {
 			gap: 0;
 			padding-inline: 0.25rem;
@@ -798,7 +889,7 @@
 		}
 	}
 
-	@media (max-width: 360px) {
+	@container reader (max-width: 360px) {
 		.top .title {
 			visibility: hidden;
 		}
@@ -806,8 +897,17 @@
 
 	/* 窄屏手机上放不下全部按钮。左右翻页按钮让位：手机上点两侧或左右滑动就能翻页，
 	   详情按钮要留着（藏起来后只能点页码打开，用户找不到）。 */
-	@media (max-width: 400px) and (pointer: coarse) {
-		.top .arrow {
+	@media (pointer: coarse) {
+		@container reader (max-width: 400px) {
+			.top .arrow {
+				display: none;
+			}
+		}
+	}
+
+	/* 触屏设备上工具栏放不下首尾页按钮，它们在详情面板里也有。 */
+	@media (pointer: coarse) {
+		.top .ends {
 			display: none;
 		}
 	}
@@ -825,16 +925,6 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-	}
-
-	/* 转 90 度：把翻页区域的宽高对调后整体顺时针转过去，里面的图照常按“放进屏幕”排版。 */
-	.paged.rotated {
-		inset: auto;
-		top: 50%;
-		left: 50%;
-		width: var(--stage-height);
-		height: var(--stage-width);
-		transform: translate(-50%, -50%) rotate(90deg);
 	}
 
 	/* 从右往左读时，第一页放在右边。 */
@@ -1004,13 +1094,32 @@
 		padding: 1rem;
 		padding-top: max(1rem, env(safe-area-inset-top));
 		background: #34353b;
+		color: var(--fg);
 		--accent: #3b97ea;
 		user-select: text;
 		-webkit-user-select: text;
 	}
 
 	.panel.wide {
+		display: flex;
+		flex-direction: column;
 		width: min(48rem, 100%);
+		/* 屏幕太矮（例如手机转过来）放不下时，中间缩到最小以后整个面板滚动。 */
+		overflow-y: auto;
+	}
+
+	/* 标签很多时上面这块自己滚，最多占四成高度，给中间的缩略图留地方。 */
+	.detail-top {
+		flex: none;
+		max-height: 40%;
+		overflow-y: auto;
+	}
+
+	.detail-bottom {
+		flex: none;
+		margin-top: 0.5rem;
+		padding-top: 0.75rem;
+		border-top: 1px solid #43464e;
 	}
 
 	.actions {
@@ -1030,7 +1139,21 @@
 	}
 
 	.overview-pages {
-		margin-top: 1.25rem;
+		flex: 1 1 0;
+		min-height: 5rem;
+		margin-top: 0.75rem;
+		overflow-y: auto;
+	}
+
+	.actions button {
+		padding: 0.4rem 0.8rem;
+		border: 1px solid #50545c;
+		border-radius: 6px;
+		background: transparent;
+		color: #ddd;
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
 	}
 
 	@media (max-width: 599px) {
@@ -1043,6 +1166,7 @@
 		}
 
 		.panel.wide {
+			height: 90%;
 			max-height: 90%;
 		}
 	}

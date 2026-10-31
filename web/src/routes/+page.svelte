@@ -12,7 +12,8 @@
 		type Sort,
 		type TagCount
 	} from '#lib/api.ts';
-	import { afterNavigate, invalidateAll } from '$app/navigation';
+	import { afterNavigate, invalidateAll, pushState, replaceState } from '$app/navigation';
+	import { page as route } from '$app/state';
 	import BatchBar from '#lib/BatchBar.svelte';
 	import BookDrawer from '#lib/BookDrawer.svelte';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
@@ -395,15 +396,38 @@
 
 	// 点标题或标签行打开详情抽屉；鼠标悬停在标签行上仍然弹出标签浮层。
 	let drawer = $state.raw<ArchiveItem | null>(null);
-	// 抽屉里的标签链接会换一个搜索，留在原页面上的抽屉会挡住新结果。
+	// 抽屉里的标签链接会换一个搜索，留在原页面上的抽屉会挡住新结果；后退回到抽屉开着的
+	// 那条记录时再找回那本书。
 	afterNavigate(() => {
-		drawer = null;
+		const id = route.state.drawer;
+		drawerInHistory = id;
+		drawer = id === undefined ? null : (items.find((item) => item.id === id) ?? null);
 	});
 
+	// 打开抽屉时加一条历史记录，手机的返回手势和浏览器的后退只关抽屉，不离开书库。
 	function openDrawer(item: ArchiveItem) {
 		closeTags();
+		if (drawer === null) pushState('', { drawer: item.id });
+		else replaceState('', { drawer: item.id });
 		drawer = item;
 	}
+
+	function closeDrawer() {
+		if (drawer === null) return;
+		drawer = null;
+		if (route.state.drawer !== undefined) history.back();
+	}
+
+	// 抽屉跟着历史记录走：后退弹掉那条记录时关上，前进回来时在当前列表里找回那本再打开。
+	let drawerInHistory: number | undefined = undefined;
+	$effect(() => {
+		const id = route.state.drawer;
+		if (id === drawerInHistory) return;
+		drawerInHistory = id;
+		untrack(() => {
+			drawer = id === undefined ? null : (items.find((item) => item.id === id) ?? null);
+		});
+	});
 </script>
 
 <header>
@@ -720,7 +744,7 @@
 </div>
 
 {#if drawer}
-	<BookDrawer item={drawer} bind:categories={categoryList} onclose={() => (drawer = null)} />
+	<BookDrawer item={drawer} bind:categories={categoryList} onclose={closeDrawer} />
 {/if}
 
 {#if tagView}
@@ -738,7 +762,7 @@
 	onkeydown={(event) => {
 		if (event.key !== 'Escape') return;
 		closeTags();
-		drawer = null;
+		closeDrawer();
 	}}
 	onscroll={() => tagView && !tagView.sheet && closeTags()}
 	onpointerdown={(event) => {

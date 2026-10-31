@@ -5,7 +5,13 @@
 	// 其他本子，最新加入的在前，带“全部”链接；不给时是按标签相似度排的相似作品。
 	const LIMIT = 13;
 
-	let { label, term, archive }: { label: string; term?: string; archive: number } = $props();
+	// compact 用在阅读器详情面板底部：封面更小，给中间的页面缩略图多留地方。
+	let {
+		label,
+		term,
+		archive,
+		compact = false
+	}: { label: string; term?: string; archive: number; compact?: boolean } = $props();
 
 	let items = $state<ArchiveItem[] | null>(null);
 	let total = $state(0);
@@ -38,7 +44,7 @@
 		<p class="error">加载失败：{failed}</p>
 	</section>
 {:else if items && items.length > 0}
-	<section>
+	<section class:compact>
 		<h2>
 			{label}
 			{#if term !== undefined}
@@ -57,6 +63,10 @@
 {/if}
 
 <style>
+	section {
+		min-width: 0;
+	}
+
 	h2 {
 		display: flex;
 		align-items: baseline;
@@ -107,5 +117,42 @@
 		-webkit-box-orient: vertical;
 		overflow: hidden;
 		margin-top: 0.3rem;
+	}
+
+	.compact .strip {
+		grid-auto-columns: 4rem;
+	}
+
+	.compact .book span {
+		-webkit-line-clamp: 1;
+		line-clamp: 1;
+		font-size: 0.7rem;
+	}
+
+	/* 手机上封面小一些、标题一行，一屏能看到四本左右，整行也不会太高。 */
+	@media (max-width: 599px) {
+		h2 {
+			margin-bottom: 0.4rem;
+			font-size: 0.88rem;
+		}
+
+		.strip {
+			grid-auto-columns: 5.25rem;
+			gap: 0.5rem;
+		}
+
+		.compact .strip {
+			grid-auto-columns: 4rem;
+		}
+
+		.book {
+			font-size: 0.72rem;
+		}
+
+		.book span {
+			-webkit-line-clamp: 1;
+			line-clamp: 1;
+			margin-top: 0.2rem;
+		}
 	}
 </style>
