@@ -79,6 +79,7 @@ impl App {
             .merge(self.metadata_router())
             .merge(self.batch_router())
             .merge(self.auth_router())
+            .merge(self.mcp_router())
             .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
             .route("/api/", any(|| async { Error::not_found() }))

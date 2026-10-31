@@ -40,7 +40,8 @@ fn scan_accepts_environment_and_cli_overrides_and_reports_failures() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let logs = String::from_utf8(output.stdout).unwrap();
+    // 日志写 stderr，stdout 留给命令自己的输出。
+    let logs = String::from_utf8(output.stderr).unwrap();
     assert!(logs.contains("快照构建完成"));
     assert!(logs.contains("elapsed_ms="));
     assert!(logs.contains("count=1"));
@@ -65,7 +66,7 @@ fn scan_accepts_environment_and_cli_overrides_and_reports_failures() {
         .unwrap();
     assert!(!output.status.success());
     assert!(
-        String::from_utf8(output.stdout)
+        String::from_utf8(output.stderr)
             .unwrap()
             .contains("broken.cbz")
     );
@@ -139,4 +140,36 @@ fn get(address: &str, path: &str) -> String {
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     response
+}
+
+#[test]
+fn token_create_prints_only_the_token_on_stdout() {
+    let fixture = Fixture::new();
+    let output = command()
+        .args(["token", "create", "命令行"])
+        .env("SHUKU_CONTENT_DIR", &fixture.config.content_dir)
+        .env("SHUKU_DATA_DIR", &fixture.config.data_dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let token = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        token.trim().starts_with("shuku_") && token.trim().len() == 70,
+        "{token}"
+    );
+    let list = command()
+        .args(["token", "list"])
+        .env("SHUKU_CONTENT_DIR", &fixture.config.content_dir)
+        .env("SHUKU_DATA_DIR", &fixture.config.data_dir)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8(list.stdout)
+            .unwrap()
+            .contains("命令行\t从未使用")
+    );
 }

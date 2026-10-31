@@ -2596,6 +2596,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "shuku-archive",
  "shuku-index",
  "shuku-metadata",

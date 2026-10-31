@@ -72,7 +72,9 @@ async fn main() -> Result<()> {
     // 终端照常输出，同时把最近的日志留给控制台的日志页。
     tracing_subscriber::registry()
         .with(
+            // 日志写 stderr，stdout 留给命令的输出，例如 `token create` 打印的令牌。
             tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
                 .with_ansi(false)
                 .with_target(false),
         )

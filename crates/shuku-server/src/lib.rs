@@ -13,6 +13,7 @@ mod hash;
 mod hosts;
 mod images;
 mod logs;
+mod mcp;
 mod metadata;
 mod scan;
 mod series;

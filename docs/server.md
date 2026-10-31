@@ -35,6 +35,12 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
 
 默认网页端和 API 不需要令牌，只给 agent 用的 `/mcp` 需要。要让网页端也需要令牌，先在控制台设置页的“设备令牌”里新建一个、在这台设备上登录，再打开“网页端也需要令牌”。没有设备能登录时，在服务器上运行 `shuku token create <设备名>` 新建令牌，再到登录页输入。`shuku token list` 列出令牌，`shuku token revoke <ID>` 吊销；命令行和服务共用数据目录，服务运行时也能用，马上生效。
 
+agent 通过 `http://<服务器>:3002/mcp` 访问书库，工具列表见 [API 文档](api.md) 的 MCP 一节。先在控制台为它新建一个令牌，再把地址和令牌配置进 agent，例如 Claude Code：
+
+```bash
+claude mcp add --transport http shuku http://nas:3002/mcp --header "Authorization: Bearer shuku_…"
+```
+
 服务端只接受 Host 是 IP 地址、`localhost` 或不带点的主机名（例如 `nas:3002`）的请求，其他域名返回 421。这是为了防 DNS rebinding：没有认证时，任意网页都能把自己的域名解析到局域网地址来读书库。用带点的名字访问（Tailscale 的完整域名、`.local`、自己的域名）时，先用 IP 打开控制台，在设置页的“允许的域名”里加上它。
 
 相对路径以进程的工作目录为准。参数可以放在 `scan` 前后。按 Ctrl-C 停止 HTTP 服务。

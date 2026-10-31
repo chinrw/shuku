@@ -28,6 +28,23 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 令牌也可以在服务器上用命令行管理，服务运行时也能用，马上生效：`shuku token create <设备名>`、`shuku token list`、`shuku token revoke <ID>`。
 
+## MCP
+
+`POST /mcp` 是给 agent 用的 MCP 服务（Streamable HTTP 传输，协议版本 2025-06-18，也接受 2025-03-26 和 2024-11-05）。总是要令牌。每次 POST 一条 JSON-RPC 消息，请求回一条 JSON，通知回 202；2025-03-26 版的批量（一个数组）也接受，按顺序回每个请求的结果。格式不对的消息（`jsonrpc` 不是 `"2.0"`、`id` 不是字符串或数字、`method` 不是字符串、`params` 不是对象）返回 -32600，什么都不做。不开 SSE 流，也没有会话，`GET /mcp` 返回 405。
+
+每个工具对应上面的一个 `/api` 接口：调用工具时服务端在进程里带着调用方的令牌请求那个接口，校验、认证和写入规则和网页端一样，接口的 JSON 响应原样放进工具结果的文本里（超过 200 KB 截断）。接口返回 4xx、5xx 时工具结果的 `isError` 为真，文本是 `{"error": "..."}`；参数缺了、类型不对、有工具不认识的参数或者工具不存在时返回 JSON-RPC 错误 -32602，什么都不做。
+
+| 工具 | 接口 |
+| --- | --- |
+| `search`、`random_archive`、`recent`、`tag_facets`、`suggest_tags` | 搜索、随机、最近阅读、标签统计和补全 |
+| `get_archive`、`get_series`、`list_categories` | 详情、系列、分类列表 |
+| `edit_archive`、`batch_edit`、`rename_tag` | 编辑、批量修改、标签改名 |
+| `create_category`、`set_category_member` | 新建分类、加进或移出分类 |
+| `fetch_metadata`、`metadata_status`、`metadata_queue`、`queue_metadata` | 运行元数据来源、来源状态、查找队列 |
+| `metadata_candidates`、`get_metadata_candidate`、`update_metadata_candidate`、`approve_metadata_candidate`、`reject_metadata_candidate` | 候选的列出、读取、改写、批准和拒绝 |
+
+请 agent 帮忙翻译在线来源查到的元数据时，先在控制台给那个来源打开 `review`，用 `queue_metadata` 把书放进队列，再让 agent 用 `metadata_candidates` 读候选、`update_metadata_candidate` 写回译好的标签和简介、`approve_metadata_candidate` 批准。
+
 ## 共用对象
 
 `Progress`：
