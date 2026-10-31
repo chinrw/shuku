@@ -15,7 +15,11 @@ pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;
 pub use store::{Store, Writer};
 
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    sync::{Mutex, MutexGuard, PoisonError},
+    time::Duration,
+};
 
 use rusqlite::{Connection, TransactionBehavior};
 
@@ -79,9 +83,21 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// 进程里打开和关闭数据库连接一个一个来。bundled 的 SQLite 3.51 在 unix VFS 里有一处锁顺序
+/// 颠倒：关闭 WAL 连接时 `unixLock` 先拿文件的 `pLockMutex` 再拿全局的 `unixBigLock`
+/// （经 `unixIsSharingShmNode`），而打开同一个文件时 `findReusableFd` 先拿全局锁再拿
+/// `pLockMutex`。两个线程同时关闭和打开同一个库就互相等死，测试里重开数据库时偶尔卡住。
+/// 打开和关闭都很少，串行化没有代价。
+static LIFECYCLE: Mutex<()> = Mutex::new(());
+
+pub(crate) fn lifecycle() -> MutexGuard<'static, ()> {
+    LIFECYCLE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// 打开并迁移数据库。Store 还没有读取分类和 Tankoubon 的接口，测试用它直接查表。
 /// `:memory:` 可用于测试；SQLite 内存库的日志模式仍为 `memory`。
 pub fn open_connection(path: impl AsRef<Path>) -> Result<Connection> {
+    let _lifecycle = lifecycle();
     let mut connection = Connection::open(path)?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
     connection.pragma_update(None, "synchronous", "NORMAL")?;

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -10,13 +11,30 @@ use crate::{
 };
 
 /// 只读连接。WAL 模式下读不挡写，写也不挡读；每个读取方法看到的是调用开始时已提交的数据。
+/// [`crate::Store`] 的写连接也包在这里面。
 pub struct Reader {
-    pub(crate) connection: Connection,
+    /// 关闭要和打开串行，见 [`crate::lifecycle`]，所以由 `Drop` 自己关。
+    pub(crate) connection: ManuallyDrop<Connection>,
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        let _lifecycle = crate::lifecycle();
+        // SAFETY: 只在这里取走一次，之后 `self` 不再被使用。
+        unsafe { ManuallyDrop::drop(&mut self.connection) };
+    }
 }
 
 impl Reader {
+    pub(crate) fn wrap(connection: Connection) -> Self {
+        Self {
+            connection: ManuallyDrop::new(connection),
+        }
+    }
+
     /// 打开只读连接。数据库必须已经由 [`crate::Store::open`] 迁移到当前版本。
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let _lifecycle = crate::lifecycle();
         let connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -29,7 +47,7 @@ impl Reader {
         if found != supported {
             return Err(Error::VersionMismatch { found, supported });
         }
-        Ok(Self { connection })
+        Ok(Self::wrap(connection))
     }
 
     pub fn scan_entries(&self) -> Result<Vec<ScanEntry>> {

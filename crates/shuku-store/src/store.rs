@@ -32,9 +32,7 @@ impl Deref for Store {
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
-            reader: Reader {
-                connection: open_connection(path)?,
-            },
+            reader: Reader::wrap(open_connection(path)?),
         })
     }
 
