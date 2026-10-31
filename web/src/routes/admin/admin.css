@@ -81,7 +81,7 @@
 .adm-meter {
 	height: 8px;
 	border-radius: 999px;
-	background: color-mix(in srgb, var(--bg) 70%, black);
+	background: var(--sunken);
 	overflow: hidden;
 }
 

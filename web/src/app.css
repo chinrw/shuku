@@ -5,6 +5,8 @@
 :root {
 	--bg: #34353b;
 	--surface: #43464e;
+	/* 比底色更深一层，控制台的侧栏、日志和进度条底槽用。 */
+	--sunken: #2b2c31;
 	--raised: #4b4f57;
 	--chip: #4f535b;
 	--chip-border: #6d7179;
@@ -30,6 +32,7 @@
 	:root {
 		--bg: #e3e0d1;
 		--surface: #edebdf;
+		--sunken: #d6d1bd;
 		--raised: #f2efdf;
 		--chip: #f2efdf;
 		--chip-border: #806769;

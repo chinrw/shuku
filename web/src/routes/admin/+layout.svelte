@@ -82,7 +82,7 @@
 		box-sizing: border-box;
 		padding: 1.25rem 0.9rem;
 		padding-top: max(1.25rem, env(safe-area-inset-top));
-		background: color-mix(in srgb, var(--bg) 70%, black);
+		background: var(--sunken);
 		display: flex;
 		flex-direction: column;
 		gap: 1.1rem;

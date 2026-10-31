@@ -116,7 +116,7 @@
 	.log {
 		padding: 0.5rem 0;
 		border-radius: 10px;
-		background: color-mix(in srgb, var(--bg) 70%, black);
+		background: var(--sunken);
 		line-height: 1.5;
 	}
 
@@ -128,7 +128,7 @@
 	}
 
 	.time {
-		color: var(--faint);
+		color: var(--muted);
 	}
 
 	.level {
