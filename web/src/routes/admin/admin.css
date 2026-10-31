@@ -1,0 +1,267 @@
+/* 控制台各页共用的样式。只在控制台里用，类名都带 adm- 前缀，免得影响书库页。 */
+
+.adm-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 0.4rem 0.8rem;
+	margin-bottom: 1.1rem;
+}
+
+.adm-head h1 {
+	margin: 0;
+	font-size: 1.5rem;
+}
+
+.adm-sub {
+	color: var(--muted);
+	font-size: 0.82rem;
+}
+
+.adm-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+.adm-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--min, 12rem)), 1fr));
+	gap: 0.9rem;
+}
+
+.adm-card {
+	box-sizing: border-box;
+	padding: 1rem 1.1rem;
+	border-radius: 10px;
+	background: var(--surface);
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	min-width: 0;
+}
+
+.adm-card h2 {
+	margin: 0;
+	font-size: 0.95rem;
+}
+
+.adm-card.running {
+	background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+
+.adm-label {
+	color: var(--muted);
+	font-size: 0.75rem;
+}
+
+.adm-figure {
+	font-size: 1.6rem;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	line-height: 1.2;
+}
+
+.adm-note {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.75rem;
+	line-height: 1.5;
+}
+
+.adm-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.4rem 0.8rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.adm-meter {
+	height: 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--bg) 70%, black);
+	overflow: hidden;
+}
+
+.adm-meter > span {
+	display: block;
+	height: 100%;
+	background: var(--accent);
+	transition: width 300ms ease;
+}
+
+.adm-meter.done > span {
+	background: var(--group);
+}
+
+.adm-meter.pending > span {
+	background: var(--new);
+}
+
+.adm-kv {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 0.35rem 0.9rem;
+	margin: 0;
+	font-size: 0.85rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.adm-kv dt {
+	color: var(--muted);
+}
+
+.adm-kv dd {
+	margin: 0;
+	text-align: right;
+	overflow-wrap: anywhere;
+}
+
+.adm-kv.left dd {
+	text-align: left;
+}
+
+.adm-state {
+	padding: 1px 8px;
+	border-radius: 999px;
+	background: var(--muted);
+	color: #1c1c1c;
+	font-size: 0.72rem;
+	font-weight: 600;
+}
+
+.adm-state.running {
+	background: var(--accent);
+	color: #fff;
+}
+
+.adm-state.failed {
+	background: var(--danger);
+}
+
+.adm-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-top: auto;
+	padding-top: 0.3rem;
+}
+
+.adm-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4rem;
+	min-height: 2.5rem;
+	padding: 0 1rem;
+	border: 1px solid var(--chip-border);
+	border-radius: 8px;
+	background: transparent;
+	cursor: pointer;
+	text-decoration: none;
+	transition:
+		transform 120ms ease,
+		filter 120ms ease;
+}
+
+.adm-button:hover:not(:disabled) {
+	color: var(--link);
+	border-color: var(--link);
+}
+
+.adm-button:active:not(:disabled) {
+	transform: scale(0.97);
+}
+
+.adm-button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.adm-button.primary {
+	border-color: var(--accent);
+	background: var(--accent);
+	color: #fff;
+	font-weight: 600;
+}
+
+.adm-button.primary:hover:not(:disabled) {
+	color: #fff;
+	filter: brightness(1.1);
+}
+
+.adm-button.danger {
+	border-color: var(--danger);
+	color: var(--danger);
+}
+
+.adm-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.adm-tab {
+	min-height: 2.3rem;
+	padding: 0 0.9rem;
+	border: 1px solid var(--chip-border);
+	border-radius: 999px;
+	background: transparent;
+	cursor: pointer;
+	font-size: 0.85rem;
+}
+
+.adm-tab[aria-selected='true'],
+.adm-tab[aria-pressed='true'] {
+	background: var(--fg);
+	border-color: var(--fg);
+	color: var(--bg);
+}
+
+.adm-tab .count {
+	opacity: 0.7;
+	margin-left: 0.2rem;
+}
+
+.adm-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.85rem;
+	font-variant-numeric: tabular-nums;
+}
+
+.adm-table th {
+	padding: 0.55rem 0.9rem;
+	color: var(--muted);
+	font-weight: 500;
+	text-align: left;
+}
+
+.adm-table td {
+	padding: 0.55rem 0.9rem;
+	border-top: 1px solid var(--border);
+	vertical-align: top;
+}
+
+.adm-table .num {
+	text-align: right;
+}
+
+.adm-scroll {
+	overflow-x: auto;
+	border-radius: 10px;
+	background: var(--surface);
+}
+
+.adm-mono {
+	font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	font-size: 0.78rem;
+	overflow-wrap: anywhere;
+}
+
+.adm-empty {
+	padding: 1.2rem 0.9rem;
+	color: var(--muted);
+}

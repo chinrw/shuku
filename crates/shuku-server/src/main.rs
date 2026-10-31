@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use shuku_server::{App, Config};
 use std::{net::SocketAddr, path::PathBuf};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
 #[command(name = "shuku", about = "扫描和阅读本地漫画归档")]
@@ -49,9 +50,15 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_target(false)
+    // 终端照常输出，同时把最近的日志留给控制台的日志页。
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_target(false),
+        )
+        .with(shuku_server::log_layer())
+        .with(tracing_subscriber::filter::LevelFilter::INFO)
         .try_init()
         .map_err(|error| anyhow::anyhow!(error))?;
     let config = Config {

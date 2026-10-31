@@ -6,8 +6,9 @@ mod reader;
 mod store;
 
 pub use models::{
-    Archive, ArchiveMetadata, CompressionMethod, Library, LibraryArchive, LibraryTag, LrrArchive,
-    LrrCategory, LrrPending, LrrTankoubon, Page, Progress, ScanEntry, Tag,
+    Archive, ArchiveMetadata, CompressionMethod, DuplicateFile, Library, LibraryArchive,
+    LibraryStats, LibraryTag, LrrArchive, LrrCategory, LrrPending, LrrTankoubon, Page, Progress,
+    ScanEntry, Tag,
 };
 pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;

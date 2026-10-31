@@ -10,7 +10,7 @@ use std::{
 /// 每次从数据库取这么多本，取的时候不持有锁太久，也不把 30 万条一次读进内存。
 const BATCH: usize = 256;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct HashReport {
     pub hashed: usize,
     /// 文件不在了，或者自扫描以来变过，留给下次扫描后再算。
@@ -27,6 +27,26 @@ impl App {
     }
 
     fn hash_contents_blocking(&self) -> Result<HashReport> {
+        let Ok(_hash) = self.0.hash_lock.lock() else {
+            self.tasks(|tasks| tasks.hash.fail(&crate::Error::Lock));
+            return Err(crate::Error::Lock);
+        };
+        // 和扫描一样，结束状态在持有锁时写入。
+        let _interrupted = crate::admin::FailOnUnwind::hash(self);
+        let result = self.hash_pending().and_then(|pending| {
+            self.tasks(|tasks| tasks.hash.start(pending));
+            self.hash_contents_running()
+        });
+        self.tasks(|tasks| tasks.hash.finish(&result));
+        result
+    }
+
+    fn hash_pending(&self) -> Result<u64> {
+        let stats = self.reader()?.stats()?;
+        Ok(stats.archives.saturating_sub(stats.hashed))
+    }
+
+    fn hash_contents_running(&self) -> Result<HashReport> {
         let mut report = HashReport::default();
         // 算好的指纹交给写队列合并提交，不等它写完就算下一本；回复在这里清点。
         let (reply, replies) = mpsc::channel();
@@ -61,6 +81,7 @@ impl App {
                 count(&mut report, written?);
                 queued -= 1;
             }
+            self.tasks(|tasks| tasks.hash.report = report.clone());
         }
         drop(reply);
         for written in replies {

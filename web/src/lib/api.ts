@@ -91,8 +91,13 @@ export async function facets(fetch: Fetch, q: string): Promise<TagCount[]> {
 	return (await request<{ tags: TagCount[] }>(fetch, `/api/facets?${query}`)).tags;
 }
 
-export async function suggestTags(prefix: string, signal: AbortSignal): Promise<TagCount[]> {
+export async function suggestTags(
+	prefix: string,
+	signal: AbortSignal,
+	limit?: number
+): Promise<TagCount[]> {
 	const query = new URLSearchParams({ prefix });
+	if (limit !== undefined) query.set('limit', String(limit));
 	return (await request<{ tags: TagCount[] }>(fetch, `/api/tags?${query}`, { signal })).tags;
 }
 

@@ -154,6 +154,94 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 { "items": [ArchiveItem] }
 ```
 
+## 控制台
+
+网页端的 `/admin` 页用下面这些接口。M1 没有认证，它们和其他接口一样只在局域网里用；会改数据的管理功能（删记录、改标签）放到 M2，和认证一起做。为了不让别的网页借浏览器触发任务，POST 和 DELETE 请求的 `Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致时返回 403；两个头都没有的请求（curl 等）照常处理。
+
+`GET /api/admin/status`
+
+控制台每 5 秒请求一次。SQLite 的计数和内存快照各读一次，不逐本查询。
+
+```json
+{
+  "server": { "version": "0.1.0", "started_at": 1761800000000, "content_dir": "/srv/comics",
+              "data_dir": "/var/lib/shuku", "web_dir": "web/build", "listen": "0.0.0.0:3002" },
+  "library": { "archives": 58756, "pages": 1912340, "bytes": 2001000000000, "hashed": 31020,
+               "lrr_imported": 58548, "lrr_pending": 76403, "with_progress": 767,
+               "read_last_week": 12, "categories": 3, "tankoubons": 0,
+               "tags": 41207, "namespaces": 23 },
+  "storage": { "database_bytes": 432013312, "wal_bytes": 3250000,
+               "cache_bytes": 2576980378, "cache_files": 18302 },
+  "snapshot": { "built_at": 1761800000000, "archives": 58756, "read_ms": 31, "build_ms": 58 },
+  "scan": { "running": true, "started_at": 1761790000000, "finished_at": null,
+            "total": 137012, "processed": 61880,
+            "report": { "added": 3124, "updated": 0, "moved": 0, "unchanged": 58704, "skipped": 12, "failed": 40 },
+            "error": null,
+            "issues": { "failed": 37, "skipped": 12, "unreadable": 3, "missing": 0 } },
+  "hash": { "running": false, "started_at": null, "finished_at": null, "total": 0,
+            "report": { "hashed": 0, "skipped": 0, "failed": 0 }, "error": null }
+}
+```
+
+- `library.tags` 和 `namespaces` 只数至少被一本用到的标签；`read_last_week` 是翻页时间在最近 7 天内的本数。
+- `storage.cache_*` 是 `数据目录/cache/images` 里的文件，每分钟最多统计一次。
+- `scan` 是正在进行或服务启动以来最近一次的扫描。`total` 在遍历完内容目录后才有值；`issues` 是各类问题的数量，明细见下面的接口。`hash` 同理，`total` 是这轮开始时还没有完整指纹的本数。服务重启后两者都从空开始。
+
+`GET /api/admin/issues`
+
+当前或最近一次扫描遇到的问题，每类最多列 1000 条，`total` 是实际数量：
+
+```json
+{
+  "scanning": false, "finished_at": 1761800000000,
+  "failed": { "total": 1, "items": [{ "path": "a/broken.zip", "error": "zip 结构损坏" }] },
+  "skipped": { "total": 1, "items": [{ "path": "b/book.rar" }] },
+  "unreadable": { "total": 0, "items": [] },
+  "missing": { "total": 1, "items": [{ "id": 42, "path": "c/gone.zip", "title": "已删除的书" }] }
+}
+```
+
+路径都相对内容目录。`unreadable` 是没有读权限的子目录；`missing` 是库里有记录、文件已经不在的归档，`title` 取自快照，快照里没有时为 `null`。
+
+`GET /api/admin/duplicates?limit=`
+
+完整指纹相同的归档，每组按路径排列。`limit` 是最多返回的组数，默认 100，范围 1 到 500。还没算出完整指纹的归档不参与。
+
+```json
+{ "total": 214, "groups": [{ "files": [{ "id": 7, "path": "a.zip", "title": "标题", "file_size": 43200000 }] }] }
+```
+
+`GET /api/admin/namespaces`
+
+每个命名空间的标签数和使用次数，按使用次数从多到少。命名空间不分大小写，空字符串是没有命名空间的标签。某个命名空间下最常用的标签用 `GET /api/tags?prefix=<命名空间>:` 取。
+
+```json
+{ "namespaces": [{ "namespace": "artist", "tags": 18240, "uses": 61377 }] }
+```
+
+`GET /api/admin/logs?level=&after=&limit=`
+
+进程内最近 1000 条日志，按时间顺序。`level` 是 `info`（默认，全部）、`warn`（警告和错误）或 `error`；`after` 是上次取到的最后一条的 `seq`，只返回更新的；`limit` 默认 200，范围 1 到 1000，超出时返回最新的那些。
+
+```json
+{ "entries": [{ "seq": 812, "time": 1761800000000, "level": "warn", "message": "扫描文件失败 path=… error=…" }],
+  "started_at": 1761790000000 }
+```
+
+`seq` 每次启动从 1 开始；`started_at` 标识服务端进程，和上次不同时说明服务重启过，客户端要丢掉旧的 `after` 从头取。
+
+`POST /api/admin/scan`、`POST /api/admin/hash`
+
+在后台开始扫描（结束后接着补算指纹，和服务启动时一样）或补算指纹，立即返回 202 和 `{"started": true}`。同一种任务已经在运行时返回 409。进度从状态接口看。
+
+`POST /api/admin/refresh`
+
+立即按数据库重建内存快照，返回 `{"snapshot": {...}}`，格式同状态接口的 `snapshot`。服务运行时用迁移工具导入后可以用它让搜索结果马上更新。
+
+`DELETE /api/admin/cache`
+
+删除图片缓存里的文件，目录本身保留，返回 `{"removed_files": 18302, "removed_bytes": 2576980378}`。图片之后按需重新生成。
+
 ## 静态文件
 
 `/api` 以外的路径由服务端从网页端的构建目录（`web/build`）提供。找不到对应文件时返回 `index.html`，交给客户端路由处理。

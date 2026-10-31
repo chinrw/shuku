@@ -138,6 +138,32 @@ pub struct LibraryArchive {
     pub tags: Vec<u32>,
 }
 
+/// 见 [`crate::Reader::stats`]。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryStats {
+    pub archives: u64,
+    pub pages: u64,
+    pub bytes: u64,
+    /// 已经算出完整指纹的归档数。
+    pub hashed: u64,
+    /// 从 LRR 导入过元数据的归档数。
+    pub lrr_imported: u64,
+    pub with_progress: u64,
+    /// 暂存着、等扫描到时套用的 LRR 记录数。
+    pub lrr_pending: u64,
+    pub categories: u64,
+    pub tankoubons: u64,
+}
+
+/// 见 [`crate::Reader::duplicates`]。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateFile {
+    pub id: i64,
+    pub path: String,
+    pub title: String,
+    pub file_size: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tag {
     pub namespace: String,

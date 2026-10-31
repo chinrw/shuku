@@ -8,7 +8,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct ScanReport {
     pub added: usize,
     pub updated: usize,
@@ -32,7 +32,19 @@ impl App {
     }
 
     fn scan_blocking(&self) -> Result<ScanReport> {
-        let _scan = self.0.scan_lock.lock().map_err(|_| Error::Lock)?;
+        let Ok(_scan) = self.0.scan_lock.lock() else {
+            self.tasks(|tasks| tasks.scan.fail(&Error::Lock));
+            return Err(Error::Lock);
+        };
+        // 结束状态在持有扫描锁时写入，下一次扫描拿到锁之前，这次的结果不会盖掉它的状态。
+        let _interrupted = crate::admin::FailOnUnwind::scan(self);
+        self.tasks(|tasks| tasks.scan.start());
+        let result = self.scan_locked();
+        self.tasks(|tasks| tasks.scan.finish(&result));
+        result
+    }
+
+    fn scan_locked(&self) -> Result<ScanReport> {
         let content = &self.0.config.content_dir;
         let entries = self.reader()?.scan_entries()?;
         // 不跟随符号链接，避免循环和越出内容目录。
@@ -49,6 +61,13 @@ impl App {
                 Err(error) => match error.path() {
                     Some(path) if error.depth() > 0 => {
                         tracing::warn!(%error, "无法读取内容目录中的条目");
+                        self.tasks(|tasks| {
+                            tasks
+                                .scan
+                                .issues
+                                .unreadable
+                                .push(issue(content, path, &error))
+                        });
                         unreadable.push(path.to_path_buf());
                         report.failed += 1;
                     }
@@ -56,7 +75,7 @@ impl App {
                 },
             }
         }
-        let mut missing: HashMap<String, VecDeque<i64>> = HashMap::new();
+        let mut missing: HashMap<String, VecDeque<(i64, String)>> = HashMap::new();
         for entry in &entries {
             let path = content.join(&entry.path);
             // 读不了的目录里的记录无法判断还在不在，不当作失踪，免得被同内容的新文件顶替。
@@ -68,9 +87,12 @@ impl App {
                 Ok(false) => missing
                     .entry(entry.quick_hash.clone())
                     .or_default()
-                    .push_back(entry.id),
+                    .push_back((entry.id, entry.path.clone())),
                 Err(error) => {
                     tracing::warn!(path = %path.display(), %error, "无法确认已入库的文件是否存在");
+                    self.tasks(|tasks| {
+                        tasks.scan.issues.failed.push(issue(content, &path, &error))
+                    });
                     report.failed += 1;
                 }
             }
@@ -80,6 +102,7 @@ impl App {
             .map(|entry| (entry.path.clone(), entry))
             .collect();
         files.sort();
+        self.tasks(|tasks| tasks.scan.total = files.len());
         // 每批限制待提交页面清单的数量；图片解析和指纹计算并行，SQLite 提交串行。
         for batch in files.chunks(64) {
             let prepared: Vec<_> = batch
@@ -101,15 +124,23 @@ impl App {
                     Ok(None) => report.unchanged += 1,
                     Err(Error::Archive(shuku_archive::Error::UnsupportedFormat)) => {
                         tracing::info!(path = %path.display(), "跳过不支持的格式");
+                        self.tasks(|tasks| tasks.scan.issues.skipped.push(relative(content, path)));
                         report.skipped += 1;
                     }
                     Err(error) => {
                         tracing::warn!(path = %path.display(), %error, "扫描文件失败");
+                        self.tasks(|tasks| {
+                            tasks.scan.issues.failed.push(crate::admin::FileIssue {
+                                path: relative(content, path),
+                                error: error.to_string(),
+                            })
+                        });
                         report.failed += 1;
                     }
                 }
             }
             if saves.is_empty() {
+                self.tasks(|tasks| tasks.scan.progress(batch.len(), &report));
                 continue;
             }
             // 一批一个事务。已有记录的元数据在同一个事务里读出，迁移工具同时改了标题也不会被覆盖。
@@ -120,6 +151,7 @@ impl App {
                         missing
                             .get_mut(&prepared.quick_hash)
                             .and_then(VecDeque::pop_front)
+                            .map(|(id, _)| id)
                     } else {
                         None
                     };
@@ -156,6 +188,7 @@ impl App {
                 Ok(())
             })?;
             self.listing_changed();
+            self.tasks(|tasks| tasks.scan.progress(batch.len(), &report));
             #[cfg(test)]
             if let Some(hook) = self
                 .0
@@ -167,10 +200,36 @@ impl App {
                 hook();
             }
         }
+        // 没被新文件认领的失踪记录，文件确实不在了。
+        let gone: Vec<(i64, String)> = missing.into_values().flatten().collect();
+        self.tasks(|tasks| {
+            for (id, path) in gone {
+                tasks
+                    .scan
+                    .issues
+                    .missing
+                    .push(crate::admin::MissingArchive { id, path });
+            }
+        });
         // 从只读连接构建，期间进度上报照常写入。
         self.refresh_blocking()?;
         tracing::info!(?report, "扫描完成");
         Ok(report)
+    }
+}
+
+/// 问题列表里显示相对内容目录的路径，和数据库里一致。
+fn relative(content: &Path, path: &Path) -> String {
+    path.strip_prefix(content)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn issue(content: &Path, path: &Path, error: &dyn std::fmt::Display) -> crate::admin::FileIssue {
+    crate::admin::FileIssue {
+        path: relative(content, path),
+        error: error.to_string(),
     }
 }
 

@@ -251,6 +251,9 @@
 		>
 			<Icon name={prefs.view === 'grid' ? 'list' : 'grid'} size={18} />
 		</button>
+		<a class="icon-button" href="/admin" aria-label="控制台" title="控制台">
+			<Icon name="settings" size={18} />
+		</a>
 	</div>
 </header>
 

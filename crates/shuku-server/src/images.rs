@@ -183,6 +183,7 @@ fn resize(bytes: &[u8], width: u32) -> Result<Vec<u8>> {
 
 fn write_cache(path: &Path, bytes: &[u8]) -> Result<()> {
     // 同一目录里的 rename 原子发布，重复生成也不会暴露未写完的 JPEG。
+    // 临时文件名没有 .jpg 扩展名，控制台清空缓存时靠这一点跳过生成中的文件。
     let parent = path
         .parent()
         .ok_or_else(|| Error::File(path.display().to_string()))?;

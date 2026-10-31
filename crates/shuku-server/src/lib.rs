@@ -1,10 +1,12 @@
 //! Shuku 的扫描和 HTTP 服务。
 
+mod admin;
 mod api;
 mod db;
 mod decode;
 mod hash;
 mod images;
+mod logs;
 mod scan;
 mod snapshot;
 
@@ -23,6 +25,7 @@ use std::{
 use tokio::sync::Notify;
 
 pub use hash::HashReport;
+pub use logs::{LogLayer, log_layer};
 pub use scan::ScanReport;
 
 #[derive(Debug, Clone)]
@@ -99,6 +102,14 @@ struct Inner {
     /// 置位表示列表元数据或标签变了，下次刷新要重建整个快照；否则只刷新进度。
     listing_changed: AtomicBool,
     scan_lock: Mutex<()>,
+    /// 补算指纹一次只跑一个。启动时的补算和控制台触发的补算撞上时，后一个等前一个结束，
+    /// 那时剩下要算的已经不多。
+    hash_lock: Mutex<()>,
+    /// 扫描和补算指纹的进度，控制台读它。
+    tasks: Mutex<admin::Tasks>,
+    started_at: std::time::SystemTime,
+    /// 图片缓存的大小要遍历目录才知道，控制台每 5 秒问一次，结果缓存一会儿。
+    cache_usage: Mutex<Option<(std::time::Instant, admin::CacheUsage)>>,
     /// 单元测试用：扫描每提交一批后调用，让扫描停在中途。
     #[cfg(test)]
     scan_batch_hook: Mutex<Option<Box<dyn FnMut() + Send>>>,
@@ -138,6 +149,10 @@ impl App {
                 changed,
                 listing_changed: AtomicBool::new(false),
                 scan_lock: Mutex::new(()),
+                hash_lock: Mutex::new(()),
+                tasks: Mutex::new(admin::Tasks::default()),
+                started_at: std::time::SystemTime::now(),
+                cache_usage: Mutex::new(None),
                 #[cfg(test)]
                 scan_batch_hook: Mutex::new(None),
                 stopping: AtomicBool::new(false),

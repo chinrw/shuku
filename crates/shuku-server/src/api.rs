@@ -44,6 +44,7 @@ impl App {
                 get(crate::images::thumbnail),
             )
             .route("/api/archives/{id}/progress", put(write_progress))
+            .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
             .route("/api/", any(|| async { Error::not_found() }))
             .route("/api/{*path}", any(|| async { Error::not_found() }))

@@ -154,3 +154,86 @@ fn a_checkpoint_blocked_by_another_checkpointer_is_not_complete() {
     old_read.execute_batch("COMMIT").unwrap();
     assert!(store.checkpoint().unwrap());
 }
+
+#[test]
+fn stats_count_archives_hashes_progress_and_staged_records() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = Store::open(directory.path().join("shuku.sqlite")).unwrap();
+    let empty = store.stats().unwrap();
+    assert_eq!((empty.archives, empty.pages, empty.bytes), (0, 0, 0));
+
+    let mut hashed = metadata("a.cbz");
+    hashed.content_hash = Some("same".into());
+    hashed.lrr_id = Some("a".repeat(40));
+    let a = store.save_archive(None, &hashed, &pages()).unwrap();
+    store
+        .save_archive(None, &metadata("b.cbz"), &pages()[..1])
+        .unwrap();
+    store.write_progress(a, 1, 1000).unwrap();
+    store
+        .write(|writer| {
+            writer.stage_lrr_pending(
+                "later.cbz",
+                &shuku_store::LrrPending {
+                    archive: shuku_store::LrrArchive {
+                        lrr_id: "b".repeat(40),
+                        title: String::new(),
+                        summary: String::new(),
+                        date_added: None,
+                        source_url: None,
+                        is_new: true,
+                        tags: Vec::new(),
+                    },
+                    progress: None,
+                    categories: Vec::new(),
+                    tankoubons: Vec::new(),
+                },
+            )
+        })
+        .unwrap();
+
+    let stats = store.stats().unwrap();
+    assert_eq!(stats.archives, 2);
+    assert_eq!(stats.pages, 3);
+    assert_eq!(stats.bytes, 2000);
+    assert_eq!(stats.hashed, 1);
+    assert_eq!(stats.lrr_imported, 1);
+    assert_eq!(stats.with_progress, 1);
+    assert_eq!(stats.lrr_pending, 1);
+    assert_eq!((stats.categories, stats.tankoubons), (0, 0));
+}
+
+#[test]
+fn duplicates_group_archives_by_full_content_hash() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = Store::open(directory.path().join("shuku.sqlite")).unwrap();
+    let save = |store: &mut Store, path: &str, hash: Option<&str>| {
+        let mut archive = metadata(path);
+        archive.content_hash = hash.map(Into::into);
+        store.save_archive(None, &archive, &pages()).unwrap()
+    };
+    let b2 = save(&mut store, "z/b.cbz", Some("bbb"));
+    let a1 = save(&mut store, "y/a.cbz", Some("aaa"));
+    let a2 = save(&mut store, "x/a.cbz", Some("aaa"));
+    let b1 = save(&mut store, "b.cbz", Some("bbb"));
+    save(&mut store, "unique.cbz", Some("ccc"));
+    // 还没算出完整指纹的不算重复，即使快速指纹相同。
+    save(&mut store, "p.cbz", None);
+    save(&mut store, "q.cbz", None);
+
+    let ids = |groups: &[Vec<shuku_store::DuplicateFile>]| -> Vec<Vec<i64>> {
+        groups
+            .iter()
+            .map(|group| group.iter().map(|file| file.id).collect())
+            .collect()
+    };
+    let (total, groups) = store.duplicates(10).unwrap();
+    assert_eq!(total, 2);
+    assert_eq!(ids(&groups), [vec![a2, a1], vec![b1, b2]]);
+    assert_eq!(groups[0][0].path, "x/a.cbz");
+    assert_eq!(groups[0][0].file_size, 1000);
+
+    let (total, groups) = store.duplicates(1).unwrap();
+    assert_eq!(total, 2);
+    assert_eq!(ids(&groups), [vec![a2, a1]]);
+}

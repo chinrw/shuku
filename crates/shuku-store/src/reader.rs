@@ -4,8 +4,8 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
-    Archive, ArchiveMetadata, Error, Library, LibraryArchive, LibraryTag, MIGRATIONS, Page,
-    Progress, Result, ScanEntry, Tag, configure,
+    Archive, ArchiveMetadata, DuplicateFile, Error, Library, LibraryArchive, LibraryStats,
+    LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry, Tag, configure,
 };
 
 /// 只读连接。WAL 模式下读不挡写，写也不挡读；每个读取方法看到的是调用开始时已提交的数据。
@@ -188,6 +188,76 @@ impl Reader {
     /// 全部归档的阅读进度。
     pub fn progress(&self) -> Result<HashMap<i64, Progress>> {
         read_all_progress(&self.connection)
+    }
+
+    /// 控制台概览用的计数，都来自同一个读取快照。每项是一次全表聚合，
+    /// 30 万本时合计在几十毫秒内，只在控制台打开时请求。
+    pub fn stats(&self) -> Result<LibraryStats> {
+        Ok(self.connection.query_row(
+            "SELECT (SELECT count(*) FROM archive),
+                    (SELECT coalesce(sum(page_count), 0) FROM archive),
+                    (SELECT coalesce(sum(file_size), 0) FROM archive),
+                    (SELECT count(*) FROM archive WHERE content_hash IS NOT NULL),
+                    (SELECT count(*) FROM archive WHERE lrr_id IS NOT NULL),
+                    (SELECT count(*) FROM progress),
+                    (SELECT count(*) FROM lrr_pending),
+                    (SELECT count(*) FROM category),
+                    (SELECT count(*) FROM tankoubon)",
+            [],
+            |row| {
+                Ok(LibraryStats {
+                    archives: row.get(0)?,
+                    pages: row.get(1)?,
+                    bytes: row.get(2)?,
+                    hashed: row.get(3)?,
+                    lrr_imported: row.get(4)?,
+                    with_progress: row.get(5)?,
+                    lrr_pending: row.get(6)?,
+                    categories: row.get(7)?,
+                    tankoubons: row.get(8)?,
+                })
+            },
+        )?)
+    }
+
+    /// 完整指纹相同的归档，每组按路径排序，组按指纹排序。返回组的总数和前 `limit` 组。
+    /// 没有指纹索引，每次全表分组；只在控制台的问题页按需请求。
+    pub fn duplicates(&self, limit: usize) -> Result<(u64, Vec<Vec<DuplicateFile>>)> {
+        let total: u64 = self.connection.query_row(
+            "SELECT count(*) FROM (SELECT 1 FROM archive WHERE content_hash IS NOT NULL
+                GROUP BY content_hash HAVING count(*) > 1)",
+            [],
+            |row| row.get(0),
+        )?;
+        let mut statement = self.connection.prepare(
+            "WITH groups AS (
+                SELECT content_hash FROM archive WHERE content_hash IS NOT NULL
+                GROUP BY content_hash HAVING count(*) > 1 ORDER BY content_hash LIMIT ?1
+             )
+             SELECT archive.content_hash, archive.id, archive.path, archive.title, archive.file_size
+             FROM archive JOIN groups ON archive.content_hash = groups.content_hash
+             ORDER BY archive.content_hash, archive.path",
+        )?;
+        let mut rows = statement.query([limit as i64])?;
+        let mut groups: Vec<Vec<DuplicateFile>> = Vec::new();
+        let mut current: Option<String> = None;
+        while let Some(row) = rows.next()? {
+            let hash: String = row.get(0)?;
+            let file = DuplicateFile {
+                id: row.get(1)?,
+                path: row.get(2)?,
+                title: row.get(3)?,
+                file_size: row.get(4)?,
+            };
+            match groups.last_mut() {
+                Some(group) if current.as_deref() == Some(hash.as_str()) => group.push(file),
+                _ => {
+                    groups.push(vec![file]);
+                    current = Some(hash);
+                }
+            }
+        }
+        Ok((total, groups))
     }
 }
 

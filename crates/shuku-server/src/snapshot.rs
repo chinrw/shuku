@@ -20,8 +20,28 @@ const REFRESH_DELAY: Duration = Duration::from_millis(100);
 pub(crate) struct Snapshot {
     pub(crate) index: Arc<Index>,
     listing: Arc<Listing>,
+    /// 索引和列表的构建时间与耗时，只刷新进度时沿用。
+    timing: Timing,
     /// 进度变得最勤，单独刷新，不用重建索引和列表。
     progress: Arc<HashMap<i64, Progress>>,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) struct Timing {
+    /// Unix 毫秒。
+    built_at: i64,
+    archives: usize,
+    read_ms: u64,
+    build_ms: u64,
+}
+
+/// 控制台标签页的一行。
+pub(crate) struct NamespaceCount {
+    pub(crate) name: String,
+    /// 这个命名空间下有多少种标签（至少被一本用到的）。
+    pub(crate) tags: usize,
+    /// 这个命名空间的标签一共被用了多少次。
+    pub(crate) uses: usize,
 }
 
 struct Listing {
@@ -53,13 +73,23 @@ impl Snapshot {
         let library = reader.library()?;
         let read_ms = start.elapsed().as_millis();
         let index = Index::build(library.index_records())?;
+        let elapsed_ms = start.elapsed().as_millis();
         tracing::info!(
             count = library.archives.len(),
             read_ms,
-            elapsed_ms = start.elapsed().as_millis(),
+            elapsed_ms,
             "快照构建完成"
         );
+        let built_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis() as i64);
         Ok(Self {
+            timing: Timing {
+                built_at,
+                archives: library.archives.len(),
+                read_ms: read_ms as u64,
+                build_ms: (elapsed_ms - read_ms) as u64,
+            },
             index: Arc::new(index),
             listing: Arc::new(Listing {
                 tags: library.tags,
@@ -67,6 +97,55 @@ impl Snapshot {
             }),
             progress: Arc::new(library.progress),
         })
+    }
+
+    pub(crate) fn timing(&self) -> Timing {
+        self.timing
+    }
+
+    /// 翻页时间不早于 `since`（Unix 毫秒）的归档数。
+    pub(crate) fn read_since(&self, since: i64) -> usize {
+        self.progress
+            .values()
+            .filter(|progress| progress.client_time >= since)
+            .count()
+    }
+
+    /// 至少被一本用到的标签数和命名空间数。
+    pub(crate) fn tag_counts(&self) -> (usize, usize) {
+        let namespaces = self.namespaces();
+        (namespaces.iter().map(|n| n.tags).sum(), namespaces.len())
+    }
+
+    /// 每个命名空间的标签数和使用次数，按使用次数从多到少，同数按名字。
+    /// 逐本累加，30 万本、每本 10 个标签时约几十毫秒。
+    pub(crate) fn namespaces(&self) -> Vec<NamespaceCount> {
+        let tags = &self.listing.tags;
+        let mut uses = vec![0_usize; tags.len()];
+        for archive in &self.listing.archives {
+            for &position in &archive.tags {
+                uses[position as usize] += 1;
+            }
+        }
+        // 和搜索一样不分大小写，显示第一个遇到的写法。
+        let mut namespaces: HashMap<String, NamespaceCount> = HashMap::new();
+        for (tag, &count) in tags.iter().zip(&uses) {
+            if count == 0 {
+                continue;
+            }
+            let entry = namespaces
+                .entry(tag.tag.namespace.to_lowercase())
+                .or_insert_with(|| NamespaceCount {
+                    name: tag.tag.namespace.clone(),
+                    tags: 0,
+                    uses: 0,
+                });
+            entry.tags += 1;
+            entry.uses += count;
+        }
+        let mut namespaces: Vec<_> = namespaces.into_values().collect();
+        namespaces.sort_by(|a, b| b.uses.cmp(&a.uses).then_with(|| a.name.cmp(&b.name)));
+        namespaces
     }
 
     /// 有阅读进度的归档里翻页时间最新的 `limit` 本，从新到旧。进度表里的归档
@@ -157,6 +236,7 @@ impl App {
         self.0.snapshot.store(Arc::new(Snapshot {
             index: current.index.clone(),
             listing: current.listing.clone(),
+            timing: current.timing,
             progress: Arc::new(progress),
         }));
         Ok(())

@@ -1,0 +1,165 @@
+<script lang="ts">
+	import { duplicates, issues, type DuplicateFile, type Issues } from '#lib/admin.ts';
+	import { bytes, clock, count } from '#lib/format.ts';
+
+	type Tab = 'failed' | 'unreadable' | 'skipped' | 'missing' | 'duplicates';
+
+	let data = $state<Issues | null>(null);
+	let groups = $state<{ total: number; groups: { files: DuplicateFile[] }[] } | null>(null);
+	let tab = $state<Tab>('failed');
+	let error = $state<string | null>(null);
+	let loading = $state(false);
+
+	async function load() {
+		loading = true;
+		error = null;
+		try {
+			data = await issues();
+			// 重复文件要全表分组，切到这一栏时才查。
+			if (tab === 'duplicates') groups = await duplicates();
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			loading = false;
+		}
+	}
+
+	$effect(() => {
+		load();
+	});
+
+	function pick(next: Tab) {
+		tab = next;
+		if (next === 'duplicates' && groups === null) load();
+	}
+
+	const hints: Record<Tab, string> = {
+		failed: '最近一次扫描读不了的文件和原因。修好文件后在任务页点“立即扫描”重试。',
+		unreadable: '没有读权限的子目录。里面已入库的记录不当作丢失。',
+		skipped: '7z、RAR、PDF 等 M1 还不读的格式，以后支持后再扫描。',
+		missing: '库里有记录、内容目录里已经找不到的文件。M1 只列出，删除记录放到 M2。',
+		duplicates: '完整指纹相同的文件，每组列出全部路径。只统计已经算好指纹的书。'
+	};
+
+	let tabs = $derived<{ key: Tab; label: string; total: number | null }[]>([
+		{ key: 'failed', label: '扫描失败', total: data?.failed.total ?? null },
+		{ key: 'unreadable', label: '读不了的目录', total: data?.unreadable.total ?? null },
+		{ key: 'skipped', label: '不支持的格式', total: data?.skipped.total ?? null },
+		{ key: 'missing', label: '文件丢失', total: data?.missing.total ?? null },
+		{ key: 'duplicates', label: '重复文件', total: groups?.total ?? null }
+	]);
+
+	function shown(listed: { total: number; items: unknown[] }) {
+		return listed.total > listed.items.length
+			? `只列出前 ${count(listed.items.length)} 条，共 ${count(listed.total)} 条`
+			: '';
+	}
+</script>
+
+<div class="adm-head">
+	<h1>问题</h1>
+	<span class="adm-sub">
+		{#if data?.scanning}来自正在进行的扫描{:else if data?.finished_at}来自 {clock(data.finished_at)} 结束的扫描{:else}服务启动以来还没有扫描过{/if}
+	</span>
+	<button class="adm-button refresh" disabled={loading} onclick={load}>刷新</button>
+</div>
+
+<div class="adm-stack">
+	<div class="adm-tabs" role="tablist" aria-label="问题类型">
+		{#each tabs as item (item.key)}
+			<button
+				class="adm-tab"
+				role="tab"
+				aria-selected={tab === item.key}
+				onclick={() => pick(item.key)}
+			>
+				{item.label}{#if item.total !== null}<span class="count">{count(item.total)}</span>{/if}
+			</button>
+		{/each}
+	</div>
+	<p class="adm-note">{hints[tab]}</p>
+	{#if error}<p class="error">加载失败：{error}</p>{/if}
+
+	{#if data}
+		<div class="adm-scroll" role="tabpanel">
+			{#if tab === 'failed' || tab === 'unreadable'}
+				{@const listed = data[tab]}
+				<table class="adm-table">
+					<thead><tr><th>{tab === 'failed' ? '路径' : '目录'}</th><th>原因</th></tr></thead>
+					<tbody>
+						{#each listed.items as item (item.path)}
+							<tr><td class="adm-mono">{item.path}</td><td class="error">{item.error}</td></tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if listed.items.length === 0}<p class="adm-empty">没有。</p>{/if}
+				{#if shown(listed)}<p class="adm-empty">{shown(listed)}</p>{/if}
+			{:else if tab === 'skipped'}
+				<table class="adm-table">
+					<thead><tr><th>路径</th></tr></thead>
+					<tbody>
+						{#each data.skipped.items as item (item.path)}
+							<tr><td class="adm-mono">{item.path}</td></tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if data.skipped.items.length === 0}<p class="adm-empty">没有。</p>{/if}
+				{#if shown(data.skipped)}<p class="adm-empty">{shown(data.skipped)}</p>{/if}
+			{:else if tab === 'missing'}
+				<table class="adm-table">
+					<thead><tr><th>标题</th><th>原路径</th></tr></thead>
+					<tbody>
+						{#each data.missing.items as item (item.id)}
+							<tr>
+								<td><a href="/a/{item.id}">{item.title ?? `#${item.id}`}</a></td>
+								<td class="adm-mono">{item.path}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if data.missing.items.length === 0}<p class="adm-empty">没有丢失的文件。</p>{/if}
+				{#if shown(data.missing)}<p class="adm-empty">{shown(data.missing)}</p>{/if}
+			{:else if groups}
+				<table class="adm-table">
+					<thead><tr><th>组</th><th>路径</th><th class="num">大小</th></tr></thead>
+					<tbody>
+						{#each groups.groups as group, index (group.files[0].id)}
+							{#each group.files as file, position (file.id)}
+								<tr class:first={position === 0}>
+									<td>{position === 0 ? `第 ${index + 1} 组` : ''}</td>
+									<td><a class="adm-mono" href="/a/{file.id}">{file.path}</a></td>
+									<td class="num">{bytes(file.file_size)}</td>
+								</tr>
+							{/each}
+						{/each}
+					</tbody>
+				</table>
+				{#if groups.groups.length === 0}<p class="adm-empty">没有重复文件。</p>{/if}
+				{#if groups.total > groups.groups.length}
+					<p class="adm-empty">只列出前 {groups.groups.length} 组，共 {count(groups.total)} 组</p>
+				{/if}
+			{:else}
+				<p class="adm-empty">加载中…</p>
+			{/if}
+		</div>
+	{/if}
+</div>
+
+<style>
+	.refresh {
+		margin-left: auto;
+		min-height: 2.1rem;
+	}
+
+	tr:not(.first) td {
+		border-top-color: transparent;
+	}
+
+	a {
+		text-decoration: none;
+	}
+
+	a:hover {
+		color: var(--link);
+	}
+</style>
