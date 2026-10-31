@@ -1,0 +1,193 @@
+name: Clients
+
+# 桌面（Linux、Windows、macOS）和 Android 客户端。客户端只包含 app/ 下的文件，网页端由服务器
+# 提供，所以只在 app/ 变化时构建。发布时 release.yml 带着版本号调用这里。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/clients.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: "写进安装包的版本号，例如 0.2.0；空着用 Cargo.toml 里的版本"
+        type: string
+        default: ""
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+
+concurrency:
+  group: clients-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  # 与 flake 里的 cargo-tauri 同一版本。
+  TAURI_CLI: "@tauri-apps/cli@2.12.4"
+  TAURI_CLI_VERSION: "2.12.4"
+  TAURI_CLI_LINUX_SHA256: 820ae3c7580ca637cad15f65638960ee2a96e5a491e224691c86d6f25e6c9e8a
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Server list tests
+        run: node --test 'app/test/*.test.js'
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # AppImage 和 deb 在较旧的 Ubuntu 上构建，glibc 版本低，新系统也能运行。
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+            name: linux-x86_64
+          - os: windows-latest
+            bundles: nsis
+            name: windows-x86_64
+          - os: macos-latest
+            bundles: dmg
+            target: universal-apple-darwin
+            name: macos-universal
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: app/src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev patchelf
+
+      # 通用二进制要同时编译 Intel 和 Apple Silicon 两个目标。
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          if [ "${{ matrix.target }}" = universal-apple-darwin ]; then
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          fi
+
+      - name: Build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          args=(--ci --bundles "${{ matrix.bundles }}")
+          if [ -n "${{ matrix.target }}" ]; then args+=(--target "${{ matrix.target }}"); fi
+          if [ -n "$VERSION" ]; then args+=(--config "{\"version\":\"$VERSION\"}"); fi
+          npx --yes "$TAURI_CLI" build "${args[@]}"
+
+      - name: Collect bundles
+        env:
+          NAME: shuku-app-${{ inputs.version || github.sha }}-${{ matrix.name }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          bundle=target/${{ matrix.target || '.' }}/release/bundle
+          for file in "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/nsis/*.exe "$bundle"/dmg/*.dmg; do
+            [ -e "$file" ] || continue
+            extension=${file##*.}
+            [ "$extension" = exe ] && extension=setup.exe
+            cp "$file" "$GITHUB_WORKSPACE/dist/$NAME.$extension"
+          done
+          ls -l "$GITHUB_WORKSPACE/dist"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app/src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # 只构建 arm64，手机和平板几乎都是它；runner 自带 Android SDK 和 NDK。
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      # Android 工程的 Gradle 任务回调 `cargo tauri android android-studio-script`（见
+      # gen/android/buildSrc 的 BuildTask.kt），所以这里要 cargo 子命令形式的 CLI，npm 的不行。
+      # 用 Tauri 发布的预编译版本，按固定的 SHA-256 校验。
+      - name: Install cargo-tauri
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          gh release download "tauri-cli-v$TAURI_CLI_VERSION" --repo tauri-apps/tauri \
+            --pattern cargo-tauri-x86_64-unknown-linux-gnu.tgz
+          echo "$TAURI_CLI_LINUX_SHA256  cargo-tauri-x86_64-unknown-linux-gnu.tgz" | sha256sum -c -
+          tar xzf cargo-tauri-x86_64-unknown-linux-gnu.tgz cargo-tauri
+          install cargo-tauri "$HOME/.cargo/bin/cargo-tauri"
+
+      # 签名密码由 Gradle 直接从环境变量读，见 gen/android/app/build.gradle.kts。没配置这几个
+      # secrets 时用调试密钥签名。
+      - name: Build
+        env:
+          VERSION: ${{ inputs.version }}
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+            echo "$KEYSTORE" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          else
+            echo "::warning::Android release signing secrets are not set; the APK is signed with a throwaway debug key"
+          fi
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          args=(--ci --apk --target aarch64)
+          if [ -n "$VERSION" ]; then args+=(--config "{\"version\":\"$VERSION\"}"); fi
+          cargo tauri android build "${args[@]}"
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Collect APK
+        env:
+          NAME: shuku-app-${{ inputs.version || github.sha }}-android-arm64
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          apk=$(find gen/android/app/build/outputs/apk -name '*-release.apk' | head -n 1)
+          test -n "$apk"
+          cp "$apk" "$GITHUB_WORKSPACE/dist/$NAME.apk"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: client-android-arm64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

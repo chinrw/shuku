@@ -18,6 +18,8 @@ nix develop -c cargo fmt --all
 
 推到 main 后，GitHub Actions（`.github/workflows/ci.yml`）在同一个 flake 环境里重跑这些检查，外加网页端的 `pnpm check`、`pnpm test` 和 `pnpm build`。推送 `v*` 标签会触发 `release.yml`，发布静态链接的 x86_64 Linux 二进制和网页端构建产物，用法见 `docs/server.md`。flake 的 rustc 没有 musl 目标，这是唯一不在 flake 环境里编译的地方：它用 rustup 安装与 flake 相同版本的 rustc。只改 Markdown 或 `docs/` 的推送不影响构建和测试，所以不触发 CI。
 
+桌面和 Android 客户端（`app/`）是独立的 Cargo workspace，不在上面的命令里。Linux 桌面版用 `nix develop .#app` 进入的环境编译（WebKitGTK 等系统库只在这个环境里）；`app/` 有变化时 `.github/workflows/clients.yml` 在 GitHub 的 Linux、Windows、macOS runner 上构建桌面版、在 Linux runner 上构建 Android APK，用 runner 自带的 rustup 和 Android SDK，不经过 flake。发布时 `release.yml` 调用它，把安装包附加到 Release 上。细节见 `docs/clients.md`。
+
 ## 当前进度
 
 - M1 后端的 T1 到 T5（`docs/plan/m1-backend.md`）都已实现并有测试：存储、zip 读取、查询解析、服务端 `shuku`、LRR 迁移工具 `shuku-migrate-lrr`。运行方式见 `docs/server.md`，接口见 `docs/api.md`。
@@ -28,7 +30,7 @@ nix develop -c cargo fmt --all
 - 删除记录只接受文件已经不在内容目录里的归档，扫描进行中或内容目录是空的（网络盘没挂载时就是这样）时拒绝。删除连带阅读进度、分类和 Tankoubon 成员关系，编号不复用。
 - 迁移工具可以早于扫描运行：还没扫描入库的归档把 LRR 的元数据按路径暂存在 `lrr_pending` 表，扫描新增那个路径时在同一个事务里套用。LRR 的 `date_added` 标签就是 Shuku 的加入时间，没有这个标签的归档用文件的修改时间（扫描时间对整个迁移来的书库都是同一天）。
 - 扫描默认跳过以 `.` 开头的目录和文件（下载工具的临时目录常常只有它自己能读）。新入库的归档用文件修改时间作为加入时间。
-- 设置分两类：只有书库目录、数据目录、网页目录和监听地址是启动参数；扫描隐藏条目、额外跳过的名字、定时扫描间隔（默认关，文件监视的后备）、条漫自动判断和允许的域名都在控制台改。`setting` 表由各功能共用：每个功能一个键（`scan`、`server`），值是那组设置的 JSON，读写用带 `#[serde(default)]` 的结构，加字段不用迁移；这两组的结构和范围在 `shuku-server` 的 `settings.rs`。定时扫描只在 HTTP 服务里运行。
+- 设置分两类：只有书库目录、数据目录、网页目录和监听地址是启动参数；扫描隐藏条目、额外跳过的名字、定时扫描间隔（默认关，文件监视的后备）、书库名、条漫自动判断和允许的域名都在控制台改。`setting` 表由各功能共用：每个功能一个键（`scan`、`server`），值是那组设置的 JSON，读写用带 `#[serde(default)]` 的结构，加字段不用迁移；这两组的结构和范围在 `shuku-server` 的 `settings.rs`。定时扫描只在 HTTP 服务里运行。
 - 扫描只认 `.zip`/`.cbz`、按魔数是 ZIP 的图片扩展名文件和散放图片的文件夹；其他文件只计数（扫描报告的 `skipped`），不列进问题页。
 - 和 LRR 一样，个别页读不出尺寸的书照样入库：坏页留在页面清单里，宽和高记为 0，`archive.broken_pages`（迁移 006）记坏页数，控制台问题页列出它们；ZIP 结构损坏仍然整本失败。
 - JPEG 头部的标记段之间夹着多余字节时 imagesize 读不出尺寸，`shuku-archive` 会像 libjpeg 一样跳过这些字节再读一遍。
@@ -36,6 +38,7 @@ nix develop -c cargo fmt --all
 - 服务运行时用 notify 监视内容目录，有变化时等安静 10 秒（最多 2 分钟）整体扫描一次，控制台扫描设置里的 `watch` 开关随时开关，细节见 `docs/server.md`。监视只调用 `App::scan` 和 `App::hash_contents`，不改扫描本身。
 - 系列和卷（`series` 表，归档的 `series_id`、`volume` 列）：扫描新书时按路径认卷（`shuku-server/src/series.rs`，规则见 `docs/server.md`），书库页用 `/api/search?group=series` 每个系列只显示一张卡，系列页是 `/s/{id}`。一本书最多属于一个系列；只有一卷的系列不当作系列显示。每次扫描结束前，还不属于系列的已入库书也认一遍；开了 ComicInfo 功能时，新书的 Series 和 Number 优先于路径。按卷出版的普通漫画用另起一个 Shuku 实例的方式管理（另一个内容目录和数据目录），不做多内容目录。
 - 详情页的推荐行最后是“相似作品”（`/api/archives/{id}/similar`，`shuku-index` 的 `Index::similar`）：按 IDF 加权的标签重合度排，跳过超过全部 1/10 且多于 100 本的常见标签，不列同系列的其他卷。书库的详情抽屉在标签下面列作者（最多两排）和相似作品。
+- 桌面（Linux、Windows、macOS）和 Android 客户端（`app/`，Tauri 2）：窗口先打开自带的服务器列表页，服务器地址和设备令牌存在那个页面的 localStorage 里；打开服务器时整个窗口跳到服务器的网页端，令牌经登录页地址的片段交给网页端（`/login#token=…`）。外壳在每个页面放一个 `window.shukuApp`，网页端据此把书库页左上角的书库名改成回到服务器列表。客户端添加服务器时读不需要令牌的 `GET /api/info`（书库名、版本、本数、要不要令牌，允许任何源跨源读）；书库名在控制台设置（`server` 设置组的 `name`），也显示在书库页左上角。Android 版只在 CI 上构建过，没在真机上测；发布签名要用户在仓库 secrets 里配置，没配置时用临时调试密钥。
 - 服务启动扫描后，在后台逐本补算整文件 BLAKE3（`content_hash`），目前只记录，还没用于去重或认出移动的文件。
 - 还没做的：
   - 用真实书库扫描，并在真实 LRR 的 Redis 上运行迁移。
@@ -133,7 +136,7 @@ SQLite 的约定：
 - 网页端是主力，覆盖 iOS 和桌面：TypeScript + Svelte 5，SvelteKit `adapter-static`、关闭 SSR。局域网 HTTP 下浏览器不提供 Service Worker，重复浏览依赖 HTTP 缓存头，所以缓存头必须正确。
 - 实际常用的访问方式是 Tailscale 的 HTTPS（`tailscale serve` 转发到只监听本机的服务），这时网页端是可安装的 PWA（`static/manifest.webmanifest`，iOS 的 Safari 和 Android 的 Chrome 都能装）。Service Worker 在 `web/src/service-worker/`，由根布局注册、开发时不注册：网页端自己的文件按版本预缓存；原图和缩略图按地址里的内容指纹缓存，命中就不请求；书库和阅读器用的几个 GET 接口先走网络、连不上时用上次的结果。原图最多占配额的 1/4 且不超过 1 GiB，缩略图 200 MiB，接口 30 MiB，超出时先删最早存入的（`bounded.ts`）。退出登录或接口返回 401 时清掉接口和图片的缓存。控制台、登录、`/api/info`、下载、MCP 和写接口不经过缓存，加接口时在 `routes.ts` 里决定要不要离线可用。离线时进度上报失败，还不排队补传。
 - 桌面和 Android 的 Tauri 应用加载服务端托管的网页端，不打包自己的一份，所以网页端的改动对它们同样生效。
-- Android 原生客户端（Kotlin + Compose）在 M4，离线阅读由它和桌面 Tauri 负责。
+- Android 原生客户端（Kotlin + Compose）在 M4，离线阅读由它负责。现有的 Tauri 客户端（`app/`）只是外壳，没有离线阅读。
 
 ## 插件
 

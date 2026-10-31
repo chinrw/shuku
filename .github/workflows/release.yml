@@ -17,9 +17,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
     steps:
       # 标签名会进入文件名和 gh 的参数，gh 把附件参数里的 # 当作显示名分隔符。
       - name: Check tag format
+        id: tag
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -27,6 +30,7 @@ jobs:
             echo "::error::tag $TAG is not vX.Y.Z or vX.Y.Z-suffix"
             exit 1
           fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
 
@@ -73,8 +77,16 @@ jobs:
             dist/*.tar.gz.sha256
           retention-days: 1
 
-  publish:
+  # 桌面和 Android 客户端。等 build 检查完标签格式再开始，版本号去掉开头的 v。
+  clients:
     needs: build
+    uses: ./.github/workflows/clients.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+    secrets: inherit
+
+  publish:
+    needs: [build, clients]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -85,11 +97,19 @@ jobs:
           name: release
           path: dist
 
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: client-*
+          merge-multiple: true
+          path: dist/clients
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          (cd dist/clients && sha256sum -- * > SHA256SUMS)
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
             "dist/shuku-${TAG}-x86_64-linux.tar.gz" \
-            "dist/shuku-${TAG}-x86_64-linux.tar.gz.sha256"
+            "dist/shuku-${TAG}-x86_64-linux.tar.gz.sha256" \
+            dist/clients/*
