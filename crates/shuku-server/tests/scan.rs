@@ -306,3 +306,61 @@ async fn new_archives_are_dated_by_their_modification_time() {
         .as_secs() as i64;
     assert!((now - 60..=now).contains(&date("future.cbz")));
 }
+
+#[tokio::test]
+async fn folders_of_loose_images_are_read_as_books() {
+    let fixture = Fixture::new();
+    let png = fixture.archive("zipped.cbz", 30, 40);
+    let content = &fixture.config.content_dir;
+    let book = content.join("series/Vol.1");
+    std::fs::create_dir_all(&book).unwrap();
+    std::fs::write(book.join("10.png"), &png).unwrap();
+    std::fs::write(book.join("2.png"), &png).unwrap();
+    std::fs::write(book.join("notes.txt"), "不是页面").unwrap();
+    // 内容目录本身直接放着的图片不成书。
+    std::fs::write(content.join("loose.png"), &png).unwrap();
+    let app = fixture.app().await;
+    let report = app.scan().await.unwrap();
+    assert_eq!((report.added, report.skipped, report.failed), (2, 2, 0));
+
+    let store = Store::open(fixture.database()).unwrap();
+    let id = store.find_by_path("series/Vol.1").unwrap().unwrap();
+    let (archive, pages) = store.archive_with_pages(id).unwrap().unwrap();
+    // 文件夹名里的点不是扩展名。
+    assert_eq!(archive.metadata.title, "Vol.1");
+    let names: Vec<_> = pages.iter().map(|page| page.entry_name.as_str()).collect();
+    assert_eq!(names, ["2.png", "10.png"]);
+    assert_eq!((pages[0].width, pages[0].height), (30, 40));
+
+    let router = app.router();
+    let listed = common::json(&router, &format!("/api/archives/{id}/pages")).await;
+    let (status, _, body) = common::request(
+        &router,
+        "GET",
+        listed["pages"][1]["url"].as_str().unwrap(),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(body, png);
+
+    // 没变就不重新读；补算得出完整指纹。
+    assert_eq!(app.scan().await.unwrap().unchanged, 2);
+    assert_eq!(app.hash_contents().await.unwrap().hashed, 2);
+
+    // 加一页算更新；整个文件夹移走保留原来的记录。
+    std::fs::write(book.join("11.png"), &png).unwrap();
+    assert_eq!(app.scan().await.unwrap().updated, 1);
+    std::fs::rename(&book, content.join("series/Vol.01")).unwrap();
+    assert_eq!(app.scan().await.unwrap().moved, 1);
+    assert_eq!(store.find_by_path("series/Vol.01").unwrap(), Some(id));
+
+    // 图片都删了，只剩空目录：算失踪，不再当书。
+    for name in ["2.png", "10.png", "11.png"] {
+        std::fs::remove_file(content.join("series/Vol.01").join(name)).unwrap();
+    }
+    app.scan().await.unwrap();
+    let issues = common::json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["missing"]["items"][0]["id"], id);
+}

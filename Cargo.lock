@@ -2099,6 +2099,7 @@ dependencies = [
  "blake3",
  "flate2",
  "imagesize",
+ "libc",
  "tempfile",
  "thiserror",
  "zip",

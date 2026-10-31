@@ -3,7 +3,6 @@ use rayon::prelude::*;
 use shuku_store::{ArchiveMetadata, CompressionMethod, Page, ScanEntry};
 use std::{
     collections::{HashMap, VecDeque},
-    fs,
     path::Path,
     time::UNIX_EPOCH,
 };
@@ -20,6 +19,8 @@ pub struct ScanReport {
 
 struct Prepared {
     path: String,
+    /// 散放图片的文件夹，标题取文件夹名而不是去掉扩展名的文件名。
+    folder: bool,
     file_size: u64,
     mtime: i64,
     quick_hash: String,
@@ -49,6 +50,8 @@ impl App {
         let entries = self.reader()?.scan_entries()?;
         // 不跟随符号链接，避免循环和越出内容目录。
         let mut files = Vec::new();
+        // 直接包含图片文件的子目录，每个当成一本书。
+        let mut folders = std::collections::BTreeSet::new();
         let mut unreadable = Vec::new();
         let mut report = ScanReport::default();
         let scan_hidden = self.0.config.scan_hidden;
@@ -57,7 +60,19 @@ impl App {
             .filter_entry(|entry| scan_hidden || entry.depth() == 0 || !is_hidden(entry));
         for entry in walk {
             match entry {
-                Ok(entry) if entry.file_type().is_file() => files.push(entry.into_path()),
+                Ok(entry) if entry.file_type().is_file() => {
+                    let image = entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(shuku_archive::is_image);
+                    // 内容目录本身直接放着的图片不成书，照旧当作不支持的文件。
+                    match entry.path().parent() {
+                        Some(parent) if image && entry.depth() > 1 => {
+                            folders.insert(parent.to_path_buf());
+                        }
+                        _ => files.push(entry.into_path()),
+                    }
+                }
                 Ok(_) => {}
                 // 内容目录里可能有别的程序建的、只有它自己能读的子目录，跳过它们继续扫描。
                 // 内容目录本身读不了说明配置有误，整次扫描失败。目录读到一半出错时
@@ -86,9 +101,10 @@ impl App {
             if unreadable.iter().any(|dir| path.starts_with(dir)) {
                 continue;
             }
+            // 文件夹里的图片都删了、只剩空目录时也算失踪。
             match path.try_exists() {
-                Ok(true) => {}
-                Ok(false) => missing
+                Ok(true) if !path.is_dir() || folders.contains(&path) => {}
+                Ok(_) => missing
                     .entry(entry.quick_hash.clone())
                     .or_default()
                     .push_back((entry.id, entry.path.clone())),
@@ -105,6 +121,7 @@ impl App {
             .into_iter()
             .map(|entry| (entry.path.clone(), entry))
             .collect();
+        files.extend(folders);
         files.sort();
         self.tasks(|tasks| tasks.scan.total = files.len());
         // 每批限制待提交页面清单的数量；图片解析和指纹计算并行，SQLite 提交串行。
@@ -242,10 +259,16 @@ fn issue(content: &Path, path: &Path, error: &dyn std::fmt::Display) -> crate::a
 }
 
 fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
+    let path = Path::new(&prepared.path);
+    // 文件夹名里的点不是扩展名，例如“Vol.1”。
+    let title = if prepared.folder {
+        path.file_name()
+    } else {
+        path.file_stem()
+    };
     Ok(ArchiveMetadata {
         path: prepared.path.clone(),
-        title: Path::new(&prepared.path)
-            .file_stem()
+        title: title
             .ok_or_else(|| Error::File(prepared.path.clone()))?
             .to_string_lossy()
             .into_owned(),
@@ -266,13 +289,24 @@ fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
 }
 
 fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<Option<Prepared>> {
-    let before = fs::metadata(path)?;
-    let mtime = unix_seconds(before.modified()?)?;
-    if existing.is_some_and(|entry| entry.file_size == before.len() && entry.mtime == mtime) {
+    let folder = path.is_dir();
+    // 文件夹的大小和修改时间是其中图片的总大小和最新的修改时间。
+    let before = shuku_archive::identity(path)?;
+    let mtime = unix_seconds(before.1)?;
+    if existing.is_some_and(|entry| entry.file_size == before.0 && entry.mtime == mtime) {
         return Ok(None);
     }
-    let quick_hash = shuku_archive::quick_hash(path)?;
-    let (pages, broken) = shuku_archive::list_pages_with_broken(path)?;
+    let (quick_hash, (pages, broken)) = if folder {
+        (
+            shuku_archive::folder_quick_hash(path)?,
+            shuku_archive::list_folder_pages_with_broken(path)?,
+        )
+    } else {
+        (
+            shuku_archive::quick_hash(path)?,
+            shuku_archive::list_pages_with_broken(path)?,
+        )
+    };
     for page in broken {
         tracing::warn!(path = %path.display(), entry = page.entry_name, reason = page.reason, "页面读不出尺寸，按坏页入库");
     }
@@ -292,8 +326,7 @@ fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<
         })
         .collect();
     // 下载工具可能正往内容目录里写文件。读的过程中文件变了，就不记录这次的结果，下次扫描再处理。
-    let after = fs::metadata(path)?;
-    if before.len() != after.len() || before.modified()? != after.modified()? {
+    if shuku_archive::identity(path)? != before {
         return Err(Error::File(format!(
             "扫描期间文件发生变化：{}",
             path.display()
@@ -301,7 +334,8 @@ fn prepare(path: &Path, relative: &str, existing: Option<&ScanEntry>) -> Result<
     }
     Ok(Some(Prepared {
         path: relative.into(),
-        file_size: before.len(),
+        folder,
+        file_size: before.0,
         mtime,
         quick_hash,
         pages,

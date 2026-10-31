@@ -110,6 +110,9 @@ fn count(report: &mut HashReport, written: bool) {
 /// 元数据核对和两种指纹都在同一个打开的句柄上做：按路径分几次打开的话，
 /// 路径中途被原子替换成大小和修改时间都相同的另一个文件时，会把它的指纹存到这条记录上。
 fn hash_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
+    if path.is_dir() {
+        return hash_folder_unchanged(path, entry);
+    }
     let mut file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
@@ -127,6 +130,30 @@ fn hash_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
     let hash = shuku_archive::content_hash_file(&mut file)?;
     let after = file.metadata()?;
     if after.len() != before.len() || after.modified()? != before.modified()? {
+        return Ok(None);
+    }
+    Ok(Some(hash))
+}
+
+/// 散放图片的文件夹：没法像单个文件那样在同一个句柄上核对，就在读之前和之后各核对一次
+/// 文件夹的大小和修改时间，再核对快速指纹。期间有图片被等长替换且修改时间不变的情况认不出来，
+/// 这和扫描判断文件夹是否变过的依据一致。
+fn hash_folder_unchanged(path: &Path, entry: &ScanEntry) -> Result<Option<String>> {
+    let identity = |path: &Path| -> Result<Option<(u64, i64)>> {
+        match shuku_archive::identity(path) {
+            Ok((size, modified)) => Ok(Some((size, unix_seconds(modified)?))),
+            Err(shuku_archive::Error::Io(error)) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    };
+    let before = identity(path)?;
+    if before != Some((entry.file_size, entry.mtime))
+        || shuku_archive::folder_quick_hash(path)? != entry.quick_hash
+    {
+        return Ok(None);
+    }
+    let hash = shuku_archive::folder_content_hash(path)?;
+    if identity(path)? != before {
         return Ok(None);
     }
     Ok(Some(hash))

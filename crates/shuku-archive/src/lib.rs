@@ -1,10 +1,12 @@
 //! ZIP 页面清单、定位读取与内容指纹。
 
 mod fingerprint;
+mod folder;
 mod header;
 mod jpeg;
 
 pub use fingerprint::{content_hash, content_hash_file, quick_hash, quick_hash_file};
+pub use folder::{folder_content_hash, folder_quick_hash, identity, list_folder_pages_with_broken};
 
 use std::cmp::Ordering;
 use std::fs::File;
@@ -174,8 +176,12 @@ pub fn list_pages_with_broken(path: impl AsRef<Path>) -> Result<(Vec<Page>, Vec<
     Ok((pages, broken))
 }
 
-/// 按清单里的数据区间直接读页，不重新解析 ZIP 中央目录。
+/// 按清单里的数据区间直接读页，不重新解析 ZIP 中央目录。`path` 是文件夹时读其中的图片文件。
 pub fn read_page(path: impl AsRef<Path>, page: &Page) -> Result<Vec<u8>> {
+    let path = path.as_ref();
+    if path.is_dir() {
+        return folder::read_folder_page(path, page);
+    }
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(page.data_offset))?;
     let mut reader = file.take(page.compressed_size);
@@ -196,7 +202,8 @@ pub fn read_page(path: impl AsRef<Path>, page: &Page) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn is_image(name: &str) -> bool {
+/// 按扩展名判断是不是图片，忽略 macOS 的 `__MACOSX/` 和 `._` 文件。扫描用它找散放的图片。
+pub fn is_image(name: &str) -> bool {
     let lower = name.to_lowercase();
     // Thumbs.db 和 .DS_Store 没有图片扩展名，下面的扩展名检查已经排除它们。
     if lower
@@ -207,11 +214,11 @@ fn is_image(name: &str) -> bool {
     }
     matches!(
         lower.rsplit_once('.').map(|(_, extension)| extension),
-        Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "jxl" | "bmp")
+        Some("jpg" | "jpeg" | "jfif" | "png" | "gif" | "webp" | "avif" | "jxl" | "bmp")
     )
 }
 
-fn natural_cmp(mut a: &str, mut b: &str) -> Ordering {
+pub(crate) fn natural_cmp(mut a: &str, mut b: &str) -> Ordering {
     while !a.is_empty() && !b.is_empty() {
         if a.as_bytes()[0].is_ascii_digit() && b.as_bytes()[0].is_ascii_digit() {
             let a_end = a.bytes().take_while(u8::is_ascii_digit).count();
