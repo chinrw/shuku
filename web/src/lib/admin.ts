@@ -43,6 +43,7 @@ export interface Status {
 		data_dir: string;
 		web_dir: string;
 		listen: string;
+		scan_hidden: boolean;
 	};
 	library: {
 		archives: number;

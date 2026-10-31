@@ -37,6 +37,13 @@ struct Cli {
         help = "HTTP 监听地址"
     )]
     listen: SocketAddr,
+    #[arg(
+        long,
+        env = "SHUKU_SCAN_HIDDEN",
+        global = true,
+        help = "也扫描以 . 开头的隐藏目录和文件（默认跳过）"
+    )]
+    scan_hidden: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -70,6 +77,7 @@ async fn main() -> Result<()> {
             .context("请设置 --data-dir 或 SHUKU_DATA_DIR")?,
         web_dir: cli.web_dir,
         listen: cli.listen,
+        scan_hidden: cli.scan_hidden,
     };
     let app = App::open(config).await?;
     if matches!(cli.command, Some(Command::Scan)) {

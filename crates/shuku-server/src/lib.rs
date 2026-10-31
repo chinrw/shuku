@@ -34,6 +34,9 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub web_dir: PathBuf,
     pub listen: SocketAddr,
+    /// 也扫描以 `.` 开头的目录和文件。默认跳过：它们通常是下载工具的临时目录，
+    /// 往往只有那个程序自己能读。
+    pub scan_hidden: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

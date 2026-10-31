@@ -258,3 +258,51 @@ async fn new_archives_get_lrr_metadata_staged_before_the_scan() {
         .unwrap();
     assert_eq!(found.ids, [staged]);
 }
+
+#[tokio::test]
+async fn hidden_entries_are_skipped_unless_enabled() {
+    let mut fixture = Fixture::new();
+    fixture.archive("book.cbz", 80, 120);
+    fixture.archive(".partial/download.cbz", 80, 120);
+    fixture.archive("sub/.hidden.cbz", 80, 120);
+    let app = fixture.app().await;
+    let report = app.scan().await.unwrap();
+    // 隐藏的目录和文件直接跳过，不算失败也不算不支持的格式。
+    assert_eq!((report.added, report.failed, report.skipped), (1, 0, 0));
+    drop(app);
+
+    fixture.config.scan_hidden = true;
+    let report = fixture.app().await.scan().await.unwrap();
+    assert_eq!((report.added, report.unchanged), (2, 1));
+}
+
+#[tokio::test]
+async fn new_archives_are_dated_by_their_modification_time() {
+    let fixture = Fixture::new();
+    fixture.archive("old.cbz", 80, 120);
+    fixture.archive("future.cbz", 80, 120);
+    let set_mtime = |name: &str, seconds: u64| {
+        std::fs::File::options()
+            .write(true)
+            .open(fixture.config.content_dir.join(name))
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+            .unwrap();
+    };
+    set_mtime("old.cbz", 1_500_000_000);
+    // 修改时间在未来时用扫描时的时间。
+    set_mtime("future.cbz", 4_000_000_000);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let store = Store::open(fixture.database()).unwrap();
+    let date = |name: &str| {
+        let id = store.find_by_path(name).unwrap().unwrap();
+        store.archive(id).unwrap().unwrap().metadata.date_added
+    };
+    assert_eq!(date("old.cbz"), 1_500_000_000);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    assert!((now - 60..=now).contains(&date("future.cbz")));
+}

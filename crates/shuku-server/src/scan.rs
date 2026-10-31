@@ -51,7 +51,11 @@ impl App {
         let mut files = Vec::new();
         let mut unreadable = Vec::new();
         let mut report = ScanReport::default();
-        for entry in walkdir::WalkDir::new(content) {
+        let scan_hidden = self.0.config.scan_hidden;
+        let walk = walkdir::WalkDir::new(content)
+            .into_iter()
+            .filter_entry(|entry| scan_hidden || entry.depth() == 0 || !is_hidden(entry));
+        for entry in walk {
             match entry {
                 Ok(entry) if entry.file_type().is_file() => files.push(entry.into_path()),
                 Ok(_) => {}
@@ -218,6 +222,10 @@ impl App {
     }
 }
 
+fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+    entry.file_name().as_encoded_bytes().starts_with(b".")
+}
+
 /// 问题列表里显示相对内容目录的路径，和数据库里一致。
 fn relative(content: &Path, path: &Path) -> String {
     path.strip_prefix(content)
@@ -246,7 +254,11 @@ fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
         mtime: prepared.mtime,
         quick_hash: prepared.quick_hash.clone(),
         content_hash: None,
-        date_added: unix_seconds(std::time::SystemTime::now())?,
+        // 用文件的修改时间：第一次扫描已有的书库时，扫描时间会让所有书都显示成今天加入。
+        // 修改时间在未来（时钟不准）时用现在。
+        date_added: prepared
+            .mtime
+            .min(unix_seconds(std::time::SystemTime::now())?),
         source_url: None,
         is_new: true,
         lrr_id: None,
@@ -329,6 +341,7 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
+            scan_hidden: false,
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         // 每批 64 个文件，65 个文件分成两批。
