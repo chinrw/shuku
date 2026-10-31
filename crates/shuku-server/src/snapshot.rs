@@ -103,9 +103,13 @@ impl App {
             .refresh_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        // 先清标志再读库：读库之后才提交的变化会重新置位，不会漏掉。
+        // 先清标志再读库：读库之后才提交的变化会重新置位，不会漏掉。失败时恢复标志，
+        // 重试时仍然整体重建。
         self.0.listing_changed.store(false, Ordering::Release);
-        let snapshot = Snapshot::load(&*self.reader()?)?;
+        let snapshot = self
+            .reader()
+            .and_then(|reader| Snapshot::load(&reader))
+            .inspect_err(|_| self.0.listing_changed.store(true, Ordering::Release))?;
         self.0.snapshot.store(Arc::new(snapshot));
         Ok(())
     }
@@ -145,7 +149,9 @@ impl App {
                 tokio::time::sleep(REFRESH_DELAY).await;
                 let Some(inner) = app.upgrade() else { return };
                 if let Err(error) = App(inner).blocking(|app| app.refresh_pending()).await {
-                    tracing::error!(%error, "刷新快照失败");
+                    // 之后可能不再有写入来触发刷新，自己再排一次，隔一个刷新延迟重试。
+                    tracing::error!(%error, "刷新快照失败，稍后重试");
+                    changed.notify_one();
                 }
             }
         });

@@ -65,15 +65,16 @@ impl Store {
     }
 
     /// 把 WAL 里已提交的页写回数据库文件，返回是否全部写回。PASSIVE 模式不等读者，
-    /// 比仍在读的快照更新的页留到下次。
+    /// 比仍在读的快照更新的页留到下次。别的连接正在 checkpoint 时 SQLite 返回
+    /// busy 和两个 -1，这时也算没写完。
     pub fn checkpoint(&self) -> Result<bool> {
-        let (log, checkpointed): (i64, i64) =
+        let (busy, log, checkpointed): (i64, i64, i64) =
             self.reader
                 .connection
                 .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
-                    Ok((row.get(1)?, row.get(2)?))
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
                 })?;
-        Ok(checkpointed == log)
+        Ok(busy == 0 && checkpointed == log)
     }
 
     pub fn save_archive(
