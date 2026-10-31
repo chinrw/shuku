@@ -35,6 +35,7 @@ nix develop -c cargo fmt --all
 
 - 只给一个人自用。不兼容 LRR 的 Perl 插件和 HTTP API，不保留 LRR 的归档 ID，不考虑 Mihon 等现有客户端；客户端自己做。
 - LRR 的元数据（标签、标题、分类、Tankoubon、阅读进度）要迁移过来，迁移完成后下线 LRR。
+- 书库里既有普通漫画（单行本、按卷连载的长篇、条漫），也有同人志，Shuku 按通用的漫画书库设计。README、文档和默认界面不以 E-Hentai/ExHentai 为中心，也不假设标签用 E-Hentai 的命名空间（`female:`、`parody:` 等）；E-Hentai 只是可选的元数据来源之一。
 - 书库约 30 万本，每本约 10 个标签。归档格式绝大部分是 zip（含 cbz），固实的 7z 和 RAR 很少。
 - 部署在局域网内，用 HTTP 直连，不配置 HTTPS。
 - 写入必须一致：一次写入要么完整提交，要么不留痕迹。读取可以滞后 10 到 20 秒，所以读可以走内存快照，写可以合并成组提交。
@@ -120,7 +121,7 @@ SQLite 的约定：
 
 ## 插件
 
-不兼容 LRR 的 Perl 插件。以后定义 `MetadataProvider`、`Downloader`、`LoginProvider` 等 trait，每个站点一个 Rust 实现；另提供子进程 JSON 协议，可以包装 gallery-dl。不在 M1 范围内。
+不兼容 LRR 的 Perl 插件。以后定义 `MetadataProvider`、`Downloader`、`LoginProvider` 等 trait，每个站点一个 Rust 实现；另提供子进程 JSON 协议，可以包装 gallery-dl。每个元数据来源都是可选的，不用的不需要配置。不在 M1 范围内。
 
 ## 路线
 
