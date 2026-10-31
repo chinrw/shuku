@@ -26,7 +26,8 @@
 	// 平时顶部有工具栏，和 LRR 一样；全屏时收起，点屏幕中间临时叫出底栏。
 	let immersive = $state(false);
 	let overlay = $state(false);
-	let panel = $state<'overview' | 'settings' | null>(null);
+	// “详情”面板就是这本书的详情页：标签、分类、下载和全部页面的缩略图。
+	let panel = $state<'detail' | 'settings' | null>(untrack(() => data.detail) ? 'detail' : null);
 	let progressError = $state<string | null>(null);
 	// 关闭了 SSR，这里一定在浏览器里运行。先取一次真实值，免得第一次渲染按宽度 0 请求图片。
 	let innerWidth = $state(window.innerWidth);
@@ -232,13 +233,24 @@
 		event.preventDefault();
 	}
 
+	// 滚动模式下中线所在的页，面板关上时如果和当前页不同就补记。
+	let middle: number | null = null;
+	$effect(() => {
+		if (panel === null && mode === 'scroll' && middle !== null && middle !== untrack(() => current)) {
+			record(middle);
+		}
+	});
+
 	// 页面中线所在的那一页算当前页。
 	function trackScroll(node: HTMLElement) {
 		const observer = new IntersectionObserver(
 			(entries) => {
 				for (const entry of entries) {
 					const index = Number((entry.target as HTMLElement).dataset.index);
-					if (entry.isIntersecting && index !== current) record(index);
+					if (!entry.isIntersecting) continue;
+					middle = index;
+					// 面板开着时（例如从书库只打开详情）不上报，关上面板后再补记。
+					if (!panel && index !== current) record(index);
 				}
 			},
 			{ root: node, rootMargin: '-50% 0px -50% 0px' }
@@ -263,9 +275,15 @@
 		else step(prefs.direction === 'rtl' ? -1 : 1);
 	}
 
+	// 滚动模式下明确选了某页就直接记下：整本放得进一屏时滚不动，观察器不会再报。
 	function jump(page: number) {
-		if (mode === 'scroll') scroller?.children[page]?.scrollIntoView();
-		else go(spreads.find((spread) => spread.includes(page))?.[0] ?? page);
+		if (mode !== 'scroll') {
+			go(spreads.find((spread) => spread.includes(page))?.[0] ?? page);
+			return;
+		}
+		scroller?.children[page]?.scrollIntoView();
+		middle = page;
+		go(page);
 	}
 
 	function update(change: () => void) {
@@ -297,14 +315,14 @@
 				<button class="bar-button" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
 					<Icon name="chevron-left" />
 				</button>
-				<button class="counter" onclick={() => (panel = 'overview')} aria-label="页面总览">
+				<button class="counter" onclick={() => (panel = 'detail')} aria-label="详情和页面">
 					{pageLabel} / {pages.length}
 				</button>
 				<button class="bar-button" onclick={stepRight} aria-label={rtlPaged ? '上一页' : '下一页'}>
 					<Icon name="chevron-right" />
 				</button>
 			{/if}
-			<button class="bar-button" onclick={() => (panel = 'overview')} aria-label="总览">
+			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
 			<button class="bar-button" onclick={() => (panel = 'settings')} aria-label="阅读设置">
@@ -382,7 +400,7 @@
 				aria-label="跳到页"
 			/>
 			<span class="counter">{pageLabel} / {pages.length}</span>
-			<button class="bar-button" onclick={() => (panel = 'overview')} aria-label="总览">
+			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
 		</footer>
@@ -393,11 +411,11 @@
 		<div class="scrim" onclick={() => (panel = null)}></div>
 		<aside
 			class="panel"
-			class:wide={panel === 'overview'}
-			aria-label={panel === 'overview' ? '总览' : '阅读设置'}
+			class:wide={panel === 'detail'}
+			aria-label={panel === 'detail' ? '详情' : '阅读设置'}
 		>
 			<div class="panel-head">
-				<h2>{panel === 'overview' ? book.title : '阅读设置'}</h2>
+				<h2>{panel === 'detail' ? book.title : '阅读设置'}</h2>
 				<button class="bar-button" onclick={() => (panel = null)} aria-label="关闭">
 					<Icon name="close" />
 				</button>
@@ -455,7 +473,7 @@
 				</div>
 			{:else}
 				<div class="actions">
-					<a href="/a/{book.id}">详情和相关作品</a>
+					<a href="/a/{book.id}">相关作品</a>
 					{#if book.series}
 						<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>
 					{/if}

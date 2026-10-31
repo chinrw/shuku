@@ -65,7 +65,7 @@ export interface PageInfo {
 	width: number;
 	height: number;
 	url: string;
-	/** 缩到 500 宽的 JPEG，详情页的页面总览用。 */
+	/** 缩到 500 宽的 JPEG，详情页和阅读器详情面板里的页面缩略图用。 */
 	thumbnail_url: string;
 }
 

@@ -1,16 +1,45 @@
 <script lang="ts">
 	import type { ArchiveItem } from './api';
+	import Icon from './Icon.svelte';
 	import { ago } from './time';
 
 	// 书库首页顶部的一排最近读过的本子，点封面直接继续读。链接不带页码：这里的进度来自
 	// 搜索快照，可能落后约 10 秒，阅读器自己读详情接口的最新进度。
 	let { items }: { items: ArchiveItem[] } = $props();
 	const now = Date.now();
+
+	// 和 LRR 一样是横向轮播：触屏直接滑，电脑上两侧有按钮，每次翻过大半屏。
+	let strip = $state<HTMLElement>();
+	let atStart = $state(true);
+	let atEnd = $state(true);
+
+	function measure() {
+		if (!strip) return;
+		atStart = strip.scrollLeft <= 1;
+		atEnd = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
+	}
+
+	function page(direction: 1 | -1) {
+		strip?.scrollBy({ left: direction * strip.clientWidth * 0.8, behavior: 'smooth' });
+	}
+
+	// 宽度和本数变了，能不能往两边翻也跟着变。
+	$effect(() => {
+		void items.length;
+		if (!strip) return;
+		const observer = new ResizeObserver(measure);
+		observer.observe(strip);
+		return () => observer.disconnect();
+	});
 </script>
 
 <section aria-labelledby="recent-heading">
 	<h2 id="recent-heading">最近阅读</h2>
-	<div class="strip">
+	<div class="carousel">
+	<button class="nav prev" onclick={() => page(-1)} disabled={atStart} aria-label="往前">
+		<Icon name="chevron-left" />
+	</button>
+	<div class="strip" bind:this={strip} onscroll={measure}>
 		{#each items as item (item.id)}
 			{@const page = item.progress?.page ?? 0}
 			<a class="book" href="/a/{item.id}/read" title={item.title}>
@@ -28,6 +57,10 @@
 			</a>
 		{/each}
 	</div>
+	<button class="nav next" onclick={() => page(1)} disabled={atEnd} aria-label="往后">
+		<Icon name="chevron-right" />
+	</button>
+	</div>
 </section>
 
 <style>
@@ -38,6 +71,46 @@
 	h2 {
 		margin: 0 0 0.5rem;
 		font-size: 0.95rem;
+	}
+
+	.carousel {
+		position: relative;
+	}
+
+	/* 按钮压在两端封面上，只给有鼠标的设备；到头的一侧隐藏。 */
+	.nav {
+		position: absolute;
+		top: 0;
+		z-index: 1;
+		display: none;
+		align-items: center;
+		justify-content: center;
+		width: 2.25rem;
+		height: calc(7.5rem * 7 / 5);
+		border: none;
+		background: color-mix(in srgb, var(--bg) 75%, transparent);
+		color: var(--fg);
+		cursor: pointer;
+	}
+
+	.nav.prev {
+		left: 0;
+		border-radius: 6px 0 0 6px;
+	}
+
+	.nav.next {
+		right: 0;
+		border-radius: 0 6px 6px 0;
+	}
+
+	@media (hover: hover) {
+		.nav {
+			display: flex;
+		}
+
+		.nav:disabled {
+			display: none;
+		}
 	}
 
 	.strip {

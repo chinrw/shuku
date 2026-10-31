@@ -15,6 +15,8 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 		pages: list.pages,
 		webtoon: list.webtoon,
 		start,
+		// 书库抽屉的“详情”按钮打开阅读器时直接弹出详情面板。
+		detail: url.searchParams.get('panel') === 'detail',
 		categories: categoryList
 	};
 };
