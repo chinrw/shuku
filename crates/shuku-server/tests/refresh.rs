@@ -40,6 +40,9 @@ async fn progress_refresh_retries_after_a_failed_read() {
     let id = json(&router, "/api/search").await["items"][0]["id"]
         .as_i64()
         .unwrap();
+    // 扫描提交批次时也通知了刷新器。等它那次刷新跑完，下面就只剩进度上报这一次通知，
+    // 失败后能不能再刷新只取决于刷新器自己有没有重新排上。
+    tokio::time::sleep(Duration::from_secs(15)).await;
     let started = Instant::now();
     let (status, _, _) = request(
         &router,

@@ -2,6 +2,8 @@ mod common;
 
 use common::{metadata, pages};
 use shuku_store::{Error, Reader, ReaderPool, Store, open_connection};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 #[test]
 fn refuses_databases_that_are_not_migrated_to_the_current_version() {
@@ -99,6 +101,18 @@ fn savepoints_undo_one_step_and_failed_writes_undo_the_whole_transaction() {
     assert_eq!(store.find_by_path("rolled-back.cbz").unwrap(), None);
 }
 
+/// FULL checkpoint 的忙等处理：第一次被调用时它已经拿到 checkpoint 锁、在等旧读事务，
+/// 置位 `CHECKPOINTER_WAITING`；之后一直等到测试置位 `CHECKPOINTER_RELEASED`。
+static CHECKPOINTER_WAITING: AtomicBool = AtomicBool::new(false);
+static CHECKPOINTER_RELEASED: AtomicBool = AtomicBool::new(false);
+
+fn hold_checkpoint_lock(calls: i32) -> bool {
+    CHECKPOINTER_WAITING.store(true, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(5));
+    // 测试卡住时最多等约 10 秒，不让测试进程挂死。
+    !CHECKPOINTER_RELEASED.load(Ordering::SeqCst) && calls < 2000
+}
+
 #[test]
 fn a_checkpoint_blocked_by_another_checkpointer_is_not_complete() {
     let directory = tempfile::tempdir().unwrap();
@@ -108,7 +122,7 @@ fn a_checkpoint_blocked_by_another_checkpointer_is_not_complete() {
     store
         .save_archive(None, &metadata("one.cbz"), &pages())
         .unwrap();
-    // 旧快照上的读事务让 FULL checkpoint 一直等，等待期间它占着 checkpoint 锁。
+    // 旧快照上的读事务让 FULL checkpoint 进入忙等，忙等期间它占着 checkpoint 锁。
     let old_read = open_connection(&path).unwrap();
     old_read
         .execute_batch("BEGIN; SELECT count(*) FROM archive;")
@@ -116,18 +130,11 @@ fn a_checkpoint_blocked_by_another_checkpointer_is_not_complete() {
     store
         .save_archive(None, &metadata("two.cbz"), &pages())
         .unwrap();
-    // 探测用的连接要在 FULL checkpoint 开始前打开：打开连接时的迁移检查要写锁，
-    // 而 FULL 等待期间占着写锁。
-    let probe = open_connection(&path).unwrap();
-    let (started, blocked) = std::sync::mpsc::channel();
     let checkpointer = std::thread::spawn({
         let path = path.clone();
         move || {
             let connection = open_connection(&path).unwrap();
-            connection
-                .busy_timeout(std::time::Duration::from_secs(3))
-                .unwrap();
-            started.send(()).unwrap();
+            connection.busy_handler(Some(hold_checkpoint_lock)).unwrap();
             connection
                 .query_row("PRAGMA wal_checkpoint(FULL)", [], |row| {
                     row.get::<_, i64>(0)
@@ -135,22 +142,15 @@ fn a_checkpoint_blocked_by_another_checkpointer_is_not_complete() {
                 .unwrap()
         }
     });
-    blocked.recv().unwrap();
-    // 等另一个连接拿到锁并进入忙等：这时 PASSIVE checkpoint 返回 (1, -1, -1)。
-    // 旧读事务本身也会让 checkpoint 写不完，所以先确认处于锁竞争，再检查返回值。
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        let busy: i64 = probe
-            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(0))
-            .unwrap();
-        if busy == 1 {
-            break;
-        }
-        assert!(std::time::Instant::now() < deadline, "没有等到锁竞争");
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !CHECKPOINTER_WAITING.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "FULL checkpoint 没有进入忙等");
+        std::thread::sleep(Duration::from_millis(1));
     }
+    // 这时 PASSIVE checkpoint 拿不到锁，SQLite 返回 (1, -1, -1)。
     assert!(!store.checkpoint().unwrap());
-    old_read.execute_batch("COMMIT").unwrap();
+    CHECKPOINTER_RELEASED.store(true, Ordering::SeqCst);
     checkpointer.join().unwrap();
+    old_read.execute_batch("COMMIT").unwrap();
     assert!(store.checkpoint().unwrap());
 }
