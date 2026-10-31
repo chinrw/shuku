@@ -111,28 +111,32 @@ impl Store {
 }
 
 impl Writer<'_> {
-    /// 在保存点里执行 `work`，出错时只撤销这一步，事务里其余的修改保留。
-    pub fn savepoint<T, E: From<Error>>(
+    /// 在保存点里执行 `work`，`work` 出错时只撤销这一步，事务里其余的修改保留，
+    /// 错误放在内层返回。外层的错误表示整个事务已经不能用了，调用方必须把它传出
+    /// [`Store::write`]：SQLite 遇到 I/O 错误或磁盘写满时会自己回滚整个事务并丢掉全部保存点，
+    /// 这时再开保存点会在事务外自动提交，失败的批次就会留下一部分写入。
+    pub fn savepoint<T, E>(
         &mut self,
         work: impl FnOnce(&mut Self) -> std::result::Result<T, E>,
-    ) -> std::result::Result<T, E> {
-        self.connection
-            .execute_batch("SAVEPOINT step")
-            .map_err(Error::from)?;
-        match work(self) {
-            Ok(value) => {
-                self.connection
-                    .execute_batch("RELEASE step")
-                    .map_err(Error::from)?;
-                Ok(value)
-            }
-            Err(error) => {
-                self.connection
-                    .execute_batch("ROLLBACK TO step; RELEASE step")
-                    .map_err(Error::from)?;
-                Err(error)
-            }
+    ) -> Result<std::result::Result<T, E>> {
+        self.require_transaction()?;
+        self.connection.execute_batch("SAVEPOINT step")?;
+        let outcome = work(self);
+        self.require_transaction()?;
+        match outcome {
+            Ok(_) => self.connection.execute_batch("RELEASE step")?,
+            Err(_) => self
+                .connection
+                .execute_batch("ROLLBACK TO step; RELEASE step")?,
         }
+        Ok(outcome)
+    }
+
+    fn require_transaction(&self) -> Result<()> {
+        if self.connection.is_autocommit() {
+            return Err(Error::TransactionAborted);
+        }
+        Ok(())
     }
 
     /// 读到的是本事务里已经做过的修改。
@@ -405,4 +409,48 @@ fn require_archive(connection: &Connection, id: i64) -> Result<()> {
         return Err(Error::ArchiveNotFound(id));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ArchiveMetadata, Error};
+
+    fn metadata(path: &str) -> ArchiveMetadata {
+        ArchiveMetadata {
+            path: path.into(),
+            title: path.into(),
+            summary: String::new(),
+            file_size: 1,
+            mtime: 1,
+            quick_hash: "quick".into(),
+            content_hash: None,
+            date_added: 1,
+            source_url: None,
+            is_new: true,
+            lrr_id: None,
+        }
+    }
+
+    #[test]
+    fn a_transaction_rolled_back_by_sqlite_fails_the_whole_batch() {
+        let mut store = Store::open(":memory:").unwrap();
+        let result = store.write(|writer| {
+            writer.save_archive(None, &metadata("before.cbz"), &[])?;
+            // 模拟 SQLite 因 I/O 错误自行回滚：事务和全部保存点都没了。
+            let aborted = writer.savepoint(|writer| {
+                writer.connection.execute_batch("ROLLBACK")?;
+                Err::<(), Error>(Error::ArchiveNotFound(0))
+            });
+            assert!(matches!(aborted, Err(Error::TransactionAborted)));
+            assert!(matches!(
+                writer.savepoint(|writer| writer.save_archive(None, &metadata("after.cbz"), &[])),
+                Err(Error::TransactionAborted)
+            ));
+            aborted?.map(|_| ())
+        });
+        assert!(result.is_err());
+        assert_eq!(store.find_by_path("before.cbz").unwrap(), None);
+        assert_eq!(store.find_by_path("after.cbz").unwrap(), None);
+    }
 }

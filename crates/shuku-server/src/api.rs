@@ -216,9 +216,11 @@ async fn pages(
 ) -> Result<Json<Value>> {
     let Path(id) = id.map_err(Error::bad_request)?;
     app.blocking(move |app| {
-        let reader = app.reader()?;
-        let archive = require_archive(&reader, id)?;
-        let pages: Vec<_> = reader.pages(id)?.into_iter().enumerate().map(|(n, page)| json!({
+        let (archive, pages) = app
+            .reader()?
+            .archive_with_pages(id)?
+            .ok_or_else(Error::not_found)?;
+        let pages: Vec<_> = pages.into_iter().enumerate().map(|(n, page)| json!({
             "width": page.width, "height": page.height,
             "url": format!("/api/archives/{id}/pages/{n}?v={}", archive.metadata.quick_hash),
         })).collect();

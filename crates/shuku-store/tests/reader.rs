@@ -31,6 +31,9 @@ fn pooled_readers_see_committed_data_and_are_not_blocked_by_an_open_write() {
     {
         let (one, two) = (pool.get().unwrap(), pool.get().unwrap());
         assert_eq!(one.pages(first).unwrap(), pages());
+        let (archive, listed) = one.archive_with_pages(first).unwrap().unwrap();
+        assert_eq!((archive.id, listed), (first, pages()));
+        assert!(one.archive_with_pages(first + 1).unwrap().is_none());
         assert_eq!(two.find_by_path("one.cbz").unwrap(), Some(first));
     }
 
@@ -80,7 +83,7 @@ fn savepoints_undo_one_step_and_failed_writes_undo_the_whole_transaction() {
             let missing = writer.savepoint(|writer| {
                 writer.save_archive(None, &metadata("undone.cbz"), &[])?;
                 writer.write_progress(i64::MAX, 0, 1)
-            });
+            })?;
             Ok::<_, Error>((kept, missing))
         })
         .unwrap();

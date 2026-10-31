@@ -1,4 +1,4 @@
-use crate::{App, Error, Result, api::require_archive, scan::unix_seconds};
+use crate::{App, Error, Result, scan::unix_seconds};
 use axum::{
     body::Body,
     extract::{
@@ -62,16 +62,14 @@ fn respond(
     thumbnail: bool,
 ) -> Result<Response> {
     let (archive, page) = {
-        let reader = app.reader()?;
-        let archive = require_archive(&reader, id)?;
+        let (archive, pages) = app
+            .reader()?
+            .archive_with_pages(id)?
+            .ok_or_else(Error::not_found)?;
         if params.v != archive.metadata.quick_hash {
             return Err(Error::not_found());
         }
-        let page = reader
-            .pages(id)?
-            .into_iter()
-            .nth(n)
-            .ok_or_else(Error::not_found)?;
+        let page = pages.into_iter().nth(n).ok_or_else(Error::not_found)?;
         (archive, page)
     };
     // 路径由扫描写入，只会是内容目录里的普通文件。文件被替换但还没重新扫描时，

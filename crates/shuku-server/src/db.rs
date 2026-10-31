@@ -175,18 +175,19 @@ fn commit(database: &Database, requests: Vec<Request>, progress_changed: &Notify
             Request::ContentHash(request) => hashes.push(request),
         }
     }
+    // 单条请求的错误留在内层，只回给它自己；外层的 `?` 表示事务已经失效，整批失败。
     let outcomes = database.write(|writer| {
-        let progress: Vec<_> = progress
+        let progress = progress
             .iter()
             .map(|request| writer.savepoint(|writer| write_progress(writer, request)))
-            .collect();
-        let hashes: Vec<_> = hashes
+            .collect::<shuku_store::Result<Vec<_>>>()?;
+        let hashes = hashes
             .iter()
             .map(|request| {
                 writer
                     .savepoint(|writer| Ok(writer.set_content_hash(&request.entry, &request.hash)?))
             })
-            .collect();
+            .collect::<shuku_store::Result<Vec<_>>>()?;
         Ok((progress, hashes))
     });
     let (progress_outcomes, hash_outcomes) = match outcomes {

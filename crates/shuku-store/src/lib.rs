@@ -47,6 +47,8 @@ pub enum Error {
     VersionMismatch { found: i64, supported: i64 },
     #[error("归档 {0} 不存在")]
     ArchiveNotFound(i64),
+    #[error("SQLite 已经回滚了整个事务")]
+    TransactionAborted,
     #[error("页面清单编码错误：{0}")]
     PageList(#[from] postcard::Error),
 }

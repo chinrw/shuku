@@ -78,15 +78,19 @@ impl Reader {
 
     /// 返回按 page_no 升序排列的清单；不存在的归档返回空清单。
     pub fn pages(&self, id: i64) -> Result<Vec<Page>> {
-        let pages = self
-            .connection
-            .prepare_cached("SELECT pages FROM page_list WHERE archive_id = ?1")?
-            .query_row([id], |row| row.get::<_, Vec<u8>>(0))
-            .optional()?;
-        Ok(match pages {
-            Some(bytes) => postcard::from_bytes(&bytes)?,
-            None => Vec::new(),
-        })
+        read_pages(&self.connection, id)
+    }
+
+    /// 归档和它的页面清单来自同一个读取快照。页面 URL 里的快速指纹取自归档，
+    /// 分两次读的话，扫描在中间提交时会把旧指纹配上新清单。
+    pub fn archive_with_pages(&self, id: i64) -> Result<Option<(Archive, Vec<Page>)>> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let archive = match read_archive(&transaction, id)? {
+            Some(archive) => Some((archive, read_pages(&transaction, id)?)),
+            None => None,
+        };
+        transaction.commit()?;
+        Ok(archive)
     }
 
     pub fn find_by_path(&self, path: &str) -> Result<Option<i64>> {
@@ -183,6 +187,17 @@ impl Reader {
     pub fn progress(&self) -> Result<HashMap<i64, Progress>> {
         read_all_progress(&self.connection)
     }
+}
+
+fn read_pages(connection: &Connection, id: i64) -> Result<Vec<Page>> {
+    let pages = connection
+        .prepare_cached("SELECT pages FROM page_list WHERE archive_id = ?1")?
+        .query_row([id], |row| row.get::<_, Vec<u8>>(0))
+        .optional()?;
+    Ok(match pages {
+        Some(bytes) => postcard::from_bytes(&bytes)?,
+        None => Vec::new(),
+    })
 }
 
 fn read_all_progress(connection: &Connection) -> Result<HashMap<i64, Progress>> {
