@@ -203,8 +203,18 @@ fn failed_writes_preserve_archive_and_pages_and_never_reuse_deleted_ids() {
         .save_archive(None, &original, &original_pages)
         .unwrap();
     let changed = metadata("changed.cbz");
+    // 页面清单写在归档行之后。让它失败，检查已经写入的归档行也一起回滚。
+    open_connection(&path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_insert BEFORE INSERT ON page_list WHEN length(NEW.pages) > 200
+                BEGIN SELECT RAISE(ABORT, 'test failure'); END;
+             CREATE TRIGGER reject_update BEFORE UPDATE ON page_list WHEN length(NEW.pages) > 200
+                BEGIN SELECT RAISE(ABORT, 'test failure'); END;",
+        )
+        .unwrap();
     let mut broken_pages = pages();
-    broken_pages[1].size = u64::MAX;
+    broken_pages[1].entry_name = "长".repeat(100);
     assert!(
         store
             .save_archive(Some(id), &changed, &broken_pages)

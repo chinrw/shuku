@@ -1,11 +1,14 @@
-use rusqlite::Connection;
-use shuku_store::{Error, open_connection};
+mod common;
+
+use common::{metadata, pages};
+use rusqlite::{Connection, params};
+use shuku_store::{Error, Store, open_connection};
 
 #[test]
 fn rejects_newer_schema_versions_without_changing_them() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    for version in [3, 7] {
+    for version in [4, 7] {
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "user_version", version)
@@ -57,7 +60,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(pragma("user_version"), 2);
+    assert_eq!(pragma("user_version"), 3);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
     assert_eq!(pragma("mmap_size"), 0x7fff_0000);
@@ -83,7 +86,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             "archive_tag",
             "category",
             "category_archive",
-            "page",
+            "page_list",
             "progress",
             "tag",
             "tankoubon",
@@ -129,4 +132,75 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
         .unwrap();
     assert_eq!(name, "收藏");
     assert!(reopened.execute("INSERT INTO tag (namespace, value, full) VALUES ('artist', 'alpha', 'artist:alpha')", []).is_err());
+}
+
+#[test]
+fn migrates_page_rows_into_one_list_per_archive() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shuku.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(concat!(
+            include_str!("../src/migrations/001_initial.sql"),
+            include_str!("../src/migrations/002_lrr_ids.sql"),
+            "PRAGMA user_version = 2;"
+        ))
+        .unwrap();
+    let mut ids = Vec::new();
+    for (path, page_count) in [("with-pages.cbz", 2), ("empty.cbz", 0)] {
+        let archive = metadata(path);
+        connection
+            .execute(
+                "INSERT INTO archive (path, title, summary, file_size, mtime, quick_hash,
+                    page_count, date_added, is_new) VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?7, 1)",
+                params![
+                    archive.path,
+                    archive.title,
+                    archive.file_size,
+                    archive.mtime,
+                    archive.quick_hash,
+                    page_count,
+                    archive.date_added
+                ],
+            )
+            .unwrap();
+        ids.push(connection.last_insert_rowid());
+    }
+    // 故意倒序插入，迁移要按 page_no 排序。
+    for (page_no, page) in pages().iter().enumerate().rev() {
+        connection
+            .execute(
+                "INSERT INTO page VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    ids[0],
+                    page_no as i64,
+                    page.entry_name,
+                    page.data_offset,
+                    page.compressed_size,
+                    page.size,
+                    page.method,
+                    page.width,
+                    page.height
+                ],
+            )
+            .unwrap();
+    }
+    drop(connection);
+
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.pages(ids[0]).unwrap(), pages());
+    assert!(store.pages(ids[1]).unwrap().is_empty());
+    let connection = open_connection(&path).unwrap();
+    let rows: i64 = connection
+        .query_row("SELECT count(*) FROM page_list", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rows, 2);
+    let old_table: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name = 'page'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(old_table, 0);
 }

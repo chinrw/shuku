@@ -125,26 +125,11 @@ impl Store {
                 id
             }
         };
-        transaction.execute("DELETE FROM page WHERE archive_id = ?1", [id])?;
-        {
-            let mut insert = transaction.prepare_cached(
-                "INSERT INTO page (archive_id, page_no, entry_name, data_offset, compressed_size,
-                    size, method, width, height) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            )?;
-            for (page_no, page) in pages.iter().enumerate() {
-                insert.execute(params![
-                    id,
-                    page_no as u64,
-                    page.entry_name,
-                    page.data_offset,
-                    page.compressed_size,
-                    page.size,
-                    page.method,
-                    page.width,
-                    page.height
-                ])?;
-            }
-        }
+        transaction.execute(
+            "INSERT INTO page_list (archive_id, pages) VALUES (?1, ?2)
+             ON CONFLICT(archive_id) DO UPDATE SET pages = excluded.pages",
+            params![id, postcard::to_stdvec(pages)?],
+        )?;
         transaction.commit()?;
         Ok(id)
     }
@@ -302,22 +287,15 @@ impl Store {
 
     /// 返回按 page_no 升序排列的清单；不存在的归档返回空清单。
     pub fn pages(&self, id: i64) -> Result<Vec<Page>> {
-        let mut statement = self
+        let pages = self
             .connection
-            .prepare_cached("SELECT * FROM page WHERE archive_id = ?1 ORDER BY page_no")?;
-        Ok(statement
-            .query_map([id], |row| {
-                Ok(Page {
-                    entry_name: row.get("entry_name")?,
-                    data_offset: row.get("data_offset")?,
-                    compressed_size: row.get("compressed_size")?,
-                    size: row.get("size")?,
-                    method: row.get("method")?,
-                    width: row.get("width")?,
-                    height: row.get("height")?,
-                })
-            })?
-            .collect::<rusqlite::Result<_>>()?)
+            .prepare_cached("SELECT pages FROM page_list WHERE archive_id = ?1")?
+            .query_row([id], |row| row.get::<_, Vec<u8>>(0))
+            .optional()?;
+        Ok(match pages {
+            Some(bytes) => postcard::from_bytes(&bytes)?,
+            None => Vec::new(),
+        })
     }
 
     pub fn find_by_path(&self, path: &str) -> Result<Option<i64>> {
@@ -435,6 +413,49 @@ impl Store {
         }
         Ok(())
     }
+}
+
+/// 迁移 003 的 Rust 步骤：把每页一行的 page 表按归档打包成 BLOB，再删掉旧表。
+pub(crate) fn pack_page_lists(connection: &Connection) -> Result<()> {
+    let mut rows = connection.prepare(
+        "SELECT archive_id, entry_name, data_offset, compressed_size, size, method, width, height
+         FROM page ORDER BY archive_id, page_no",
+    )?;
+    let mut rows = rows.query([])?;
+    let mut insert =
+        connection.prepare("INSERT INTO page_list (archive_id, pages) VALUES (?1, ?2)")?;
+    let mut current: Option<(i64, Vec<Page>)> = None;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        if current.as_ref().map(|(current, _)| *current) != Some(id) {
+            if let Some((id, pages)) = current.take() {
+                insert.execute(params![id, postcard::to_stdvec(&pages)?])?;
+            }
+            current = Some((id, Vec::new()));
+        }
+        if let Some((_, pages)) = &mut current {
+            pages.push(Page {
+                entry_name: row.get(1)?,
+                data_offset: row.get(2)?,
+                compressed_size: row.get(3)?,
+                size: row.get(4)?,
+                method: row.get(5)?,
+                width: row.get(6)?,
+                height: row.get(7)?,
+            });
+        }
+    }
+    if let Some((id, pages)) = current {
+        insert.execute(params![id, postcard::to_stdvec(&pages)?])?;
+    }
+    // 没有页面的归档在旧表里没有行，也补上一个空清单，让每本归档都有一行。
+    connection.execute(
+        "INSERT INTO page_list (archive_id, pages)
+         SELECT id, ?1 FROM archive WHERE id NOT IN (SELECT archive_id FROM page_list)",
+        [postcard::to_stdvec::<[Page]>(&[])?],
+    )?;
+    connection.execute_batch("DROP TABLE page")?;
+    Ok(())
 }
 
 fn set_archive_tags(connection: &Connection, id: i64, tags: &[Tag]) -> Result<()> {

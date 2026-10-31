@@ -21,9 +21,16 @@ const CACHE_SIZE_KIB: i64 = 64 * 1024;
 /// 另一个连接正在写时，等这么久再报 SQLITE_BUSY。服务端运行时迁移工具和测试会从别的连接写入。
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-const MIGRATIONS: &[&str] = &[
-    include_str!("migrations/001_initial.sql"),
-    include_str!("migrations/002_lrr_ids.sql"),
+/// 每项迁移先执行 SQL，再执行可选的 Rust 步骤。SQL 做不到的数据转换放在 Rust 步骤里。
+type Migration = (&'static str, Option<fn(&Connection) -> Result<()>>);
+
+const MIGRATIONS: &[Migration] = &[
+    (include_str!("migrations/001_initial.sql"), None),
+    (include_str!("migrations/002_lrr_ids.sql"), None),
+    (
+        include_str!("migrations/003_page_list.sql"),
+        Some(store::pack_page_lists),
+    ),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +41,8 @@ pub enum Error {
     UnsupportedVersion { found: i64, supported: i64 },
     #[error("归档 {0} 不存在")]
     ArchiveNotFound(i64),
+    #[error("页面清单编码错误：{0}")]
+    PageList(#[from] postcard::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -55,8 +64,11 @@ pub fn open_connection(path: impl AsRef<Path>) -> Result<Connection> {
             supported,
         });
     }
-    for (index, migration) in MIGRATIONS.iter().enumerate().skip(version as usize) {
-        transaction.execute_batch(migration)?;
+    for (index, (sql, step)) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+        transaction.execute_batch(sql)?;
+        if let Some(step) = step {
+            step(&transaction)?;
+        }
         transaction.pragma_update(None, "user_version", (index + 1) as i64)?;
     }
     transaction.commit()?;

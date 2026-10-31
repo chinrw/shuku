@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 
 /// 扫描只需文件身份，不加载标签、进度和页面清单。
@@ -102,7 +104,7 @@ pub struct Progress {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompressionMethod {
     Stored,
     Deflate,
@@ -131,7 +133,8 @@ impl FromSql for CompressionMethod {
 }
 
 /// 页面在清单中的下标就是从 0 开始的 page_no。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 清单用 postcard 按字段顺序编码存进数据库，增删或调换字段都要加一项迁移重写旧数据。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Page {
     pub entry_name: String,
     pub data_offset: u64,

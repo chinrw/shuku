@@ -7,7 +7,9 @@ publish.workspace = true
 description = "SQLite storage for Shuku"
 
 [dependencies]
+postcard = { version = "1", features = ["use-std"] }
 rusqlite = { version = "0.38", features = ["bundled", "fallible_uint"] }
+serde = { version = "1", features = ["derive"] }
 shuku-index = { path = "../shuku-index" }
 thiserror.workspace = true
 

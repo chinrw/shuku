@@ -253,10 +253,12 @@ async fn refuses_to_resize_pages_above_the_pixel_limit() {
     let app = fixture.app().await;
     app.scan().await.unwrap();
     // 尺寸来自扫描时读到的图片头部，这里直接改记录来模拟超大图片。
-    shuku_store::open_connection(fixture.database())
-        .unwrap()
-        .execute("UPDATE page SET width = 8000, height = 8001", [])
-        .unwrap();
+    let mut store = shuku_store::Store::open(fixture.database()).unwrap();
+    let id = store.find_by_path("book.cbz").unwrap().unwrap();
+    let mut pages = store.pages(id).unwrap();
+    (pages[0].width, pages[0].height) = (8000, 8001);
+    let metadata = store.archive(id).unwrap().unwrap().metadata;
+    store.save_archive(Some(id), &metadata, &pages).unwrap();
     let router = app.router();
     let item = &json(&router, "/api/search").await["items"][0];
     let listing = json(&router, &format!("/api/archives/{}/pages", item["id"])).await;
