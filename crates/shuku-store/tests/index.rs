@@ -158,6 +158,7 @@ fn ten_thousand_archives_with_ten_tags_build_the_same_index() {
                 sort: sort.clone(),
                 limit: 37,
                 after: None,
+                offset: 0,
                 reverse: false,
                 collapse_series: false,
             };

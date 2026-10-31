@@ -292,3 +292,24 @@ fn namespace_sort_uses_the_naturally_smallest_value_of_each_book() {
         .unwrap();
     assert_eq!(result.ids, [1, 2, 3]);
 }
+
+#[test]
+fn offset_pages_match_cursor_pages() {
+    let index = library();
+    let page = |offset| {
+        index
+            .search(&Query {
+                limit: 2,
+                offset,
+                ..Query::default()
+            })
+            .unwrap()
+    };
+    assert_eq!(page(0).ids, vec![5, 3]);
+    assert_eq!(page(2).ids, vec![4, 2]);
+    assert_eq!(page(2).next_after, Some(2));
+    assert_eq!(page(4).ids, vec![1]);
+    assert_eq!(page(4).next_after, None);
+    assert!(page(10).ids.is_empty());
+    assert_eq!(page(10).total, 5);
+}

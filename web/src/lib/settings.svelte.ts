@@ -1,3 +1,6 @@
+import type { Order, Sort } from './api';
+import { parseOrder, parseSort } from './libraryUrl';
+
 export type ReaderMode = 'paged' | 'scroll';
 export type Direction = 'rtl' | 'ltr';
 /** 翻页模式下整页放进屏幕，或者页宽占满屏幕、上下滚动。 */
@@ -18,6 +21,10 @@ class Settings {
 	view = $state<LibraryView>('grid');
 	/** 书库页同一系列的各卷合成一张卡。 */
 	groupSeries = $state(true);
+	/** 书库的排序，地址里没写排序时用它。默认按加入时间、最新的在前。 */
+	sort = $state<Sort>('date');
+	/** `null` 是这种排序的默认方向。 */
+	order = $state<Order | null>(null);
 	/** 书库页不显示读到最后一页的书，和别的筛选同时生效。 */
 	hideFinished = $state(false);
 	/**
@@ -39,6 +46,11 @@ class Settings {
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
 		if (typeof saved.groupSeries === 'boolean') this.groupSeries = saved.groupSeries;
 		if (typeof saved.hideFinished === 'boolean') this.hideFinished = saved.hideFinished;
+		const sort = typeof saved.sort === 'string' ? parseSort(saved.sort) : null;
+		if (sort) {
+			this.sort = sort;
+			this.order = parseOrder(saved.order ?? null);
+		}
 		if (
 			typeof saved.webtoonWidth === 'number' &&
 			saved.webtoonWidth >= WEBTOON_WIDTH.min &&
@@ -56,6 +68,7 @@ class Settings {
 	save() {
 		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
 			this;
+		const { sort, order } = this;
 		localStorage.setItem(
 			KEY,
 			JSON.stringify({
@@ -66,6 +79,8 @@ class Settings {
 				view,
 				groupSeries,
 				hideFinished,
+				sort,
+				order,
 				webtoonWidth,
 				webtoon
 			})

@@ -4,17 +4,29 @@ import {
 	parseCategory,
 	parseFilter,
 	parseOrder,
+	parsePage,
 	parseSort,
 	parseTags
 } from './libraryUrl';
 
 describe('libraryHref', () => {
-	it('omits defaults and keeps the rest', () => {
-		expect(libraryHref({ q: '', sort: 'title', category: null })).toBe('/');
+	it('always writes the sort, omits other defaults and keeps the rest', () => {
+		expect(libraryHref({ q: '', sort: 'title', category: null })).toBe('/?sort=title');
 		expect(libraryHref({ q: 'artist:a', sort: 'date', category: 3 })).toBe(
 			'/?q=artist%3Aa&sort=date&c=3'
 		);
-		expect(libraryHref({ q: '', sort: 'title', category: 7 })).toBe('/?c=7');
+		expect(libraryHref({ q: '', sort: 'title', category: 7, page: 1 })).toBe('/?sort=title&c=7');
+		expect(libraryHref({ q: '', sort: 'title', category: null, page: 3 })).toBe(
+			'/?sort=title&p=3'
+		);
+	});
+
+	it('reads page numbers', () => {
+		expect(parsePage('3')).toBe(3);
+		expect(parsePage(null)).toBe(1);
+		expect(parsePage('0')).toBe(1);
+		expect(parsePage('2.5')).toBe(1);
+		expect(parsePage(String(Number.MAX_SAFE_INTEGER))).toBe(1);
 	});
 });
 
@@ -40,8 +52,12 @@ describe('parseFilter', () => {
 	});
 
 	it('round-trips through libraryHref', () => {
-		expect(libraryHref({ q: '', sort: 'title', category: null, filter: 'new' })).toBe('/?f=new');
-		expect(libraryHref({ q: 'a', sort: 'title', category: 2, filter: null })).toBe('/?q=a&c=2');
+		expect(libraryHref({ q: '', sort: 'title', category: null, filter: 'new' })).toBe(
+			'/?sort=title&f=new'
+		);
+		expect(libraryHref({ q: 'a', sort: 'title', category: 2, filter: null })).toBe(
+			'/?q=a&sort=title&c=2'
+		);
 	});
 });
 
@@ -49,9 +65,10 @@ describe('sort and order', () => {
 	it('keeps known sorts and any ns: namespace', () => {
 		expect(parseSort('pages')).toBe('pages');
 		expect(parseSort('ns:artist')).toBe('ns:artist');
-		expect(parseSort('ns:')).toBe('title');
-		expect(parseSort('size')).toBe('title');
-		expect(parseSort(null)).toBe('title');
+		expect(parseSort('title')).toBe('title');
+		expect(parseSort('ns:')).toBeNull();
+		expect(parseSort('size')).toBeNull();
+		expect(parseSort(null)).toBeNull();
 		expect(parseOrder('desc')).toBe('desc');
 		expect(parseOrder('down')).toBeNull();
 	});
@@ -71,7 +88,7 @@ describe('saved tag selection', () => {
 	it('keeps the selected tags in the address', () => {
 		expect(
 			libraryHref({ q: '', sort: 'title', category: null, tags: ['artist:a', 'long hair'] })
-		).toBe('/?t=artist%3Aa&t=long+hair');
+		).toBe('/?sort=title&t=artist%3Aa&t=long+hair');
 		expect(parseTags([' Artist:A ', '', 'artist:a', 'x'])).toEqual(['artist:a', 'x']);
 	});
 });

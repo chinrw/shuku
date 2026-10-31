@@ -12,22 +12,27 @@ import {
 	parseCategory,
 	parseFilter,
 	parseOrder,
+	parsePage,
 	parseSort,
 	parseTags
 } from '#lib/libraryUrl.ts';
+import { PAGE_SIZE } from '#lib/pages.ts';
 import { savedTagStore } from '#lib/savedTags.svelte.ts';
 import { settings } from '#lib/settings.svelte.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, url }) => {
 	const q = url.searchParams.get('q') ?? '';
-	const sort = parseSort(url.searchParams.get('sort'));
-	const order = parseOrder(url.searchParams.get('o'));
+	const prefs = settings();
+	// 地址里没写排序时（书库首页、标签链接）用这台设备记住的排序和方向。
+	const urlSort = parseSort(url.searchParams.get('sort'));
+	const sort = urlSort ?? prefs.sort;
+	const order = urlSort ? parseOrder(url.searchParams.get('o')) : prefs.order;
+	const page = parsePage(url.searchParams.get('p'));
 	const category = parseCategory(url.searchParams.get('c'));
 	const filter = parseFilter(url.searchParams.get('f'));
 	// 筛选行上选中的收藏标签，每个都要完整匹配，和其他条件取交集。
 	const tags = parseTags(url.searchParams.getAll('t'));
-	const prefs = settings();
 	// 地址里的筛选加上“隐藏读完的”开关，两者同时生效。
 	const filters: Filter[] = [
 		...(filter ? [filter] : []),
@@ -60,7 +65,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	);
 	// 最近阅读只在书库首页显示。它加载失败不影响列表，只是不显示这一栏。
 	const reading: Promise<ArchiveItem[]> =
-		q || tags.length > 0 || category !== null || filter !== null
+		q || tags.length > 0 || category !== null || filter !== null || page > 1
 		? Promise.resolve([])
 		: recent(fetch).catch((error) => {
 				console.warn('加载最近阅读失败', error);
@@ -69,7 +74,17 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	try {
 		// 几个请求互不依赖，并行发出；语句写错或分类不存在时搜索返回 400。
 		const [result, categoryList, recentItems, newCount, pinnedTags] = await Promise.all([
-			search(fetch, { q, sort, order, category, filters, tags, group }),
+			search(fetch, {
+				q,
+				sort,
+				order,
+				category,
+				filters,
+				tags,
+				group,
+				offset: (page - 1) * PAGE_SIZE,
+				limit: PAGE_SIZE
+			}),
 			shelves,
 			reading,
 			newBooks,
@@ -84,6 +99,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			filter,
 			filters,
 			tags,
+			page,
 			group,
 			result,
 			categories: categoryList,
@@ -102,6 +118,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				filter,
 				filters,
 				tags,
+				page,
 				group,
 				result: null,
 				categories: await shelves,

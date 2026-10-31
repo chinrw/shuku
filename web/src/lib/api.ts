@@ -134,6 +134,8 @@ export function search(
 		/** 每个都要完整匹配的标签，书库筛选行上选中的收藏标签。 */
 		tags?: string[];
 		after?: number;
+		/** 跳过前面这么多条，按页码翻页用。 */
+		offset?: number;
 		limit?: number;
 		/** 同一系列只返回一卷，书库页每个系列一张卡。 */
 		group?: 'series' | null;
@@ -145,6 +147,7 @@ export function search(
 	if (params.filters?.length) query.set('filter', params.filters.join(','));
 	for (const tag of params.tags ?? []) query.append('tag', tag);
 	if (params.after !== undefined) query.set('after', String(params.after));
+	if (params.offset) query.set('offset', String(params.offset));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	if (params.group != null) query.set('group', params.group);
 	return request(fetch, `/api/search?${query}`);
@@ -166,6 +169,11 @@ export function createCategory(name: string, search = ''): Promise<{ id: number 
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ name, search })
 	});
+}
+
+/** 删除分类，书本身不动。 */
+export async function deleteCategory(id: number) {
+	await send(fetch, `/api/categories/${id}`, { method: 'DELETE' });
 }
 
 /** 收藏的标签，所有设备共用，按收藏的先后排列。 */

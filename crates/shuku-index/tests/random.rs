@@ -52,6 +52,7 @@ fn index_matches_a_brute_force_scan() {
         let expected = naive.search(&query);
 
         check_pages(&index, &query, &expected);
+        check_offsets(&index, &query, &expected);
         check_cursor_before_match(&mut rng, &index, &naive, &query, &expected);
         // 偶尔取比标签总数还大的 limit，前 limit 名永远填不满。
         let limit = match rng.random_range(0..10) {
@@ -88,6 +89,32 @@ fn check_pages(index: &Index, query: &Query, expected: &[ArchiveId]) {
         assert_eq!(page.next_after, page.ids.last().copied(), "{query:?}");
         after = page.next_after;
         start = end;
+    }
+}
+
+/// 按页码翻页：跳过前面几页的条数，每页的内容和游标都要与暴力结果一致。
+fn check_offsets(index: &Index, query: &Query, expected: &[ArchiveId]) {
+    for page_number in 0..PAGES_PER_QUERY {
+        let offset = page_number * query.limit;
+        let page = index
+            .search(&Query {
+                offset,
+                ..query.clone()
+            })
+            .unwrap();
+        assert_eq!(page.total, expected.len() as u64, "{query:?}");
+        let start = offset.min(expected.len());
+        let end = (offset + query.limit).min(expected.len());
+        assert_eq!(page.ids, expected[start..end], "{query:?} offset {offset}");
+        let more = end < expected.len();
+        assert_eq!(
+            page.next_after,
+            more.then(|| expected[end - 1]),
+            "{query:?}"
+        );
+        if !more {
+            return;
+        }
     }
 }
 
@@ -187,6 +214,7 @@ fn random_query(rng: &mut StdRng, tags: &[String], naive: &Naive) -> Query {
         },
         reverse: rng.random_bool(0.3),
         after: None,
+        offset: 0,
         // 页面大多很小，匹配不多的结果也要翻好几页。
         limit: if rng.random_bool(0.8) {
             rng.random_range(1..=8)

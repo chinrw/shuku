@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import {
+		ApiError,
+		categories as listCategories,
+		deleteCategory,
 		random,
-		search,
 		suggestTags,
+		type Category,
 		type ArchiveItem,
 		type Order,
 		type Sort,
@@ -16,6 +19,8 @@
 	import { forgetMembers } from '#lib/membership.svelte.ts';
 	import { savedTagStore } from '#lib/savedTags.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
+	import { pageCount } from '#lib/pages.ts';
+	import Pager from '#lib/Pager.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
@@ -25,29 +30,34 @@
 	import { onDestroy, untrack } from 'svelte';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
 	import { byline, formatDate, namespaceClass, rowTags } from '#lib/tags.ts';
-	import type { Snapshot } from './$types';
 
 	let { data } = $props();
 	const prefs = settings();
 
-	// 翻到后面的页时在这里追加；搜索条件变化后 data 更新，两者随之重置。
 	let items = $derived<ArchiveItem[]>(data.result?.items ?? []);
-	let next = $derived(data.result?.next_after ?? null);
 	let query = $derived(data.q);
-	let loading = $state(false);
-	let loadError = $state<string | null>(null);
+	let pages = $derived(pageCount(data.result?.total ?? 0));
 
-	// 返回列表时恢复已经加载的条目，浏览器才能把滚动位置还原到原处。
-	export const snapshot: Snapshot<{ items: ArchiveItem[]; next: number | null }> = {
-		capture: () => ({ items, next }),
-		restore: (saved) => {
-			items = saved.items;
-			next = saved.next;
-		}
-	};
+	// 当前搜索条件的第几页，其余条件不变。
+	function pageHref(page: number) {
+		return libraryHref({
+			q: data.q,
+			sort: data.sort,
+			order: data.order,
+			category: data.category,
+			filter: data.filter,
+			tags: data.tags,
+			page
+		});
+	}
 
-	// 换排序方式时方向回到它的默认方向。
+	// 换排序方式时方向回到它的默认方向。换排序或方向时这台设备记住它，下次打开书库照样用。
 	function navigate(q: string, sort: Sort, order: Order | null = sort === data.sort ? data.order : null) {
+		if (sort !== data.sort || order !== data.order) {
+			prefs.sort = sort;
+			prefs.order = order;
+			prefs.save();
+		}
 		goto(
 			libraryHref({ q, sort, order, category: data.category, filter: data.filter, tags: data.tags })
 		);
@@ -262,6 +272,54 @@
 
 	const pinnedTags = savedTagStore();
 
+	// 筛选行的编辑状态：分类和收藏的标签旁边出现 ×，还能输入标签直接收藏。
+	let editing = $state(false);
+	let editError = $state<string | null>(null);
+	let newTag = $state('');
+	let pinChoices = $state<TagCount[]>([]);
+	let pinRequest: AbortController | undefined;
+
+	async function removeCategory(category: Category) {
+		const ok = confirm(
+			`删除分类“${category.name}”？分类里的 ${category.count} 本书不会删除，只是不再属于这个分类。`
+		);
+		if (!ok) return;
+		editError = null;
+		try {
+			await deleteCategory(category.id);
+			categoryList = await listCategories(fetch).catch(() =>
+				categoryList.filter((other) => other.id !== category.id)
+			);
+			// 正在按这个分类筛选时回到不筛选。悬停时可能已经预加载了删除前的数据，
+			// 换完地址再让 load 重新跑一遍，分类列表和结果都以删除后的为准。
+			if (data.category === category.id) await goto(categoryHref(category.id));
+			await invalidateAll();
+		} catch (cause) {
+			editError = `没有删除：${cause instanceof ApiError ? cause.message : String(cause)}`;
+		}
+	}
+
+	async function suggestPinned() {
+		pinRequest?.abort();
+		const prefix = newTag.trim();
+		if (!prefix) {
+			pinChoices = [];
+			return;
+		}
+		pinRequest = new AbortController();
+		try {
+			pinChoices = await suggestTags(prefix, pinRequest.signal, 8);
+		} catch (cause) {
+			if (!(cause instanceof DOMException && cause.name === 'AbortError')) pinChoices = [];
+		}
+	}
+
+	function pinTag(tag: string) {
+		if (!pinnedTags.has(tag)) pinnedTags.toggle(tag);
+		newTag = '';
+		pinChoices = [];
+	}
+
 	// 选中后又取消收藏的标签也照样显示，免得筛选着却看不到、取消不了。
 	let tagButtons = $derived([
 		...pinnedTags.tags,
@@ -305,43 +363,6 @@
 	function toggleView() {
 		prefs.view = prefs.view === 'grid' ? 'list' : 'grid';
 		prefs.save();
-	}
-
-	async function loadMore() {
-		if (loading || next === null) return;
-		loading = true;
-		loadError = null;
-		try {
-			const result = await search(fetch, {
-				q: data.q,
-				tags: data.tags,
-				sort: data.sort,
-				order: data.order,
-				category: data.category,
-				filters: data.filters,
-				group: data.group,
-				after: next
-			});
-			items = [...items, ...result.items];
-			next = result.next_after;
-		} catch (error) {
-			loadError = error instanceof Error ? error.message : String(error);
-		} finally {
-			loading = false;
-		}
-	}
-
-	// 条目数变化后重新观察，加载完一页后哨兵仍在视口内时会继续加载下一页。
-	function sentinel(node: HTMLElement) {
-		void items.length;
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries[0].isIntersecting && loadError === null) loadMore();
-			},
-			{ rootMargin: '800px' }
-		);
-		observer.observe(node);
-		return () => observer.disconnect();
 	}
 
 	// 标签弹窗：鼠标悬停时打开，移开后稍等再关，让鼠标能移进弹窗里点标签；触屏点一下打开。
@@ -505,6 +526,9 @@
 {#if randomError}
 	<p class="status error" role="alert">{randomError}</p>
 {/if}
+{#if editError || pinnedTags.error}
+	<p class="status error" role="alert">{editError ?? `收藏标签没有保存：${pinnedTags.error}`}</p>
+{/if}
 <!-- 和 LRR 一样一排：新书、各个分类，按钮样式相同，只靠图标区分；最右边是开关和本数。 -->
 <nav class="facets" aria-label="筛选和分类">
 	<a href={filterHref('new')} aria-current={data.filter === 'new' ? 'true' : undefined}>
@@ -513,32 +537,78 @@
 		{#if data.newCount !== null}<span class="count">{data.newCount}</span>{/if}
 	</a>
 	{#each shelves as category (category.id)}
-		<a
-			href={categoryHref(category.id)}
-			aria-current={data.category === category.id ? 'true' : undefined}
-			title={category.dynamic ? '动态分类' : undefined}
-		>
-			{#if category.bookmark}<Icon name="bookmark" size={13} filled />{/if}
-			<span>{category.name}</span>
-			<span class="count">{category.count}</span>
-		</a>
+		<span class="item">
+			<a
+				href={categoryHref(category.id)}
+				aria-current={data.category === category.id ? 'true' : undefined}
+				title={category.dynamic ? '动态分类' : undefined}
+			>
+				{#if category.bookmark}<Icon name="bookmark" size={13} filled />{/if}
+				<span>{category.name}</span>
+				<span class="count">{category.count}</span>
+			</a>
+			{#if editing}
+				<button class="remove" aria-label="删除分类 {category.name}" onclick={() => removeCategory(category)}
+					>×</button
+				>
+			{/if}
+		</span>
 	{/each}
 	{#each tagButtons as tag (tag)}
-		<a
-			class={namespaceClass(splitTag(tag).namespace)}
-			href={tagHref(tag)}
-			aria-current={data.tags.includes(tag) ? 'true' : undefined}
-			title="收藏的标签，可以同时选几个"
-		>
-			<Icon name="tag" size={13} />
-			<span>{tag}</span>
-		</a>
+		<span class="item">
+			<a
+				class={namespaceClass(splitTag(tag).namespace)}
+				href={tagHref(tag)}
+				aria-current={data.tags.includes(tag) ? 'true' : undefined}
+				title="收藏的标签，可以同时选几个"
+			>
+				<Icon name="tag" size={13} />
+				<span>{tag}</span>
+			</a>
+			{#if editing && pinnedTags.has(tag)}
+				<button
+					class="remove"
+					aria-label="取消收藏标签 {tag}"
+					disabled={pinnedTags.isPending(tag)}
+					onclick={() => pinnedTags.toggle(tag)}>×</button
+				>
+			{/if}
+		</span>
 	{/each}
 	<span class="end">
+		<button aria-pressed={editing} onclick={() => (editing = !editing)} title="删除分类、管理收藏的标签">
+			<Icon name="edit" size={13} />编辑
+		</button>
 		<button aria-pressed={prefs.hideFinished} onclick={toggleHideFinished}>隐藏读完的</button>
 		{#if data.result}<span class="total">共 {data.result.total} 本</span>{/if}
 	</span>
 </nav>
+{#if editing}
+	<!-- 输入时提示书库里已有的标签，选中就收藏，不用先打开一本书。 -->
+	<form class="add-tag" onsubmit={(event) => event.preventDefault()}>
+		<input
+			bind:value={newTag}
+			oninput={suggestPinned}
+			placeholder="收藏标签…"
+			aria-label="收藏标签"
+			autocapitalize="off"
+			autocomplete="off"
+			spellcheck="false"
+		/>
+		{#if pinChoices.length > 0}
+			<ul class="suggestions">
+				{#each pinChoices as choice (choice.tag)}
+					<li>
+						<button type="button" onclick={() => pinTag(choice.tag)}>
+							<span class={namespaceClass(splitTag(choice.tag).namespace)}>{choice.tag}</span>
+							<span class="count">{choice.count}</span>
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</form>
+{/if}
 
 {#if data.recent.length > 0}
 	<RecentRow items={data.recent} />
@@ -547,6 +617,8 @@
 {#if batchMessage}
 	<p class="status" role="status">{batchMessage}</p>
 {/if}
+
+<Pager page={data.page} {pages} href={pageHref} />
 
 {#if prefs.view === 'grid'}
 	<main class="grid" onclickcapture={pickCard}>
@@ -676,15 +748,9 @@
 	}}
 />
 
-{#if loadError}
-	<p class="footer error">
-		加载失败：{loadError}
-		<button class="icon-button" onclick={loadMore}>重试</button>
-	</p>
-{:else if next !== null}
-	<div class="footer" {@attach sentinel}>{loading ? '加载中…' : ''}</div>
-{:else if items.length > 0}
-	<div class="footer">没有更多了</div>
+<Pager page={data.page} {pages} href={pageHref} />
+{#if items.length === 0 && data.result && data.page > 1}
+	<p class="footer">这一页没有书了，<a href={pageHref(1)}>回到第一页</a></p>
 {/if}
 
 {#if selecting}
@@ -869,6 +935,67 @@
 	.facets a[aria-current='true'] .count {
 		color: inherit;
 		opacity: 0.7;
+	}
+
+	/* 编辑时分类和收藏的标签后面跟一个 ×。 */
+	.facets .item {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: 0.15rem;
+	}
+
+	.facets .remove {
+		padding: 0 0.35rem;
+		border-color: transparent;
+		background: transparent;
+		color: var(--muted);
+		font-size: 0.95rem;
+		line-height: 1;
+	}
+
+	.facets .remove:hover {
+		color: var(--danger);
+	}
+
+	.add-tag {
+		position: relative;
+		width: min(20rem, calc(100% - 2rem));
+		margin: 0.4rem 1rem 0;
+	}
+
+	.add-tag input {
+		width: 100%;
+		height: 2rem;
+		padding: 0 0.6rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface);
+		color: var(--fg);
+	}
+
+	.add-tag .suggestions button {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		width: 100%;
+		padding: 0.35rem 0.7rem;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.add-tag .suggestions button:hover {
+		background: var(--surface);
+	}
+
+	@media (min-width: 1024px) {
+		.add-tag {
+			margin: 0.4rem 1.25rem 0;
+		}
 	}
 
 	/* “新书”的图标，和卡片上“新”角标同色。 */

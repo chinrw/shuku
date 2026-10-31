@@ -28,7 +28,11 @@ export function defaultOrder(sort: Sort): Order {
 	return sort === 'date' ? 'desc' : 'asc';
 }
 
-/** 书库页的地址。默认值（空搜索、按标题、默认方向、不限分类、不筛选）不写进地址栏。 */
+/**
+ * 书库页的地址。排序总是写进去：地址里没有排序时用浏览器记住的排序（见 settings），
+ * 省略的话换过默认排序的设备会把链接理解成另一种排序。其余默认值（空搜索、默认方向、
+ * 不限分类、不筛选、第一页）不写。
+ */
 export function libraryHref(params: {
 	q: string;
 	sort: Sort;
@@ -37,15 +41,27 @@ export function libraryHref(params: {
 	filter?: UrlFilter | null;
 	/** 筛选行上选中的收藏标签。 */
 	tags?: string[];
+	/** 第几页，从 1 开始。 */
+	page?: number;
 }): string {
 	const query = new URLSearchParams();
 	if (params.q) query.set('q', params.q);
-	if (params.sort !== 'title') query.set('sort', params.sort);
+	query.set('sort', params.sort);
 	if (params.order && params.order !== defaultOrder(params.sort)) query.set('o', params.order);
 	if (params.category !== null) query.set('c', String(params.category));
 	if (params.filter) query.set('f', params.filter);
 	for (const tag of params.tags ?? []) query.append('t', tag);
-	return query.size ? `/?${query}` : '/';
+	if (params.page && params.page > 1) query.set('p', String(params.page));
+	return `/?${query}`;
+}
+
+// 30 万本、每页 100 本也只有 3000 页，再大的页码只会是手改的地址。
+const MAX_PAGE = 1_000_000;
+
+/** 地址里的页码，不是 1 到 MAX_PAGE 之间的整数时当作第一页。 */
+export function parsePage(raw: string | null): number {
+	const page = Number(raw);
+	return raw !== null && Number.isSafeInteger(page) && page > 0 && page <= MAX_PAGE ? page : 1;
 }
 
 /** 地址里选中的收藏标签，去掉空的和重复的。 */
@@ -69,10 +85,10 @@ export function filterLabel(filter: UrlFilter): string {
 }
 
 /** 地址里的排序，不认识的值当作按标题。`ns:` 后面是任意命名空间。 */
-export function parseSort(raw: string | null): Sort {
-	if (raw === 'date' || raw === 'pages') return raw;
+export function parseSort(raw: string | null): Sort | null {
+	if (raw === 'title' || raw === 'date' || raw === 'pages') return raw;
 	if (raw?.startsWith('ns:') && raw.slice(3).trim()) return raw as Sort;
-	return 'title';
+	return null;
 }
 
 /** 地址里的方向，不是 asc 或 desc 时当作默认方向。 */

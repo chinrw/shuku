@@ -147,6 +147,8 @@ struct SearchParams {
     sort: Option<String>,
     order: Option<String>,
     after: Option<i64>,
+    /// 跳过前面这么多条，书库页按页码翻页用。
+    offset: Option<usize>,
     limit: Option<usize>,
     /// `series` 时同一系列只返回卷号最小的一卷，见 [`shuku_index::Query::collapse_series`]。
     group: Option<String>,
@@ -188,6 +190,7 @@ async fn search(
         query.sort = sort;
         query.reverse = reverse;
         query.after = params.after;
+        query.offset = params.offset.unwrap_or(0);
         query.limit = limit;
         query.collapse_series = collapse_series;
         let result = snapshot.index.search(&query).map_err(Error::bad_request)?;

@@ -4,6 +4,7 @@
 		grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
 		list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
 		back: 'M15 18l-6-6 6-6',
+		edit: 'M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z',
 		bookmark: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
 		'chevron-left': 'M15 18l-6-6 6-6',
 		'chevron-right': 'M9 18l6-6-6-6',

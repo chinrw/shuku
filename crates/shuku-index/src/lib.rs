@@ -122,6 +122,8 @@ pub struct Query {
     pub reverse: bool,
     /// Continue after this archive, taken from [`SearchResult::next_after`].
     pub after: Option<ArchiveId>,
+    /// 在 `after` 之后再跳过这么多条结果，书库页按页码翻页用。
+    pub offset: usize,
     pub limit: usize,
     /// 同一系列的结果只留卷号最小的一卷，书库页每个系列只显示一张卡。总数也按留下的算。
     pub collapse_series: bool,
@@ -135,6 +137,7 @@ impl Default for Query {
             sort: Sort::default(),
             reverse: false,
             after: None,
+            offset: 0,
             limit: DEFAULT_LIMIT,
             collapse_series: false,
         }
@@ -355,6 +358,7 @@ impl Index {
             order,
             query.reverse,
             start,
+            query.offset,
             query.limit.saturating_add(1),
         );
         let next_after = if page.len() > query.limit {
@@ -635,6 +639,7 @@ impl Index {
         order: &SortOrder,
         reverse: bool,
         start: usize,
+        skip: usize,
         take: usize,
     ) -> Vec<u32> {
         if matches.len() * DENSE_DIVISOR >= self.ids.len() as u64 {
@@ -647,16 +652,19 @@ impl Index {
             return docs
                 .skip(start)
                 .filter(|&doc| matches.contains(doc))
+                .skip(skip)
                 .take(take)
                 .collect();
         }
         let rank = |doc: &u32| order.rank(*doc, reverse);
         let mut docs: Vec<u32> = matches.iter().filter(|doc| rank(doc) >= start).collect();
-        if docs.len() > take {
-            docs.select_nth_unstable_by_key(take, rank);
-            docs.truncate(take);
+        let end = skip.saturating_add(take);
+        if docs.len() > end {
+            docs.select_nth_unstable_by_key(end, rank);
+            docs.truncate(end);
         }
         docs.sort_unstable_by_key(rank);
+        docs.drain(..skip.min(docs.len()));
         docs
     }
 }

@@ -256,6 +256,10 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
     )
     .await;
     assert_eq!(second["items"][0]["title"], "漫画 10");
+    // 按页码翻页：offset 跳过前面的条数，和跟着游标翻到的一样。
+    let by_offset = json(&router, "/api/search?q=%E6%BC%AB%E7%94%BB&limit=1&offset=1").await;
+    assert_eq!(by_offset["items"], second["items"]);
+    assert_eq!(by_offset["next_after"], second["next_after"]);
     assert_eq!(second["next_after"], Value::Null);
     assert_eq!(json(&router, "/api/search?q=artist:*").await["total"], 1);
     assert_eq!(json(&router, "/api/search?q=o*er").await["degraded"], true);
