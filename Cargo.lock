@@ -2591,6 +2591,7 @@ dependencies = [
  "jxl-oxide",
  "notify",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "shuku-archive",

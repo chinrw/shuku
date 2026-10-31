@@ -7,6 +7,7 @@ import {
 	type Category
 } from '#lib/api.ts';
 import { parseCategory, parseFilter, parseOrder, parseSort } from '#lib/libraryUrl.ts';
+import { settings } from '#lib/settings.svelte.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, url }) => {
@@ -15,6 +16,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const order = parseOrder(url.searchParams.get('o'));
 	const category = parseCategory(url.searchParams.get('c'));
 	const filter = parseFilter(url.searchParams.get('f'));
+	const prefs = settings();
+	const group: 'series' | null = prefs.groupSeries && !prefs.ungroupForBatch ? 'series' : null;
 	// 分类按钮加载失败不影响列表，只是不显示这一排。
 	const shelves: Promise<Category[]> = categories(fetch).catch((error) => {
 		console.warn('加载分类失败', error);
@@ -30,7 +33,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	try {
 		// 几个请求互不依赖，并行发出；语句写错或分类不存在时搜索返回 400。
 		const [result, categoryList, recentItems] = await Promise.all([
-			search(fetch, { q, sort, order, category, filter }),
+			search(fetch, { q, sort, order, category, filter, group }),
 			shelves,
 			reading
 		]);
@@ -40,6 +43,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			order,
 			category,
 			filter,
+			group,
 			result,
 			categories: categoryList,
 			recent: recentItems,
@@ -54,6 +58,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				order,
 				category,
 				filter,
+				group,
 				result: null,
 				categories: await shelves,
 				recent: [],

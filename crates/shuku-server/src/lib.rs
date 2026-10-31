@@ -14,6 +14,7 @@ mod images;
 mod logs;
 mod metadata;
 mod scan;
+mod series;
 mod settings;
 mod snapshot;
 mod watch;

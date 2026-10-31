@@ -156,6 +156,10 @@ fn random_library(rng: &mut StdRng, tags: &[String]) -> Vec<ArchiveRecord> {
                 tags: (0..tag_count).map(|_| random_tag(rng, tags)).collect(),
                 page_count: rng.random_range(0..30),
                 is_new: rng.random_bool(0.3),
+                // 少数归档分属 20 个系列，卷号常有重复，同卷号按标题顺序取。
+                series: rng
+                    .random_bool(0.3)
+                    .then(|| (rng.random_range(0..20), rng.random_range(0..5))),
             }
         })
         .collect()
@@ -189,6 +193,7 @@ fn random_query(rng: &mut StdRng, tags: &[String], naive: &Naive) -> Query {
         } else {
             rng.random_range(1..=60)
         },
+        collapse_series: rng.random_bool(0.5),
     }
 }
 
@@ -279,6 +284,7 @@ struct NaiveRecord {
     tags: BTreeSet<String>,
     page_count: u32,
     is_new: bool,
+    series: Option<(i64, u32)>,
 }
 
 /// 逐本检查每个条件，排序直接比较标题，不使用位图和预先算好的排列。
@@ -298,6 +304,7 @@ impl Naive {
                     tags: r.tags.iter().map(|t| normalize(t)).collect(),
                     page_count: r.page_count,
                     is_new: r.is_new,
+                    series: r.series,
                 })
                 .collect(),
             dates: records.iter().map(|r| (r.id, r.date_added)).collect(),
@@ -355,7 +362,20 @@ impl Naive {
 
     /// 返回全部匹配，按查询的排序方式排列。
     fn search(&self, query: &Query) -> Vec<ArchiveId> {
-        let matched: BTreeSet<ArchiveId> = self.matching(query).map(|r| r.id).collect();
+        let mut matched: BTreeSet<ArchiveId> = self.matching(query).map(|r| r.id).collect();
+        if query.collapse_series {
+            let title_rank = self.order(&Sort::Title, false).1;
+            let mut first: HashMap<i64, (u32, usize, ArchiveId)> = HashMap::new();
+            for record in self.matching(query) {
+                if let Some((series, volume)) = record.series {
+                    matched.remove(&record.id);
+                    let candidate = (volume, title_rank[&record.id], record.id);
+                    let best = first.entry(series).or_insert(candidate);
+                    *best = (*best).min(candidate);
+                }
+            }
+            matched.extend(first.into_values().map(|(_, _, id)| id));
+        }
         self.order(&query.sort, query.reverse)
             .0
             .into_iter()

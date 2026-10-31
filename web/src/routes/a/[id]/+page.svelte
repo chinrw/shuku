@@ -94,6 +94,7 @@
 		<h1>{book.title}</h1>
 		<p class="meta">
 			{book.page_count} 页 · {formatSize(book.file_size)}
+			{#if book.series}<br />系列：<a href="/s/{book.series.id}">{book.series.name}</a>{/if}
 			{#if book.progress}<br />读到第 {resumePage + 1} 页{/if}
 			{#if memberCategories.length}
 				<br />分类：{#each memberCategories as category, index (category.id)}{#if index}、{/if}<a
@@ -107,6 +108,9 @@
 				<a href="/a/{book.id}/read?page=0">从头</a>
 			{:else}
 				<a class="primary" href="/a/{book.id}/read?page=0">开始阅读</a>
+			{/if}
+			{#if book.series?.next != null}
+				<a href="/a/{book.series.next}/read">下一卷</a>
 			{/if}
 			<a href={downloadUrl(book.id)} download>下载</a>
 			{#if editing?.id !== book.id}

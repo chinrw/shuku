@@ -607,6 +607,36 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 把归档放进 `key` 对应的系列，作为第 `volume` 卷。系列不存在时以 `name` 新建，
+    /// 已经存在时名字不变。
+    pub fn set_series(&mut self, id: i64, key: &str, name: &str, volume: u32) -> Result<()> {
+        require_archive(self.connection, id)?;
+        let series: i64 = self.connection.query_row(
+            "INSERT INTO series (name, key) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET key = excluded.key
+             RETURNING id",
+            params![name, key],
+            |row| row.get(0),
+        )?;
+        self.connection.execute(
+            "UPDATE archive SET series_id = ?1, volume = ?2 WHERE id = ?3",
+            params![series, volume, id],
+        )?;
+        Ok(())
+    }
+
+    /// 归档所在系列的文件夹搬到了别处：把系列的归组依据换成 `key`，之后扫到的新卷归进原系列。
+    /// 归档不属于系列、或者 `key` 已经是另一个系列的依据时不变。
+    pub fn move_series(&mut self, id: i64, key: &str) -> Result<()> {
+        self.connection.execute(
+            "UPDATE series SET key = ?1
+             WHERE id = (SELECT series_id FROM archive WHERE id = ?2)
+               AND NOT EXISTS (SELECT 1 FROM series WHERE key = ?1)",
+            params![key, id],
+        )?;
+        Ok(())
+    }
+
     /// 把归档放进后台查 E-Hentai 的队列，已经在里面的不变。
     pub fn queue_metadata(&mut self, id: i64) -> Result<()> {
         self.connection.execute(

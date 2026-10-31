@@ -58,6 +58,7 @@ impl App {
             .route("/api/tags", get(suggest_tags))
             .route("/api/recent", get(recent))
             .route("/api/random", get(random))
+            .route("/api/series/{id}", get(series))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
             .route(
@@ -137,6 +138,8 @@ struct SearchParams {
     order: Option<String>,
     after: Option<i64>,
     limit: Option<usize>,
+    /// `series` 时同一系列只返回卷号最小的一卷，见 [`shuku_index::Query::collapse_series`]。
+    group: Option<String>,
 }
 
 async fn search(
@@ -150,6 +153,11 @@ async fn search(
     }
     let (sort, reverse) = parse_sort(params.sort.as_deref(), params.order.as_deref())?;
     let filters = parse_filters(&params.filter)?;
+    let collapse_series = match params.group.as_deref() {
+        None | Some("") => false,
+        Some("series") => true,
+        Some(group) => return Err(Error::bad_request(format!("不支持的 group：{group}"))),
+    };
     app.blocking(move |app| {
         let snapshot = app.snapshot();
         let (mut query, degraded) = build_query(&snapshot, &params.q, params.category, &filters)?;
@@ -157,6 +165,7 @@ async fn search(
         query.reverse = reverse;
         query.after = params.after;
         query.limit = limit;
+        query.collapse_series = collapse_series;
         let result = snapshot.index.search(&query).map_err(Error::bad_request)?;
         // 结果和列表元数据来自同一个快照，结果里的每本都查得到。
         let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&item)).collect();
@@ -424,7 +433,36 @@ fn list_item(item: &crate::snapshot::Item<'_>) -> Value {
         "progress": progress(item.progress), "tags": tag_groups(item.tags()),
         "cover_url": cover_url(item.archive.id, &item.archive.quick_hash),
         "date_added": item.archive.date_added, "source_url": item.archive.source_url,
+        "series": item.series.zip(item.archive.series).map(|(series, (_, volume))| json!({
+            "id": series.id, "name": series.name, "volume": volume,
+            "volumes": series.volumes.len(),
+        })),
     })
+}
+
+/// 一个系列和它的各卷，按卷号排列。只有一卷的系列不算系列，返回 404。
+async fn series(
+    State(app): State<App>,
+    id: std::result::Result<Path<i64>, PathRejection>,
+) -> Result<Json<Value>> {
+    let Path(id) = id.map_err(Error::bad_request)?;
+    app.blocking(move |app| {
+        let snapshot = app.snapshot();
+        let series = snapshot.series(id).ok_or_else(|| Error::Http {
+            status: StatusCode::NOT_FOUND,
+            message: format!("系列 {id} 不存在"),
+        })?;
+        let items: Vec<_> = series
+            .volumes
+            .iter()
+            .filter_map(|id| snapshot.item(*id))
+            .map(|item| list_item(&item))
+            .collect();
+        Ok(Json(
+            json!({"id": series.id, "name": series.name, "items": items}),
+        ))
+    })
+    .await
 }
 
 #[derive(Default, Deserialize)]
@@ -504,6 +542,19 @@ pub(crate) fn detail_json(app: &App, id: i64) -> Result<Value> {
     let reader = app.reader()?;
     let archive = require_archive(&reader, id)?;
     let categories = reader.archive_categories(id)?;
+    // 阅读器读完一卷时接着打开下一卷。
+    let series = reader.archive_series(id)?.map(|series| {
+        let position = series.volumes.iter().position(|&volume| volume == id);
+        let neighbour = |offset: isize| {
+            position
+                .and_then(|position| position.checked_add_signed(offset))
+                .and_then(|position| series.volumes.get(position))
+        };
+        json!({
+            "id": series.id, "name": series.name,
+            "previous": neighbour(-1), "next": neighbour(1),
+        })
+    });
     let tags = tag_groups(&archive.tags);
     let missing = matches!(
         app.0
@@ -521,6 +572,7 @@ pub(crate) fn detail_json(app: &App, id: i64) -> Result<Value> {
         "path": archive.metadata.path, "missing": missing,
         "progress": progress(archive.progress.as_ref()), "tags": tags,
         "categories": categories, "cover_url": cover_url(id, &archive.metadata.quick_hash),
+        "series": series,
     }))
 }
 

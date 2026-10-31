@@ -3,7 +3,7 @@
 
 use crate::{App, Result};
 use shuku_index::Index;
-use shuku_store::{Category, LibraryArchive, LibraryTag, Progress, Reader, Tag};
+use shuku_store::{Category, LibraryArchive, LibraryTag, Progress, Reader, Series, Tag};
 use std::{
     collections::HashMap,
     sync::{Arc, PoisonError, atomic::Ordering},
@@ -50,12 +50,15 @@ struct Listing {
     tags: Vec<LibraryTag>,
     /// 按 ID 升序，按 ID 二分查找。
     archives: Vec<LibraryArchive>,
+    /// 至少有两卷的系列，按 ID 升序。
+    series: Vec<Series>,
 }
 
 /// 列表页的一项。
 pub(crate) struct Item<'a> {
     pub(crate) archive: &'a LibraryArchive,
     pub(crate) progress: Option<&'a Progress>,
+    pub(crate) series: Option<&'a Series>,
     tags: &'a [LibraryTag],
 }
 
@@ -96,6 +99,7 @@ impl Snapshot {
             listing: Arc::new(Listing {
                 tags: library.tags,
                 archives: library.archives,
+                series: library.series,
             }),
             progress: Arc::new(library.progress),
             categories: Arc::new(library.categories),
@@ -185,11 +189,19 @@ impl Snapshot {
         let position = archives
             .binary_search_by_key(&id, |archive| archive.id)
             .ok()?;
+        let archive = &archives[position];
         Some(Item {
-            archive: &archives[position],
+            archive,
             progress: self.progress.get(&id),
+            series: archive.series.and_then(|(series, _)| self.series(series)),
             tags: &self.listing.tags,
         })
+    }
+
+    pub(crate) fn series(&self, id: i64) -> Option<&Series> {
+        let series = &self.listing.series;
+        let position = series.binary_search_by_key(&id, |series| series.id).ok()?;
+        Some(&series[position])
     }
 }
 

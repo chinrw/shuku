@@ -5,8 +5,8 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
     Archive, ArchiveMetadata, BrokenArchive, Category, DuplicateFile, Error, Library,
-    LibraryArchive, LibraryStats, LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry, Tag,
-    configure,
+    LibraryArchive, LibraryStats, LibraryTag, MIGRATIONS, Page, Progress, Result, ScanEntry,
+    Series, Tag, configure,
 };
 
 /// 只读连接。WAL 模式下读不挡写，写也不挡读；每个读取方法看到的是调用开始时已提交的数据。
@@ -167,12 +167,16 @@ impl Reader {
                 Ok(tag)
             })
             .collect::<Result<Vec<_>>>()?;
+        let names = read_series_names(&transaction)?;
         let mut archives = transaction
             .prepare(
-                "SELECT id, title, page_count, quick_hash, is_new, date_added, source_url
+                "SELECT id, title, page_count, quick_hash, is_new, date_added, source_url,
+                    series_id, volume
                  FROM archive ORDER BY id",
             )?
             .query_map([], |row| {
+                let series = row.get::<_, Option<i64>>(7)?;
+                let volume = row.get::<_, Option<u32>>(8)?.unwrap_or(0);
                 Ok(LibraryArchive {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -182,9 +186,13 @@ impl Reader {
                     date_added: row.get(5)?,
                     source_url: row.get(6)?,
                     tags: Vec::new(),
+                    series: series
+                        .filter(|id| names.contains_key(id))
+                        .map(|id| (id, volume)),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let series = group_series(names, &archives);
         // 两边都按归档 ID 升序，归并时不必为每本查一次。
         let mut associations = transaction
             .prepare("SELECT archive_id, tag_id FROM archive_tag ORDER BY archive_id")?;
@@ -221,7 +229,36 @@ impl Reader {
             archives,
             progress,
             categories,
+            series,
         })
+    }
+
+    /// 一本归档所属的系列，只有一卷的系列不算。
+    pub fn archive_series(&self, id: i64) -> Result<Option<Series>> {
+        let series = self
+            .connection
+            .prepare_cached("SELECT series_id FROM archive WHERE id = ?1")?
+            .query_row([id], |row| row.get::<_, Option<i64>>(0))
+            .optional()?
+            .flatten();
+        let Some(series) = series else {
+            return Ok(None);
+        };
+        let name: String = self.connection.query_row(
+            "SELECT name FROM series WHERE id = ?1",
+            [series],
+            |row| row.get(0),
+        )?;
+        let volumes = self
+            .connection
+            .prepare_cached("SELECT id FROM archive WHERE series_id = ?1 ORDER BY volume, id")?
+            .query_map([series], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()?;
+        Ok((volumes.len() >= 2).then_some(Series {
+            id: series,
+            name,
+            volumes,
+        }))
     }
 
     /// 全部分类和静态分类的成员，置顶在前，再按名字。
@@ -350,6 +387,45 @@ impl Reader {
         }
         Ok((total, groups))
     }
+}
+
+/// 至少有两卷的系列的名字。
+fn read_series_names(connection: &Connection) -> Result<HashMap<i64, String>> {
+    Ok(connection
+        .prepare(
+            "SELECT series.id, series.name FROM series
+             JOIN archive ON archive.series_id = series.id
+             GROUP BY series.id HAVING count(*) >= 2",
+        )?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+/// 按 [`LibraryArchive::series`] 列出各系列的卷，按卷号、再按 ID 排列，系列按 ID 升序。
+fn group_series(names: HashMap<i64, String>, archives: &[LibraryArchive]) -> Vec<Series> {
+    let mut members: Vec<(i64, u32, i64)> = archives
+        .iter()
+        .filter_map(|archive| {
+            let (series, volume) = archive.series?;
+            Some((series, volume, archive.id))
+        })
+        .collect();
+    members.sort_unstable();
+    let mut series: Vec<Series> = names
+        .into_iter()
+        .map(|(id, name)| Series {
+            id,
+            name,
+            volumes: Vec::new(),
+        })
+        .collect();
+    series.sort_unstable_by_key(|series| series.id);
+    for (id, _, archive) in members {
+        if let Ok(position) = series.binary_search_by_key(&id, |series| series.id) {
+            series[position].volumes.push(archive);
+        }
+    }
+    series
 }
 
 fn read_pages(connection: &Connection, id: i64) -> Result<Vec<Page>> {

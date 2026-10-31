@@ -47,6 +47,8 @@ pub struct ArchiveRecord {
     pub page_count: u32,
     /// 入库后还没打开过。扫描新增的归档为真，LRR 导入的沿用 LRR 的 isnew。
     pub is_new: bool,
+    /// 所属系列的 ID 和卷号，见 [`Query::collapse_series`]。
+    pub series: Option<(i64, u32)>,
 }
 
 /// `pages:` 和 `read:` 条件里的比较，例如 `pages:>=20` 是 `AtLeast(20)`。
@@ -120,6 +122,8 @@ pub struct Query {
     /// Continue after this archive, taken from [`SearchResult::next_after`].
     pub after: Option<ArchiveId>,
     pub limit: usize,
+    /// 同一系列的结果只留卷号最小的一卷，书库页每个系列只显示一张卡。总数也按留下的算。
+    pub collapse_series: bool,
 }
 
 impl Default for Query {
@@ -131,6 +135,7 @@ impl Default for Query {
             reverse: false,
             after: None,
             limit: DEFAULT_LIMIT,
+            collapse_series: false,
         }
     }
 }
@@ -224,6 +229,10 @@ pub struct Index {
     page_counts: Vec<u32>,
     new_docs: RoaringBitmap,
     untagged_docs: RoaringBitmap,
+    /// 属于某个系列的归档。
+    series_docs: RoaringBitmap,
+    /// `series_docs` 里每本的系列 ID 和卷号。
+    doc_series: HashMap<u32, (i64, u32)>,
 }
 
 impl Index {
@@ -237,6 +246,8 @@ impl Index {
         let mut dates = Vec::new();
         let mut page_counts = Vec::new();
         let mut new_docs = RoaringBitmap::new();
+        let mut series_docs = RoaringBitmap::new();
+        let mut doc_series = HashMap::new();
 
         for record in records {
             let doc = u32::try_from(ids.len()).map_err(|_| BuildError::TooManyArchives)?;
@@ -248,6 +259,10 @@ impl Index {
             page_counts.push(record.page_count);
             if record.is_new {
                 new_docs.insert(doc);
+            }
+            if let Some(series) = record.series {
+                series_docs.insert(doc);
+                doc_series.insert(doc, series);
             }
             title_keys.push(natural::natural_key(&record.title));
             title_start.push(titles.len());
@@ -305,6 +320,8 @@ impl Index {
             page_counts,
             new_docs,
             untagged_docs,
+            series_docs,
+            doc_series,
         })
     }
 
@@ -327,7 +344,10 @@ impl Index {
             }
         };
 
-        let matches = self.evaluate(query);
+        let mut matches = self.evaluate(query);
+        if query.collapse_series {
+            self.collapse_series(&mut matches);
+        }
         // Fetch one extra match to learn whether another page exists.
         let mut page = self.page(
             &matches,
@@ -400,6 +420,26 @@ impl Index {
                 count: self.tag_docs[tag].len(),
             })
             .collect()
+    }
+
+    /// 每个系列只留结果里卷号最小的一卷，同卷号按标题顺序。只遍历结果里属于系列的归档，
+    /// 书库里没有系列时没有额外开销。
+    fn collapse_series(&self, matches: &mut RoaringBitmap) {
+        let members = &*matches & &self.series_docs;
+        if members.is_empty() {
+            return;
+        }
+        let mut first: HashMap<i64, (u32, u32, u32)> = HashMap::new();
+        for doc in &members {
+            let (series, volume) = self.doc_series[&doc];
+            let candidate = (volume, self.by_title.rank[doc as usize], doc);
+            first
+                .entry(series)
+                .and_modify(|best| *best = (*best).min(candidate))
+                .or_insert(candidate);
+        }
+        *matches -= &members;
+        matches.extend(first.into_values().map(|(_, _, doc)| doc));
     }
 
     /// 逐本累加结果里每本归档的标签。除了清零一张按标签数分配的计数表，

@@ -118,9 +118,17 @@
 		if (page >= 0 && page < pages.length && page !== current) record(page);
 	}
 
+	// 翻过最后一页时提示下一卷。阅读器的状态在打开时读一次，换书要整页重新加载。
+	const nextVolume = book.series?.next ?? null;
+	let finishedVolume = $state(false);
+
 	function step(delta: number) {
 		const target = spreads[spreadIndex + delta];
 		if (target) go(target[0]);
+		// 双页时最后一屏只记它的第一页，翻过最后一屏才算读完，补记最后一页，
+		// “读完”筛选和系列页的续读才认。
+		if (!target && delta > 0 && pages.length > 0) go(pages.length - 1);
+		finishedVolume = !target && delta > 0 && nextVolume !== null;
 	}
 
 	function src(index: number, cssWidth: number) {
@@ -448,6 +456,12 @@
 			{:else}
 				<div class="actions">
 					<a href="/a/{book.id}">详情和相关作品</a>
+					{#if book.series}
+						<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>
+					{/if}
+					{#if nextVolume !== null}
+						<a href="/a/{nextVolume}/read" data-sveltekit-reload>下一卷</a>
+					{/if}
 					<a href={downloadUrl(book.id)} download>下载</a>
 				</div>
 				<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
@@ -470,6 +484,19 @@
 
 	{#if progressError}
 		<p class="toast">进度没有保存：{progressError}</p>
+	{/if}
+
+	<!-- 滚动模式没有“再翻一页”，滚到最后一页就提示。 -->
+	{#if nextVolume !== null && (finishedVolume || (mode === 'scroll' && current === pages.length - 1))}
+		<p class="next-volume" role="status">
+			这一卷读完了
+			<a href="/a/{nextVolume}/read" data-sveltekit-reload>下一卷</a>
+			{#if finishedVolume}
+				<button class="bar-button" onclick={() => (finishedVolume = false)} aria-label="关闭">
+					<Icon name="close" />
+				</button>
+			{/if}
+		</p>
 	{/if}
 </div>
 
@@ -753,6 +780,31 @@
 		line-height: 1.7;
 		white-space: pre-wrap;
 		color: #ccc;
+	}
+
+	.next-volume {
+		position: absolute;
+		left: 50%;
+		bottom: 5.5rem;
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		transform: translateX(-50%);
+		margin: 0;
+		padding: 0.3rem 0.3rem 0.3rem 0.9rem;
+		border: 1px solid #43464e;
+		border-radius: 8px;
+		background: #2b2c31;
+		font-size: 0.9rem;
+		white-space: nowrap;
+	}
+
+	.next-volume a {
+		padding: 0.3rem 0.8rem;
+		border-radius: 6px;
+		background: #3b97ea;
+		color: white;
+		text-decoration: none;
 	}
 
 	.toast {

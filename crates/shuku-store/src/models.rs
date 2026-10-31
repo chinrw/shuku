@@ -100,6 +100,18 @@ pub struct Library {
     pub progress: HashMap<i64, Progress>,
     /// 按置顶在前、再按名字排序。
     pub categories: Vec<Category>,
+    /// 至少有两卷的系列，按 ID 升序。
+    pub series: Vec<Series>,
+}
+
+/// 一部按卷出版的作品。只有一卷的系列不当作系列显示：扫描按文件名归组，
+/// 单独一本名字里带 “Vol.2” 的同人志不该显示成系列。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Series {
+    pub id: i64,
+    pub name: String,
+    /// 各卷的归档 ID，按卷号、再按 ID 排列。
+    pub volumes: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +139,7 @@ impl Library {
                 .collect(),
             page_count: archive.page_count,
             is_new: archive.is_new,
+            series: archive.series,
         })
     }
 }
@@ -151,6 +164,8 @@ pub struct LibraryArchive {
     pub source_url: Option<String>,
     /// [`Library::tags`] 的下标，升序，也就是按小写完整名排序，与 [`Archive::tags`] 一致。
     pub tags: Vec<u32>,
+    /// 所属系列的 ID 和卷号，只有一卷的系列不算。
+    pub series: Option<(i64, u32)>,
 }
 
 /// 见 [`crate::Reader::stats`]。

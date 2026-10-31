@@ -202,6 +202,17 @@ impl App {
                         }
                         None => new_metadata(&prepared)?,
                     };
+                    // 新书按路径认卷，名字只有卷号的换成带系列名的标题。文件名解析仍用原来的名字。
+                    let file_title = file_title(&prepared)?;
+                    let detected = crate::series::detect(&prepared.path, &file_title);
+                    let (volume, moved_volume) = match id {
+                        None => (detected, None),
+                        Some(_) if moved_id.is_some() => (None, detected),
+                        Some(_) => (None, None),
+                    };
+                    if let Some(title) = volume.as_ref().and_then(|volume| volume.title.clone()) {
+                        metadata.title = title;
+                    }
                     metadata.path = prepared.path;
                     metadata.file_size = prepared.file_size;
                     metadata.mtime = prepared.mtime;
@@ -210,6 +221,12 @@ impl App {
                     metadata.content_hash = None;
                     let path = metadata.path.clone();
                     let saved = writer.save_archive(id, &metadata, &prepared.pages)?;
+                    if let Some(volume) = volume {
+                        writer.set_series(saved, &volume.key, &volume.series, volume.volume)?;
+                    } else if let Some(volume) = moved_volume {
+                        // 整个系列的文件夹搬走后，归组依据跟着换到新位置，之后加进来的卷才归得进去。
+                        writer.move_series(saved, &volume.key)?;
+                    }
                     // 迁移工具先于扫描运行时，LRR 的元数据按路径暂存着，在同一个事务里套用。
                     // 只有真正新加入、不是从 LRR 迁移来的书才跑元数据功能，和 LRR 只对新上传的书
                     // 自动运行插件一样；迁移来的元数据已经是 LRR 里跑过插件的结果。
@@ -217,10 +234,10 @@ impl App {
                         && !writer.apply_lrr_pending(saved, &path)?
                         && moved_id.is_none()
                     {
-                        // 新书的标题就是去掉扩展名的文件名（文件夹是整个文件夹名），
+                        // 新书的初始标题就是去掉扩展名的文件名（文件夹是整个文件夹名），
                         // 文件名解析用它，和 LRR 用文件名一样。
                         if let Some(edit) =
-                            plugins.edit_for_new(&path, &metadata.title, prepared.comicinfo)
+                            plugins.edit_for_new(&path, &file_title, prepared.comicinfo)
                         {
                             edit.apply(writer, saved)?;
                         }
@@ -369,7 +386,8 @@ fn issue(content: &Path, path: &Path, error: &dyn std::fmt::Display) -> crate::a
     }
 }
 
-fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
+/// 新书的初始标题：去掉扩展名的文件名，文件夹是整个文件夹名。
+fn file_title(prepared: &Prepared) -> Result<String> {
     let path = Path::new(&prepared.path);
     // 文件夹名里的点不是扩展名，例如“Vol.1”。
     let title = if prepared.folder {
@@ -377,12 +395,16 @@ fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
     } else {
         path.file_stem()
     };
+    Ok(title
+        .ok_or_else(|| Error::File(prepared.path.clone()))?
+        .to_string_lossy()
+        .into_owned())
+}
+
+fn new_metadata(prepared: &Prepared) -> Result<ArchiveMetadata> {
     Ok(ArchiveMetadata {
         path: prepared.path.clone(),
-        title: title
-            .ok_or_else(|| Error::File(prepared.path.clone()))?
-            .to_string_lossy()
-            .into_owned(),
+        title: file_title(prepared)?,
         summary: String::new(),
         file_size: prepared.file_size,
         mtime: prepared.mtime,

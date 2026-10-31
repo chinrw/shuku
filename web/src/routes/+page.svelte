@@ -85,14 +85,42 @@
 	// 服务端改完标签约 10 秒后才重建快照，那时再取一次列表，筛选结果才对得上。
 	const SNAPSHOT_DELAY = 11_000;
 	let reloadTimer: ReturnType<typeof setTimeout> | undefined;
-	onDestroy(() => clearTimeout(reloadTimer));
+	onDestroy(() => {
+		clearTimeout(reloadTimer);
+		prefs.ungroupForBatch = false;
+	});
+
+	// 系列合并着时先等展开后的列表回来再进入批量模式，否则卡片和总数都还是合并的。
+	let startingBatch = $state(false);
+	async function startBatch() {
+		if (startingBatch) return;
+		if (data.group) {
+			startingBatch = true;
+			prefs.ungroupForBatch = true;
+			try {
+				await invalidateAll();
+			} finally {
+				startingBatch = false;
+			}
+			if (data.group) {
+				prefs.ungroupForBatch = false;
+				return;
+			}
+		}
+		selecting = true;
+	}
 
 	function endBatch(message: string | null, tags = false) {
 		selecting = false;
 		selected.clear();
 		selectAll = false;
 		batchMessage = message;
-		if (!message) return;
+		const regroup = prefs.ungroupForBatch;
+		prefs.ungroupForBatch = false;
+		if (!message) {
+			if (regroup) invalidateAll();
+			return;
+		}
 		invalidateAll();
 		// 只改了分类时不动已经排着的刷新，它可能是上一批改标签留下的。
 		if (tags) {
@@ -213,6 +241,15 @@
 			: { namespace: tag.slice(0, colon), value: tag.slice(colon + 1) };
 	}
 
+	// 合并显示时，系列只占一张卡，点开是系列页。
+	const seriesOf = (item: ArchiveItem) => (data.group ? item.series : null);
+
+	function toggleSeries() {
+		prefs.groupSeries = !prefs.groupSeries;
+		prefs.save();
+		invalidateAll();
+	}
+
 	function toggleView() {
 		prefs.view = prefs.view === 'grid' ? 'list' : 'grid';
 		prefs.save();
@@ -229,6 +266,7 @@
 				order: data.order,
 				category: data.category,
 				filter: data.filter,
+				group: data.group,
 				after: next
 			});
 			items = [...items, ...result.items];
@@ -372,7 +410,8 @@
 		<button
 			class="icon-button"
 			class:on={selecting}
-			onclick={() => (selecting ? endBatch(null) : (selecting = true))}
+			onclick={() => (selecting ? endBatch(null) : startBatch())}
+			disabled={startingBatch}
 			aria-pressed={selecting}
 			aria-label="批量操作"
 			title="批量操作"
@@ -398,6 +437,12 @@
 	<p class="status">
 		共 {data.result.total} 本{#if currentFilter}，{currentFilter}{/if}{#if currentCategory}，分类“{currentCategory.name}”{/if}{#if data.q}，搜索“{data.q}”{/if}
 		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
+		<!-- 批量操作时始终展开各卷，不能切回合并。 -->
+		{#if !selecting && items.some((item) => item.series)}
+			· <button class="link" onclick={toggleSeries}
+				>{data.group ? '系列已合并，展开各卷' : '按系列合并'}</button
+			>
+		{/if}
 	</p>
 {/if}
 {#if randomError}
@@ -434,13 +479,18 @@
 {#if prefs.view === 'grid'}
 	<main class="grid" onclickcapture={pickCard}>
 		{#each items as item (item.id)}
+			{@const series = seriesOf(item)}
 			<div class="card" data-id={item.id} class:picked={selecting && (selectAll || selected.has(item.id))}>
-				<a class="title" href="/a/{item.id}/read" title={item.title}>{item.title}</a>
-				<a class="cover" href="/a/{item.id}/read">
+				{#if series}
+					<a class="title" href="/s/{series.id}" title={series.name}>{series.name}</a>
+				{:else}
+					<a class="title" href="/a/{item.id}/read" title={item.title}>{item.title}</a>
+				{/if}
+				<a class="cover" class:stack={series} href={series ? `/s/${series.id}` : `/a/${item.id}/read`}>
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
-					<span class="badge pages">{item.page_count}P</span>
-					{#if item.progress && item.page_count > 0}
+					<span class="badge pages">{series ? `${series.volumes} 卷` : `${item.page_count}P`}</span>
+					{#if !series && item.progress && item.page_count > 0}
 						<div
 							class="progress"
 							style:width="{((item.progress.page + 1) / item.page_count) * 100}%"
@@ -465,15 +515,21 @@
 {:else}
 	<main class="list" onclickcapture={pickCard}>
 		{#each items as item (item.id)}
+			{@const series = seriesOf(item)}
+			{@const href = series ? `/s/${series.id}` : `/a/${item.id}/read`}
 			<article class="row" data-id={item.id} class:picked={selecting && (selectAll || selected.has(item.id))}>
-				<a class="thumb" href="/a/{item.id}/read">
+				<a class="thumb" {href}>
 					<img src={item.cover_url} alt="" loading="lazy" />
 				</a>
 				<div class="body">
-					<a class="title" href="/a/{item.id}/read">{item.title}</a>
+					<a class="title" {href}>{series?.name ?? item.title}</a>
 					<div class="meta">
-						{item.page_count} 页
-						{#if progressText(item)}· <span class:fresh={item.is_new && !item.progress}>{progressText(item)}</span>{/if}
+						{#if series}
+							共 {series.volumes} 卷
+						{:else}
+							{item.page_count} 页
+							{#if progressText(item)}· <span class:fresh={item.is_new && !item.progress}>{progressText(item)}</span>{/if}
+						{/if}
 					</div>
 					<!-- 列表里每本都显示加入日期和来源太占地方，这两行只放在弹窗和详情页里。 -->
 					<TagTable
@@ -700,6 +756,15 @@
 		color: var(--muted);
 	}
 
+	.status .link {
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--link);
+		font: inherit;
+		cursor: pointer;
+	}
+
 	.grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
@@ -771,6 +836,21 @@
 		height: 100%;
 		object-fit: cover;
 		object-position: center top;
+	}
+
+	/* 系列卡的封面后面错开两层，看起来是一叠书。 */
+	.cover.stack {
+		overflow: visible;
+		margin: 6px 6px 0 0;
+		box-shadow:
+			3px -3px 0 0 var(--surface),
+			3px -3px 0 1px var(--border),
+			6px -6px 0 0 var(--surface),
+			6px -6px 0 1px var(--border);
+	}
+
+	.cover.stack img {
+		border-radius: 6px;
 	}
 
 	.badge {

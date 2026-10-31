@@ -29,9 +29,12 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
   "tags": [
     { "namespace": "", "values": ["独立标签"] },
     { "namespace": "artist", "values": ["某某"] }
-  ]
+  ],
+  "series": { "id": 3, "name": "作品名", "volume": 1, "volumes": 12 }
 }
 ```
+
+`series` 是这本书所属的系列（按卷出版的作品）、它的卷号和这个系列一共几卷，不属于系列时为 `null`。只有一卷的系列不算系列，这时也是 `null`。系列由扫描按路径认出，规则见 [docs/server.md](server.md#系列和卷)。
 
 列表项带上全部标签和加入时间、来源，网页端在列表和标签弹窗里直接显示，不用逐本请求详情。LRR 把加入时间和来源存成 `date_added`、`source` 标签，Shuku 存在归档表的列里，显示时由网页端还原成这两行。`tags` 的格式与归档详情相同。
 
@@ -39,7 +42,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 ## 搜索
 
-`GET /api/search?q=&category=&filter=&sort=&order=&after=&limit=`
+`GET /api/search?q=&category=&filter=&sort=&order=&after=&limit=&group=`
 
 - `q`：LRR 风格的搜索语句，语法见 `docs/plan/m1-backend.md` 的 T3。为空时返回全部。和 LRR 一样支持 `pages:` 和 `read:` 数值条件：后面跟 `>`、`<`、`>=`、`<=`、`=` 或不带运算符的非负整数，例如 `pages:>20`、`read:0`，前面加 `-` 表示排除。`read:` 比较的是读到的页码，从 1 开始，没读过是 0，所以 `read:0` 是没读过的书。
 - `category`：分类 ID（见下面的分类接口），只返回这个分类里的归档，和 `q` 同时生效。静态分类按成员筛选；动态分类按它的搜索语句筛选，语句 Shuku 还不能解析时这个分类为空。分类不存在时返回 400。
@@ -48,6 +51,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 - `order`：`asc` 或 `desc`。不给时加入时间是新的在前，其余从小到大。
 - `after`：上一页响应里的 `next_after`，第一页不传。
 - `limit`：默认 50，上限 200。
+- `group`：`series` 时同一系列在结果里只留卷号最小的一卷，`total` 也按留下的算，书库页据此给每个系列只显示一张卡。搜到系列里的某几卷时留下的是其中卷号最小的那一卷。不给时每卷单独列出。其他值返回 400。
 
 响应：
 
@@ -129,6 +133,18 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 ```
 
 `categories` 是这本书所在的静态分类的 ID，按 ID 升序；动态分类不列出。
+
+属于系列的书另有 `"series": {"id": 3, "name": "作品名", "previous": 41, "next": 43}`，`previous` 和 `next` 是按卷号排的前一卷和后一卷，没有时为 `null`；不属于系列时 `series` 为 `null`。详情直接读数据库，扫描刚认出的系列在这里立即可见，列表项里的 `series` 要等快照刷新。
+
+## 系列
+
+`GET /api/series/{id}`
+
+```json
+{ "id": 3, "name": "作品名", "items": [ArchiveItem] }
+```
+
+`items` 是各卷，按卷号排列，同卷号按归档 ID。系列不存在或只有一卷时返回 404。
 
 `tags` 按命名空间分组，组按命名空间名排序，没有命名空间的标签放在 `namespace` 为空字符串的组里。
 

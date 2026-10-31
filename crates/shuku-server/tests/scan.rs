@@ -365,7 +365,7 @@ async fn folders_of_loose_images_are_read_as_books() {
     let fixture = Fixture::new();
     let png = fixture.archive("zipped.cbz", 30, 40);
     let content = &fixture.config.content_dir;
-    let book = content.join("series/Vol.1");
+    let book = content.join("books/Mr.Smith");
     std::fs::create_dir_all(&book).unwrap();
     std::fs::write(book.join("10.png"), &png).unwrap();
     std::fs::write(book.join("2.png"), &png).unwrap();
@@ -377,10 +377,10 @@ async fn folders_of_loose_images_are_read_as_books() {
     assert_eq!((report.added, report.skipped, report.failed), (2, 2, 0));
 
     let store = Store::open(fixture.database()).unwrap();
-    let id = store.find_by_path("series/Vol.1").unwrap().unwrap();
+    let id = store.find_by_path("books/Mr.Smith").unwrap().unwrap();
     let (archive, pages) = store.archive_with_pages(id).unwrap().unwrap();
     // 文件夹名里的点不是扩展名。
-    assert_eq!(archive.metadata.title, "Vol.1");
+    assert_eq!(archive.metadata.title, "Mr.Smith");
     let names: Vec<_> = pages.iter().map(|page| page.entry_name.as_str()).collect();
     assert_eq!(names, ["2.png", "10.png"]);
     assert_eq!((pages[0].width, pages[0].height), (30, 40));
@@ -420,13 +420,13 @@ async fn folders_of_loose_images_are_read_as_books() {
     dir.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(10))
         .unwrap();
     assert_eq!(app.scan().await.unwrap().updated, 1);
-    std::fs::rename(&book, content.join("series/Vol.01")).unwrap();
+    std::fs::rename(&book, content.join("books/Mr. Smith")).unwrap();
     assert_eq!(app.scan().await.unwrap().moved, 1);
-    assert_eq!(store.find_by_path("series/Vol.01").unwrap(), Some(id));
+    assert_eq!(store.find_by_path("books/Mr. Smith").unwrap(), Some(id));
 
     // 图片都删了，只剩空目录：算失踪，不再当书。
     for name in ["2.png", "20.png", "11.png"] {
-        std::fs::remove_file(content.join("series/Vol.01").join(name)).unwrap();
+        std::fs::remove_file(content.join("books/Mr. Smith").join(name)).unwrap();
     }
     app.scan().await.unwrap();
     let issues = common::json(&router, "/api/admin/issues").await;

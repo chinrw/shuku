@@ -16,6 +16,23 @@ export interface ArchiveItem {
 	date_added: number;
 	source_url: string | null;
 	tags: TagGroup[];
+	/** 所属系列，只有一卷的系列不算。 */
+	series: SeriesRef | null;
+}
+
+export interface SeriesRef {
+	id: number;
+	name: string;
+	volume: number;
+	/** 系列一共几卷。 */
+	volumes: number;
+}
+
+/** 系列页：各卷按卷号排列。 */
+export interface Series {
+	id: number;
+	name: string;
+	items: ArchiveItem[];
 }
 
 export interface SearchResult {
@@ -30,7 +47,9 @@ export interface TagGroup {
 	values: string[];
 }
 
-export interface ArchiveDetail extends ArchiveItem {
+export interface ArchiveDetail extends Omit<ArchiveItem, 'series'> {
+	/** 所属系列和前后两卷的 ID，阅读器读完一卷时接着打开下一卷。 */
+	series: { id: number; name: string; previous: number | null; next: number | null } | null;
 	summary: string;
 	file_size: number;
 	/** 相对内容目录的路径。 */
@@ -106,6 +125,8 @@ export function search(
 		filter?: Filter | null;
 		after?: number;
 		limit?: number;
+		/** 同一系列只返回一卷，书库页每个系列一张卡。 */
+		group?: 'series' | null;
 	}
 ): Promise<SearchResult> {
 	const query = new URLSearchParams({ q: params.q, sort: params.sort });
@@ -114,7 +135,12 @@ export function search(
 	if (params.filter != null) query.set('filter', params.filter);
 	if (params.after !== undefined) query.set('after', String(params.after));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
+	if (params.group != null) query.set('group', params.group);
 	return request(fetch, `/api/search?${query}`);
+}
+
+export function series(fetch: Fetch, id: number): Promise<Series> {
+	return request(fetch, `/api/series/${id}`);
 }
 
 /** 书库页的分类按钮，置顶的在前。 */

@@ -293,6 +293,7 @@ fn generate() -> (Vec<ArchiveRecord>, usize) {
                 tags,
                 page_count: rng.random_range(8..400),
                 is_new: rng.random_bool(0.3),
+                series: None,
             }
         })
         .collect();
