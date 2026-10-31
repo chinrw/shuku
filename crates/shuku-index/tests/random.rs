@@ -28,6 +28,8 @@ const TAG_VALUES: &[&str] = &[
     "full color",
     "ab",
     "ab2",
+    // 字节序在 ab2 前面、自然序在后面，按命名空间排序要取自然序最小的值。
+    "ab10",
 ];
 /// 标题由这些片段拼成，相邻的数字片段会连成更长的数字。
 const TITLE_PARTS: &[&str] = &[
@@ -98,7 +100,8 @@ fn check_cursor_before_match(
     query: &Query,
     expected: &[ArchiveId],
 ) {
-    let (order, rank) = naive.order(query.sort);
+    let (order, rank) = naive.order(&query.sort, query.reverse);
+    let (order, rank) = (&order, &rank);
     let Some(&target) = expected.get(rng.random_range(0..expected.len().max(1))) else {
         return;
     };
@@ -168,11 +171,17 @@ fn random_query(rng: &mut StdRng, tags: &[String], naive: &Naive) -> Query {
         exclude: (0..exclude)
             .map(|_| random_term(rng, tags, naive, 2))
             .collect(),
-        sort: if rng.random_bool(0.5) {
-            Sort::Title
-        } else {
-            Sort::DateAddedNewest
+        sort: match rng.random_range(0..5) {
+            0 => Sort::Title,
+            1 => Sort::DateAddedNewest,
+            2 => Sort::Pages,
+            3 => Sort::Namespace("missing".into()),
+            _ => {
+                let namespace = NAMESPACES[rng.random_range(..NAMESPACES.len())];
+                Sort::Namespace(random_case(rng, namespace))
+            }
         },
+        reverse: rng.random_bool(0.3),
         after: None,
         // 页面大多很小，匹配不多的结果也要翻好几页。
         limit: if rng.random_bool(0.8) {
@@ -275,21 +284,11 @@ struct NaiveRecord {
 /// 逐本检查每个条件，排序直接比较标题，不使用位图和预先算好的排列。
 struct Naive {
     records: Vec<NaiveRecord>,
-    by_title: Vec<ArchiveId>,
-    by_date: Vec<ArchiveId>,
-    title_rank: HashMap<ArchiveId, usize>,
-    date_rank: HashMap<ArchiveId, usize>,
+    dates: HashMap<ArchiveId, i64>,
 }
 
 impl Naive {
     fn new(records: &[ArchiveRecord]) -> Self {
-        let mut by_title: Vec<&ArchiveRecord> = records.iter().collect();
-        by_title.sort_by(|a, b| natural_cmp(&a.title, &b.title).then(a.id.cmp(&b.id)));
-        let mut by_date: Vec<&ArchiveRecord> = records.iter().collect();
-        by_date.sort_by_key(|r| Reverse((r.date_added, r.id)));
-        let ids = |order: Vec<&ArchiveRecord>| order.iter().map(|r| r.id).collect::<Vec<_>>();
-        let rank = |order: &[ArchiveId]| order.iter().enumerate().map(|(i, &id)| (id, i)).collect();
-        let (by_title, by_date) = (ids(by_title), ids(by_date));
         Self {
             records: records
                 .iter()
@@ -301,19 +300,50 @@ impl Naive {
                     is_new: r.is_new,
                 })
                 .collect(),
-            title_rank: rank(&by_title),
-            date_rank: rank(&by_date),
-            by_title,
-            by_date,
+            dates: records.iter().map(|r| (r.id, r.date_added)).collect(),
         }
     }
 
-    /// 返回全部归档的排列，以及每本在排列里的位置。
-    fn order(&self, sort: Sort) -> (&[ArchiveId], &HashMap<ArchiveId, usize>) {
+    /// 返回全部归档的排列，以及每本在排列里的位置。每次现算。
+    fn order(&self, sort: &Sort, reverse: bool) -> (Vec<ArchiveId>, HashMap<ArchiveId, usize>) {
+        let mut by_title: Vec<&NaiveRecord> = self.records.iter().collect();
+        by_title.sort_by(|a, b| natural_cmp(&a.title, &b.title).then(a.id.cmp(&b.id)));
+        let title_rank: HashMap<ArchiveId, usize> = by_title
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.id, i))
+            .collect();
+        let mut order = by_title;
         match sort {
-            Sort::Title => (&self.by_title, &self.title_rank),
-            Sort::DateAddedNewest => (&self.by_date, &self.date_rank),
+            Sort::Title => {}
+            Sort::DateAddedNewest => order.sort_by_key(|r| Reverse((self.dates[&r.id], r.id))),
+            Sort::Pages => order.sort_by_key(|r| (r.page_count, title_rank[&r.id])),
+            Sort::Namespace(namespace) => {
+                let prefix = format!("{}:", normalize(namespace));
+                let value = |r: &NaiveRecord| {
+                    r.tags
+                        .iter()
+                        .filter(|tag| tag.starts_with(&prefix))
+                        .map(|tag| tag[prefix.len()..].to_string())
+                        .min_by(|a, b| natural_cmp(a, b))
+                };
+                order.sort_by(|a, b| {
+                    match (value(a), value(b)) {
+                        (Some(x), Some(y)) => natural_cmp(&x, &y),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => Ordering::Equal,
+                    }
+                    .then(title_rank[&a.id].cmp(&title_rank[&b.id]))
+                });
+            }
         }
+        let mut ids: Vec<ArchiveId> = order.iter().map(|r| r.id).collect();
+        if reverse {
+            ids.reverse();
+        }
+        let rank = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        (ids, rank)
     }
 
     fn matching(&self, query: &Query) -> impl Iterator<Item = &NaiveRecord> {
@@ -326,10 +356,9 @@ impl Naive {
     /// 返回全部匹配，按查询的排序方式排列。
     fn search(&self, query: &Query) -> Vec<ArchiveId> {
         let matched: BTreeSet<ArchiveId> = self.matching(query).map(|r| r.id).collect();
-        self.order(query.sort)
+        self.order(&query.sort, query.reverse)
             .0
-            .iter()
-            .copied()
+            .into_iter()
             .filter(|id| matched.contains(id))
             .collect()
     }

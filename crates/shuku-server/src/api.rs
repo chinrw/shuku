@@ -41,6 +41,7 @@ impl App {
             .route("/api/facets", get(facets))
             .route("/api/tags", get(suggest_tags))
             .route("/api/recent", get(recent))
+            .route("/api/random", get(random))
             .route("/api/archives/{id}", get(detail))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
@@ -111,6 +112,7 @@ struct SearchParams {
     #[serde(default)]
     filter: String,
     sort: Option<String>,
+    order: Option<String>,
     after: Option<i64>,
     limit: Option<usize>,
 }
@@ -124,16 +126,13 @@ async fn search(
     if !(1..=200).contains(&limit) {
         return Err(Error::bad_request("limit 必须在 1 到 200 之间"));
     }
-    let sort = match params.sort.as_deref() {
-        None | Some("title") => Sort::Title,
-        Some("date") => Sort::DateAddedNewest,
-        _ => return Err(Error::bad_request("sort 必须是 title 或 date")),
-    };
+    let (sort, reverse) = parse_sort(params.sort.as_deref(), params.order.as_deref())?;
     let filters = parse_filters(&params.filter)?;
     app.blocking(move |app| {
         let snapshot = app.snapshot();
         let (mut query, degraded) = build_query(&snapshot, &params.q, params.category, &filters)?;
         query.sort = sort;
+        query.reverse = reverse;
         query.after = params.after;
         query.limit = limit;
         let result = snapshot.index.search(&query).map_err(Error::bad_request)?;
@@ -141,6 +140,64 @@ async fn search(
         let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&item)).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": degraded, "items": items})))
     }).await
+}
+
+/// `sort` 是 `title`、`date`、`pages` 或 `ns:<命名空间>`；`order` 是 `asc` 或 `desc`，
+/// 不给时按各自的默认方向：加入时间默认新的在前，其余默认从小到大。
+fn parse_sort(sort: Option<&str>, order: Option<&str>) -> Result<(Sort, bool)> {
+    let sort = match sort {
+        None | Some("title") => Sort::Title,
+        Some("date") => Sort::DateAddedNewest,
+        Some("pages") => Sort::Pages,
+        Some(other) => match other.strip_prefix("ns:") {
+            Some(namespace) if !namespace.trim().is_empty() => {
+                Sort::Namespace(namespace.trim().to_owned())
+            }
+            _ => {
+                return Err(Error::bad_request(
+                    "sort 必须是 title、date、pages 或 ns:<命名空间>",
+                ));
+            }
+        },
+    };
+    let descending_by_default = sort == Sort::DateAddedNewest;
+    let reverse = match order {
+        None => false,
+        Some("asc") => descending_by_default,
+        Some("desc") => !descending_by_default,
+        Some(_) => return Err(Error::bad_request("order 必须是 asc 或 desc")),
+    };
+    Ok((sort, reverse))
+}
+
+#[derive(Default, Deserialize)]
+struct RandomParams {
+    #[serde(default)]
+    q: String,
+    category: Option<i64>,
+    #[serde(default)]
+    filter: String,
+}
+
+/// 搜索结果里随机的一本，没有结果时返回 404。
+async fn random(
+    State(app): State<App>,
+    params: std::result::Result<Query<RandomParams>, QueryRejection>,
+) -> Result<Json<Value>> {
+    let Query(params) = params.map_err(Error::bad_request)?;
+    let filters = parse_filters(&params.filter)?;
+    // 不为一个随机数引入 rand：标准库每个 RandomState 的种子都不同。
+    let seed = std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), 0);
+    app.blocking(move |app| {
+        let snapshot = app.snapshot();
+        let (query, _) = build_query(&snapshot, &params.q, params.category, &filters)?;
+        let id = snapshot
+            .index
+            .random(&query, seed)
+            .ok_or_else(Error::not_found)?;
+        Ok(Json(json!({ "id": id })))
+    })
+    .await
 }
 
 #[derive(Default, Deserialize)]

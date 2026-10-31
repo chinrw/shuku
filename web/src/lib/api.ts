@@ -45,7 +45,9 @@ export interface PageInfo {
 	thumbnail_url: string;
 }
 
-export type Sort = 'title' | 'date';
+/** `ns:artist` 这类是按命名空间下的标签值排序。 */
+export type Sort = 'title' | 'date' | 'pages' | `ns:${string}`;
+export type Order = 'asc' | 'desc';
 
 /** 书库页的快捷筛选，见 docs/api.md 的搜索接口。 */
 export type Filter = 'new' | 'unread' | 'reading' | 'finished' | 'untagged';
@@ -95,6 +97,7 @@ export function search(
 	params: {
 		q: string;
 		sort: Sort;
+		order?: Order | null;
 		category?: number | null;
 		filter?: Filter | null;
 		after?: number;
@@ -102,6 +105,7 @@ export function search(
 	}
 ): Promise<SearchResult> {
 	const query = new URLSearchParams({ q: params.q, sort: params.sort });
+	if (params.order != null) query.set('order', params.order);
 	if (params.category != null) query.set('category', String(params.category));
 	if (params.filter != null) query.set('filter', params.filter);
 	if (params.after !== undefined) query.set('after', String(params.after));
@@ -128,6 +132,23 @@ export async function setCategoryMember(category: number, archive: number, membe
 	await send(fetch, `/api/categories/${category}/archives/${archive}`, {
 		method: member ? 'PUT' : 'DELETE'
 	});
+}
+
+/** 搜索结果里随机的一本，没有结果时返回 `null`。 */
+export async function random(params: {
+	q: string;
+	category: number | null;
+	filter: Filter | null;
+}): Promise<number | null> {
+	const query = new URLSearchParams({ q: params.q });
+	if (params.category !== null) query.set('category', String(params.category));
+	if (params.filter !== null) query.set('filter', params.filter);
+	try {
+		return (await request<{ id: number }>(fetch, `/api/random?${query}`)).id;
+	} catch (error) {
+		if (error instanceof ApiError && error.status === 404) return null;
+		throw error;
+	}
 }
 
 /** 最近读过的归档，按翻页时间从新到旧。 */

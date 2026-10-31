@@ -1,4 +1,4 @@
-import type { Filter, Sort } from './api';
+import type { Filter, Order, Sort } from './api';
 
 /** 快捷筛选的按钮文字，也是它们在书库页上的顺序。 */
 export const FILTERS: [Filter, string][] = [
@@ -9,16 +9,33 @@ export const FILTERS: [Filter, string][] = [
 	['untagged', '未打标签']
 ];
 
-/** 书库页的地址。默认值（空搜索、按标题、不限分类、不筛选）不写进地址栏。 */
+/** 排序下拉框的选项。命名空间排序只列常用的几个，接口接受任意命名空间。 */
+export const SORTS: [Sort, string][] = [
+	['title', '标题'],
+	['date', '加入时间'],
+	['pages', '页数'],
+	['ns:artist', '作者'],
+	['ns:group', '社团'],
+	['ns:parody', '原作']
+];
+
+/** 不指定方向时的方向：加入时间新的在前，其余从小到大。 */
+export function defaultOrder(sort: Sort): Order {
+	return sort === 'date' ? 'desc' : 'asc';
+}
+
+/** 书库页的地址。默认值（空搜索、按标题、默认方向、不限分类、不筛选）不写进地址栏。 */
 export function libraryHref(params: {
 	q: string;
 	sort: Sort;
+	order?: Order | null;
 	category: number | null;
 	filter?: Filter | null;
 }): string {
 	const query = new URLSearchParams();
 	if (params.q) query.set('q', params.q);
 	if (params.sort !== 'title') query.set('sort', params.sort);
+	if (params.order && params.order !== defaultOrder(params.sort)) query.set('o', params.order);
 	if (params.category !== null) query.set('c', String(params.category));
 	if (params.filter) query.set('f', params.filter);
 	return query.size ? `/?${query}` : '/';
@@ -33,4 +50,16 @@ export function parseCategory(raw: string | null): number | null {
 /** 地址里的快捷筛选，不认识的值当作没有。 */
 export function parseFilter(raw: string | null): Filter | null {
 	return FILTERS.find(([filter]) => filter === raw)?.[0] ?? null;
+}
+
+/** 地址里的排序，不认识的值当作按标题。`ns:` 后面是任意命名空间。 */
+export function parseSort(raw: string | null): Sort {
+	if (raw === 'date' || raw === 'pages') return raw;
+	if (raw?.startsWith('ns:') && raw.slice(3).trim()) return raw as Sort;
+	return 'title';
+}
+
+/** 地址里的方向，不是 asc 或 desc 时当作默认方向。 */
+export function parseOrder(raw: string | null): Order | null {
+	return raw === 'asc' || raw === 'desc' ? raw : null;
 }

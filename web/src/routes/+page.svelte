@@ -1,13 +1,21 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { search, suggestTags, type ArchiveItem, type Sort, type TagCount } from '#lib/api.ts';
+	import {
+		random,
+		search,
+		suggestTags,
+		type ArchiveItem,
+		type Order,
+		type Sort,
+		type TagCount
+	} from '#lib/api.ts';
 	import Icon from '#lib/Icon.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { FILTERS, libraryHref } from '#lib/libraryUrl.ts';
+	import { defaultOrder, FILTERS, libraryHref, SORTS } from '#lib/libraryUrl.ts';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
 	import { namespaceClass, tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
@@ -31,8 +39,33 @@
 		}
 	};
 
-	function navigate(q: string, sort: Sort) {
-		goto(libraryHref({ q, sort, category: data.category, filter: data.filter }));
+	// 换排序方式时方向回到它的默认方向。
+	function navigate(q: string, sort: Sort, order: Order | null = sort === data.sort ? data.order : null) {
+		goto(libraryHref({ q, sort, order, category: data.category, filter: data.filter }));
+	}
+
+	let order = $derived(data.order ?? defaultOrder(data.sort));
+
+	function flipOrder() {
+		navigate(data.q, data.sort, order === 'asc' ? 'desc' : 'asc');
+	}
+
+	// 在当前的搜索、分类和筛选里随机打开一本。
+	let picking = $state(false);
+	let randomError = $state<string | null>(null);
+	async function openRandom() {
+		if (picking) return;
+		picking = true;
+		randomError = null;
+		try {
+			const id = await random({ q: data.q, category: data.category, filter: data.filter });
+			if (id === null) randomError = '没有符合条件的书，随机不到';
+			else await goto(`/a/${id}`);
+		} catch (error) {
+			randomError = `随机失败：${error instanceof Error ? error.message : String(error)}`;
+		} finally {
+			picking = false;
+		}
 	}
 
 	function submit(event: SubmitEvent) {
@@ -101,6 +134,7 @@
 		return libraryHref({
 			q: data.q,
 			sort: data.sort,
+			order: data.order,
 			category: data.category === id ? null : id,
 			filter: data.filter
 		});
@@ -111,6 +145,7 @@
 		return libraryHref({
 			q: data.q,
 			sort: data.sort,
+			order: data.order,
 			category: data.category,
 			filter: data.filter === filter ? null : filter
 		});
@@ -140,6 +175,7 @@
 			const result = await search(fetch, {
 				q: data.q,
 				sort: data.sort,
+				order: data.order,
 				category: data.category,
 				filter: data.filter,
 				after: next
@@ -258,9 +294,30 @@
 			onchange={(event) => navigate(data.q, event.currentTarget.value as Sort)}
 			aria-label="排序"
 		>
-			<option value="title">标题</option>
-			<option value="date">最新加入</option>
+			{#each SORTS as [value, label] (value)}
+				<option {value}>{label}</option>
+			{/each}
+			{#if !SORTS.some(([value]) => value === data.sort)}
+				<option value={data.sort}>{data.sort}</option>
+			{/if}
 		</select>
+		<button
+			class="icon-button"
+			onclick={flipOrder}
+			aria-label={order === 'asc' ? '当前从小到大，改成从大到小' : '当前从大到小，改成从小到大'}
+			title={order === 'asc' ? '从小到大' : '从大到小'}
+		>
+			<Icon name={order === 'asc' ? 'arrow-up' : 'arrow-down'} size={18} />
+		</button>
+		<button
+			class="icon-button"
+			onclick={openRandom}
+			disabled={picking}
+			aria-label="随机一本"
+			title="随机一本"
+		>
+			<Icon name="shuffle" size={18} />
+		</button>
 		<button
 			class="icon-button"
 			onclick={toggleView}
@@ -281,6 +338,9 @@
 		共 {data.result.total} 本{#if currentFilter}，{currentFilter}{/if}{#if currentCategory}，分类“{currentCategory.name}”{/if}{#if data.q}，搜索“{data.q}”{/if}
 		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
 	</p>
+{/if}
+{#if randomError}
+	<p class="status error" role="alert">{randomError}</p>
 {/if}
 <nav class="facets" aria-label="筛选">
 	{#each FILTERS as [filter, label] (filter)}

@@ -13,6 +13,7 @@ pub use parser::{ParseError, ParsedQuery, ReadCondition, parse_query};
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use memchr::memmem;
 use roaring::RoaringBitmap;
@@ -93,13 +94,18 @@ pub enum Term {
     Untagged,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Sort {
     /// Natural title order, then archive id.
     #[default]
     Title,
     /// Newest `date_added` first, then the larger archive id first.
     DateAddedNewest,
+    /// 页数从少到多，同页数按标题自然序。
+    Pages,
+    /// 按这个命名空间下的标签值自然序，例如 `artist` 按作者名排。一本有几个值时取自然序
+    /// 最小的那个；没有这个命名空间的归档排在最后。同值按标题自然序。
+    Namespace(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +115,8 @@ pub struct Query {
     /// No term may match.
     pub exclude: Vec<Term>,
     pub sort: Sort,
+    /// 倒过来遍历排序，例如按标题从 Z 到 A、按加入时间从旧到新。
+    pub reverse: bool,
     /// Continue after this archive, taken from [`SearchResult::next_after`].
     pub after: Option<ArchiveId>,
     pub limit: usize,
@@ -120,6 +128,7 @@ impl Default for Query {
             include: Vec::new(),
             exclude: Vec::new(),
             sort: Sort::default(),
+            reverse: false,
             after: None,
             limit: DEFAULT_LIMIT,
         }
@@ -177,6 +186,16 @@ impl SortOrder {
         }
         Self { order, rank }
     }
+
+    /// `reverse` 时从后往前数的名次，分页和游标都按它算。
+    fn rank(&self, doc: u32, reverse: bool) -> usize {
+        let rank = self.rank[doc as usize] as usize;
+        if reverse {
+            self.order.len() - 1 - rank
+        } else {
+            rank
+        }
+    }
 }
 
 pub struct Index {
@@ -198,6 +217,10 @@ pub struct Index {
     title_start: Vec<usize>,
     by_title: SortOrder,
     by_date: SortOrder,
+    by_pages: SortOrder,
+    /// 按命名空间排序的排列第一次用到时才算，30 万本的合成数据上约 60 ms，算好后留到索引被换掉。
+    /// 只缓存索引里有标签的命名空间，个数有限。
+    by_namespace: Mutex<HashMap<String, Arc<SortOrder>>>,
     page_counts: Vec<u32>,
     new_docs: RoaringBitmap,
     untagged_docs: RoaringBitmap,
@@ -260,6 +283,10 @@ impl Index {
             let (a, b) = (a as usize, b as usize);
             dates[b].cmp(&dates[a]).then(ids[b].cmp(&ids[a]))
         });
+        let by_title = SortOrder::new(by_title);
+        let mut by_pages: Vec<u32> = (0..count).collect();
+        by_pages
+            .sort_unstable_by_key(|&doc| (page_counts[doc as usize], by_title.rank[doc as usize]));
 
         Ok(Self {
             ids,
@@ -271,8 +298,10 @@ impl Index {
             doc_tags,
             titles,
             title_start,
-            by_title: SortOrder::new(by_title),
+            by_title,
             by_date: SortOrder::new(by_date),
+            by_pages: SortOrder::new(by_pages),
+            by_namespace: Mutex::new(HashMap::new()),
             page_counts,
             new_docs,
             untagged_docs,
@@ -280,21 +309,33 @@ impl Index {
     }
 
     pub fn search(&self, query: &Query) -> Result<SearchResult, SearchError> {
-        let order = match query.sort {
+        let namespace_order;
+        let order = match &query.sort {
             Sort::Title => &self.by_title,
             Sort::DateAddedNewest => &self.by_date,
+            Sort::Pages => &self.by_pages,
+            Sort::Namespace(namespace) => {
+                namespace_order = self.namespace_order(namespace);
+                namespace_order.as_deref().unwrap_or(&self.by_title)
+            }
         };
         let start = match query.after {
             None => 0,
             Some(id) => {
                 let doc = self.doc_of.get(&id).ok_or(SearchError::UnknownCursor(id))?;
-                order.rank[*doc as usize] as usize + 1
+                order.rank(*doc, query.reverse) + 1
             }
         };
 
         let matches = self.evaluate(query);
         // Fetch one extra match to learn whether another page exists.
-        let mut page = self.page(&matches, order, start, query.limit.saturating_add(1));
+        let mut page = self.page(
+            &matches,
+            order,
+            query.reverse,
+            start,
+            query.limit.saturating_add(1),
+        );
         let next_after = if page.len() > query.limit {
             page.truncate(query.limit);
             page.last().map(|&doc| self.ids[doc as usize])
@@ -486,27 +527,90 @@ impl Index {
         docs
     }
 
+    /// 结果里随机的一本，`seed` 由调用方给出。没有结果时返回 `None`。
+    pub fn random(&self, query: &Query, seed: u64) -> Option<ArchiveId> {
+        let matches = self.evaluate(query);
+        let count = matches.len();
+        if count == 0 {
+            return None;
+        }
+        let doc = matches.select((seed % count) as u32)?;
+        Some(self.ids[doc as usize])
+    }
+
+    /// 按命名空间排序的排列。命名空间在索引里没有标签时返回 `None`，这时每本都没有值，
+    /// 排出来就是标题自然序。
+    fn namespace_order(&self, namespace: &str) -> Option<Arc<SortOrder>> {
+        let prefix = format!("{}:", normalize_tag(namespace));
+        let lo = self
+            .tag_names
+            .partition_point(|name| name.as_str() < prefix.as_str());
+        let hi = lo + self.tag_names[lo..].partition_point(|name| name.starts_with(&prefix));
+        if lo == hi {
+            return None;
+        }
+        let mut cache = self
+            .by_namespace
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(order) = cache.get(&prefix) {
+            return Some(order.clone());
+        }
+        // 标签名按字节序排列，和自然序不同（unit10 在 unit2 前面），所以每本要在这个
+        // 命名空间的几个值里取自然序最小的，不能直接取第一个。每个值的键只算一次。
+        let value_keys: Vec<String> = self.tag_names[lo..hi]
+            .iter()
+            .map(|name| natural::natural_key(&name[prefix.len()..]))
+            .collect();
+        let keys: Vec<Option<&str>> = (0..self.ids.len())
+            .map(|doc| {
+                self.doc_tags[self.doc_tag_start[doc]..self.doc_tag_start[doc + 1]]
+                    .iter()
+                    .map(|&tag| tag as usize)
+                    .filter(|tag| (lo..hi).contains(tag))
+                    .map(|tag| value_keys[tag - lo].as_str())
+                    .min()
+            })
+            .collect();
+        let mut order: Vec<u32> = (0..self.ids.len() as u32).collect();
+        order.sort_unstable_by(|&a, &b| {
+            let (key_a, key_b) = (&keys[a as usize], &keys[b as usize]);
+            // `None` 排在最后。
+            key_a
+                .is_none()
+                .cmp(&key_b.is_none())
+                .then_with(|| key_a.cmp(key_b))
+                .then(self.by_title.rank[a as usize].cmp(&self.by_title.rank[b as usize]))
+        });
+        let order = Arc::new(SortOrder::new(order));
+        cache.insert(prefix, order.clone());
+        Some(order)
+    }
+
     /// Returns up to `take` matches whose rank is at least `start`, in sort order.
     fn page(
         &self,
         matches: &RoaringBitmap,
         order: &SortOrder,
+        reverse: bool,
         start: usize,
         take: usize,
     ) -> Vec<u32> {
         if matches.len() * DENSE_DIVISOR >= self.ids.len() as u64 {
-            return order.order[start.min(order.order.len())..]
-                .iter()
-                .copied()
+            let docs = order.order.iter().copied();
+            let docs: Box<dyn Iterator<Item = u32>> = if reverse {
+                Box::new(docs.rev())
+            } else {
+                Box::new(docs)
+            };
+            return docs
+                .skip(start)
                 .filter(|&doc| matches.contains(doc))
                 .take(take)
                 .collect();
         }
-        let rank = |doc: &u32| order.rank[*doc as usize];
-        let mut docs: Vec<u32> = matches
-            .iter()
-            .filter(|doc| rank(doc) as usize >= start)
-            .collect();
+        let rank = |doc: &u32| order.rank(*doc, reverse);
+        let mut docs: Vec<u32> = matches.iter().filter(|doc| rank(doc) >= start).collect();
         if docs.len() > take {
             docs.select_nth_unstable_by_key(take, rank);
             docs.truncate(take);

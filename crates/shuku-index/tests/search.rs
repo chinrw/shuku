@@ -259,3 +259,36 @@ fn duplicate_archive_ids_are_rejected_at_build_time() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn random_picks_only_matches_and_none_when_empty() {
+    let index = Index::build(vec![
+        record(1, "a", 0, &["artist:alpha"]),
+        record(2, "b", 0, &["artist:beta"]),
+        record(3, "c", 0, &["artist:alpha"]),
+    ])
+    .unwrap();
+    let alpha = query(vec![Term::Tag("artist:alpha".into())]);
+    let picked: std::collections::BTreeSet<_> = (0..20)
+        .filter_map(|seed| index.random(&alpha, seed))
+        .collect();
+    assert_eq!(picked, [1, 3].into());
+    assert_eq!(index.random(&query(vec![Term::Tag("x".into())]), 7), None);
+}
+
+#[test]
+fn namespace_sort_uses_the_naturally_smallest_value_of_each_book() {
+    let index = Index::build(vec![
+        record(1, "a", 0, &["artist:unit2", "artist:unit10"]),
+        record(2, "b", 0, &["artist:unit3"]),
+        record(3, "c", 0, &[]),
+    ])
+    .unwrap();
+    let result = index
+        .search(&Query {
+            sort: Sort::Namespace("artist".into()),
+            ..Query::default()
+        })
+        .unwrap();
+    assert_eq!(result.ids, [1, 2, 3]);
+}

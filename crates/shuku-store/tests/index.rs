@@ -153,9 +153,10 @@ fn ten_thousand_archives_with_ten_tags_build_the_same_index() {
             let mut query = Query {
                 include: include.clone(),
                 exclude: exclude.clone(),
-                sort,
+                sort: sort.clone(),
                 limit: 37,
                 after: None,
+                reverse: false,
             };
             loop {
                 let expected = direct.search(&query).unwrap();
