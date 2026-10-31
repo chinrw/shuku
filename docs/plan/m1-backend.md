@@ -22,7 +22,7 @@ SQLite 存储层，供服务端和迁移工具使用。
   - `archive`：`id INTEGER PRIMARY KEY AUTOINCREMENT`、`path`（相对内容目录，唯一）、`title`、`summary`、`file_size`、`mtime`、`quick_hash`、`content_hash`（可空）、`page_count`、`date_added`、`source_url`（可空）、`is_new`、`lrr_id`（可空，迁移时记录 LRR 的旧 ID）。
   - `tag`：`id`、`namespace`、`value`、`full`（小写的 `namespace:value`，唯一；没有命名空间时就是值本身）。
   - `archive_tag`：`(tag_id, archive_id)` 主键，`WITHOUT ROWID`，另建 `(archive_id, tag_id)` 索引；两个外键都 `ON DELETE CASCADE`。
-  - `page`：`archive_id`、`page_no`（从 0 开始）、`entry_name`、`data_offset`、`compressed_size`、`size`、`method`（stored 或 deflate）、`width`、`height`；主键 `(archive_id, page_no)`。
+  - `page`：`archive_id`、`page_no`（从 0 开始）、`entry_name`、`data_offset`、`compressed_size`、`size`、`method`（stored 或 deflate）、`width`、`height`；主键 `(archive_id, page_no)`。2026-10-31 起改为 `page_list` 表，每本一行，页面清单整本编码成一个 BLOB（迁移 003）。
   - `progress`：`archive_id` 主键、`page`、`client_time`、`updated_at`。
   - `category`：`id`、`name`、`search`（动态分类的搜索语句，静态分类为空）、`pinned`；`category_archive(category_id, archive_id)`。
   - `tankoubon`：`id`、`name`、`summary`；`tankoubon_archive(tankoubon_id, archive_id, position)`；`tankoubon_tag(tankoubon_id, tag_id)`。
