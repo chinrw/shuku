@@ -1,6 +1,6 @@
 //! 读归档里的 ComicInfo.xml，字段对应照 LRR 的 ComicInfo 插件（1.2）。
 
-use crate::{Error, Metadata, Result, parse_tag_list};
+use crate::{Error, Metadata, Result, Volume, parse_tag_list};
 use shuku_store::Tag;
 
 /// 归档里要找的文件名，不分大小写，可以在子目录里。
@@ -66,11 +66,30 @@ pub fn parse(bytes: &[u8]) -> Result<Metadata> {
             .find(|url| !url.is_empty())
             .map(str::to_owned)
     });
+    // 漫画按章节分文件时 Number 是章号、Volume 是所在的卷，按卷分文件时常常只有其中一个。
+    // 一本归档对应一个 Number，所以先用它。`10.5` 这样的番外取整数部分，同号按归档 ID 排。
+    let number = |name: &str| {
+        let value = field(name)?;
+        value.parse::<u32>().ok().or_else(|| {
+            value
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && (0.0..=f64::from(u32::MAX)).contains(n))
+                .map(|n| n as u32)
+        })
+    };
+    let volume = field("Series").and_then(|series| {
+        Some(Volume {
+            series,
+            number: number("Number").or_else(|| number("Volume"))?,
+        })
+    });
     Ok(Metadata {
         title: field("Title"),
         summary: field("Summary"),
         tags,
         source_url,
+        volume,
     })
 }
 
@@ -120,6 +139,46 @@ mod tests {
                 "female:glasses",
                 ":full color"
             ]
+        );
+    }
+
+    #[test]
+    fn series_and_number_give_the_volume() {
+        let volume = |xml: &str| parse(xml.as_bytes()).unwrap().volume;
+        assert_eq!(
+            volume(
+                "<ComicInfo><Series>作品</Series><Number>3</Number><Volume>1</Volume></ComicInfo>"
+            ),
+            Some(Volume {
+                series: "作品".into(),
+                number: 3
+            })
+        );
+        assert_eq!(
+            volume("<ComicInfo><Series>作品</Series><Volume>2</Volume></ComicInfo>")
+                .map(|volume| volume.number),
+            Some(2)
+        );
+        assert_eq!(
+            volume("<ComicInfo><Series>作品</Series><Number>10.5</Number></ComicInfo>")
+                .map(|volume| volume.number),
+            Some(10)
+        );
+        // 不是数、超出范围的序号不算，改用 Volume。
+        for number in ["inf", "NaN", "1e999", "4294967296", "-1"] {
+            let xml = format!(
+                "<ComicInfo><Series>作品</Series><Number>{number}</Number><Volume>2</Volume></ComicInfo>"
+            );
+            assert_eq!(
+                volume(&xml).map(|volume| volume.number),
+                Some(2),
+                "{number}"
+            );
+        }
+        assert_eq!(volume("<ComicInfo><Number>3</Number></ComicInfo>"), None);
+        assert_eq!(
+            volume("<ComicInfo><Series>作品</Series><Number>番外</Number></ComicInfo>"),
+            None
         );
     }
 

@@ -11,8 +11,10 @@
 		volumes.filter((item) => item.progress && item.progress.page + 1 >= item.page_count).length
 	);
 
+	// 标题去掉前面的系列名：“作品 第1卷”显示成“第1卷”，按话分的“作品 032”显示成“032”。
 	function label(item: (typeof volumes)[number]) {
-		return item.series ? `第 ${item.series.volume} 卷` : item.title;
+		const prefix = `${data.series.name} `;
+		return item.title.startsWith(prefix) ? item.title.slice(prefix.length) : item.title;
 	}
 
 	// 从书库点进来时用浏览器返回，书库的滚动位置才会恢复。

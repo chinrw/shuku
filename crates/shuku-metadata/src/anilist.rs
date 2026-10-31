@@ -269,6 +269,7 @@ fn media_metadata(media: Media, options: &AnilistOptions) -> Metadata {
                 .site_url
                 .unwrap_or_else(|| format!("https://anilist.co/manga/{}", media.id)),
         ),
+        volume: None,
     }
 }
 

@@ -385,6 +385,7 @@ fn gallery_metadata(response: &str, options: &EhOptions, chinese: bool) -> Resul
         summary: None,
         tags,
         source_url: None,
+        volume: None,
     })
 }
 

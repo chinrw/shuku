@@ -224,6 +224,7 @@ fn subject_metadata(subject: Subject, options: &BangumiOptions) -> Metadata {
         summary: (!summary.is_empty()).then_some(summary),
         tags,
         source_url: Some(format!("https://bgm.tv/subject/{}", subject.id)),
+        volume: None,
     }
 }
 

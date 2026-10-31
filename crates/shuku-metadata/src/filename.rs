@@ -115,6 +115,7 @@ impl FilenameParser {
             summary: None,
             tags,
             source_url: None,
+            volume: None,
         })
     }
 }

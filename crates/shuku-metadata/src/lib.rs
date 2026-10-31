@@ -26,6 +26,17 @@ pub struct Metadata {
     pub tags: Vec<Tag>,
     /// 归档还没有来源地址时才写入。
     pub source_url: Option<String>,
+    /// 这一本属于哪个系列、是第几本，扫描用它把各卷归成一个系列。不算要写入的元数据，
+    /// [`Metadata::is_empty`] 不看它，也不存进待确认的候选。
+    #[serde(skip)]
+    pub volume: Option<Volume>,
+}
+
+/// ComicInfo 的 `Series` 和 `Number`（没有时用 `Volume`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Volume {
+    pub series: String,
+    pub number: u32,
 }
 
 impl Metadata {
@@ -39,6 +50,9 @@ impl Metadata {
         }
         if other.source_url.is_some() {
             self.source_url = other.source_url;
+        }
+        if other.volume.is_some() {
+            self.volume = other.volume;
         }
         self.tags.extend(other.tags);
     }

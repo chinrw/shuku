@@ -141,6 +141,13 @@ impl App {
             .into_iter()
             .map(|entry| (entry.path.clone(), entry))
             .collect();
+        // 这次扫描走到的条目和是不是文件夹，补认卷只看这些：隐藏、额外跳过和读不了的目录里的
+        // 记录保持原样。
+        let walked: HashMap<String, bool> = files
+            .iter()
+            .map(|path| (relative(content, path), false))
+            .chain(folders.iter().map(|path| (relative(content, path), true)))
+            .collect();
         files.extend(folders);
         files.sort();
         self.tasks(|tasks| tasks.scan.total = files.len());
@@ -205,12 +212,24 @@ impl App {
                     // 新书按路径认卷，名字只有卷号的换成带系列名的标题。文件名解析仍用原来的名字。
                     let file_title = file_title(&prepared)?;
                     let detected = crate::series::detect(&prepared.path, &file_title);
-                    let (volume, moved_volume) = match id {
-                        None => (detected, None),
-                        Some(_) if moved_id.is_some() => (None, detected),
-                        Some(_) => (None, None),
+                    // ComicInfo 写明了系列和序号时以它为准，但同一文件夹已经按路径归成了系列
+                    // （例如在 ComicInfo 归组之前入库的卷）时跟着原系列，免得新卷单独成组。
+                    let joins_path_series = match &detected {
+                        Some(volume) if id.is_none() => writer.series_key_exists(&volume.key)?,
+                        _ => false,
                     };
-                    if let Some(title) = volume.as_ref().and_then(|volume| volume.title.clone()) {
+                    let comicinfo = prepared
+                        .comicinfo
+                        .as_ref()
+                        .and_then(|metadata| metadata.volume.clone())
+                        .filter(|_| id.is_none() && !joins_path_series)
+                        .map(crate::series::from_comicinfo);
+                    // 按 ComicInfo 归组时卷号可能和名字里的不一样，标题不按路径改。
+                    if id.is_none()
+                        && comicinfo.is_none()
+                        && let Some(title) =
+                            detected.as_ref().and_then(|volume| volume.title.clone())
+                    {
                         metadata.title = title;
                     }
                     metadata.path = prepared.path;
@@ -221,19 +240,39 @@ impl App {
                     metadata.content_hash = None;
                     let path = metadata.path.clone();
                     let saved = writer.save_archive(id, &metadata, &prepared.pages)?;
-                    if let Some(volume) = volume {
-                        writer.set_series(saved, &volume.key, &volume.series, volume.volume)?;
-                    } else if let Some(volume) = moved_volume {
-                        // 整个系列的文件夹搬走后，归组依据跟着换到新位置，之后加进来的卷才归得进去。
-                        writer.move_series(saved, &volume.key)?;
-                    }
                     // 迁移工具先于扫描运行时，LRR 的元数据按路径暂存着，在同一个事务里套用。
                     // 只有真正新加入、不是从 LRR 迁移来的书才跑元数据功能，和 LRR 只对新上传的书
                     // 自动运行插件一样；迁移来的元数据已经是 LRR 里跑过插件的结果。
-                    if existing_id.is_none()
-                        && !writer.apply_lrr_pending(saved, &path)?
-                        && moved_id.is_none()
-                    {
+                    let from_lrr =
+                        existing_id.is_none() && writer.apply_lrr_pending(saved, &path)?;
+                    let fresh = id.is_none() && !from_lrr;
+                    // ComicInfo 写明了系列和序号时以它为准，它和别的元数据功能一样只用于真正的新书；
+                    // 按路径认卷是目录结构，迁移来的书也用。
+                    match id {
+                        None => {
+                            let volume = if fresh {
+                                comicinfo.or(detected)
+                            } else {
+                                detected
+                            };
+                            if let Some(volume) = volume {
+                                writer.set_series(
+                                    saved,
+                                    &volume.key,
+                                    &volume.series,
+                                    volume.volume,
+                                )?;
+                            }
+                        }
+                        // 整个系列的文件夹搬走后，归组依据跟着换到新位置，之后加进来的卷才归得进去。
+                        Some(_) if moved_id.is_some() => {
+                            if let Some(volume) = detected {
+                                writer.move_series(saved, &volume.key)?;
+                            }
+                        }
+                        Some(_) => {}
+                    }
+                    if fresh {
                         // 新书的初始标题就是去掉扩展名的文件名（文件夹是整个文件夹名），
                         // 文件名解析用它，和 LRR 用文件名一样。
                         if let Some(edit) =
@@ -272,6 +311,10 @@ impl App {
             {
                 hook();
             }
+        }
+        let assigned = self.assign_series(&walked)?;
+        if assigned > 0 {
+            tracing::info!(assigned, "已入库的书按路径认出了卷");
         }
         // 没被新文件认领的失踪记录，文件确实不在了。
         let gone: Vec<(i64, String)> = missing.into_values().flatten().collect();

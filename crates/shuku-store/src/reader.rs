@@ -240,6 +240,15 @@ impl Reader {
         })
     }
 
+    /// 还不属于任何系列的归档的 ID 和路径，按 ID 升序。
+    pub fn archives_without_series(&self) -> Result<Vec<(i64, String)>> {
+        Ok(self
+            .connection
+            .prepare("SELECT id, path FROM archive WHERE series_id IS NULL ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     /// 一本归档所属的系列，只有一卷的系列不算。
     pub fn archive_series(&self, id: i64) -> Result<Option<Series>> {
         let series = self

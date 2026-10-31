@@ -473,6 +473,7 @@ fn applied(edit: &ArchiveEdit) -> Metadata {
             TagEdit::Keep | TagEdit::Replace(_) => Vec::new(),
         },
         source_url: edit.source_url.clone().flatten(),
+        volume: None,
     }
 }
 
@@ -615,6 +616,7 @@ mod tests {
                 },
             ],
             source_url: Some("https://e-hentai.org/g/1/a/".into()),
+            volume: None,
         };
         let kept = proposal(metadata.clone(), false);
         assert_eq!(kept.title, None);

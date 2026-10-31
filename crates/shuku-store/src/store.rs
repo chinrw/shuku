@@ -654,12 +654,23 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 有没有以 `key` 为归组依据的系列。
+    pub fn series_key_exists(&self, key: &str) -> Result<bool> {
+        Ok(self
+            .connection
+            .query_row("SELECT 1 FROM series WHERE key = ?1", [key], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
     /// 归档所在系列的文件夹搬到了别处：把系列的归组依据换成 `key`，之后扫到的新卷归进原系列。
-    /// 归档不属于系列、或者 `key` 已经是另一个系列的依据时不变。
+    /// 归档不属于系列、`key` 已经是另一个系列的依据、或者系列不是按路径归组（依据以 `/` 开头，
+    /// 例如按 ComicInfo 的系列名，和位置无关）时不变。
     pub fn move_series(&mut self, id: i64, key: &str) -> Result<()> {
         self.connection.execute(
             "UPDATE series SET key = ?1
              WHERE id = (SELECT series_id FROM archive WHERE id = ?2)
+               AND substr(key, 1, 1) != '/'
                AND NOT EXISTS (SELECT 1 FROM series WHERE key = ?1)",
             params![key, id],
         )?;
