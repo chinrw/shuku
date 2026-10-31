@@ -412,8 +412,8 @@ mod tests {
             data_dir: root.path().join("data"),
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
-            scan_hidden: false,
             detect_webtoons: true,
+            allowed_hosts: Vec::new(),
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         let app = App::open(config).await.unwrap();
