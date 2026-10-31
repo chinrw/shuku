@@ -18,7 +18,7 @@
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { defaultOrder, filterLabel, FILTERS, libraryHref, SORTS } from '#lib/libraryUrl.ts';
+	import { defaultOrder, filterLabel, libraryHref, SORTS, type UrlFilter } from '#lib/libraryUrl.ts';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { onDestroy, untrack } from 'svelte';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
@@ -62,7 +62,7 @@
 	let batchMessage = $state<string | null>(null);
 
 	// 换了搜索条件才清空选择；同一个条件重新加载（例如批量改完后的刷新）时保留。
-	let listKey = $derived(JSON.stringify([data.q, data.sort, data.order, data.category, data.filter]));
+	let listKey = $derived(JSON.stringify([data.q, data.sort, data.order, data.category, data.filters]));
 	$effect(() => {
 		void listKey;
 		untrack(() => {
@@ -138,7 +138,7 @@
 		picking = true;
 		randomError = null;
 		try {
-			const id = await random({ q: data.q, category: data.category, filter: data.filter });
+			const id = await random({ q: data.q, category: data.category, filters: data.filters });
 			if (id === null) randomError = '没有符合条件的书，随机不到';
 			else await goto(`/a/${id}/read`);
 		} catch (error) {
@@ -220,8 +220,8 @@
 		});
 	}
 
-	// 新书和阅读状态的快捷筛选，一次只选一个，再点一次取消。
-	function filterHref(filter: (typeof FILTERS)[number][0]) {
+	// “新书”筛选，再点一次取消。
+	function filterHref(filter: UrlFilter) {
 		return libraryHref({
 			q: data.q,
 			sort: data.sort,
@@ -231,13 +231,23 @@
 		});
 	}
 
-	let currentFilter = $derived(data.filter ? filterLabel(data.filter) : undefined);
+	// 早先的阅读状态和未打标签筛选没有按钮了，旧链接打开时在结果说明里写出来。
+	let hiddenFilter = $derived(
+		data.filter && data.filter !== 'new' ? filterLabel(data.filter) : undefined
+	);
 
 	// 分类按钮和抽屉共用。抽屉里新建分类或改了成员后重新取一次带本数的列表，
 	// 按钮跟着变；换一次搜索又回到这一页加载的数据。
 	let categoryList = $derived(data.categories);
 
-	let currentCategory = $derived(categoryList.find((category) => category.id === data.category));
+	// LRR 查重插件标记的疑似重复是待处理的问题，放在控制台里，不当书架显示。
+	let shelves = $derived(categoryList.filter((category) => !category.duplicates));
+
+	function toggleHideFinished() {
+		prefs.hideFinished = !prefs.hideFinished;
+		prefs.save();
+		invalidateAll();
+	}
 
 	function splitTag(tag: string) {
 		const colon = tag.indexOf(':');
@@ -270,7 +280,7 @@
 				sort: data.sort,
 				order: data.order,
 				category: data.category,
-				filter: data.filter,
+				filters: data.filters,
 				group: data.group,
 				after: next
 			});
@@ -446,13 +456,13 @@
 
 {#if data.queryError}
 	<p class="status error">{data.queryError}</p>
-{:else if data.result}
+{:else if data.result && (hiddenFilter || data.result.degraded || (!selecting && items.some((item) => item.series)))}
 	<p class="status">
-		共 {data.result.total} 本{#if currentFilter}，{currentFilter}{/if}{#if currentCategory}，分类“{currentCategory.name}”{/if}{#if data.q}，搜索“{data.q}”{/if}
-		{#if data.result.degraded}<span>· 部分通配符还不支持，结果可能偏多</span>{/if}
+		{#if hiddenFilter}<span>筛选：{hiddenFilter} ·</span>{/if}
+		{#if data.result.degraded}<span>部分通配符还不支持，结果可能偏多 ·</span>{/if}
 		<!-- 批量操作时始终展开各卷，不能切回合并。 -->
 		{#if !selecting && items.some((item) => item.series)}
-			· <button class="link" onclick={toggleSeries}
+			<button class="link" onclick={toggleSeries}
 				>{data.group ? '系列已合并，展开各卷' : '按系列合并'}</button
 			>
 		{/if}
@@ -461,25 +471,29 @@
 {#if randomError}
 	<p class="status error" role="alert">{randomError}</p>
 {/if}
-<nav class="facets" aria-label="筛选">
-	{#each FILTERS as [filter, label] (filter)}
-		<a href={filterHref(filter)} aria-current={data.filter === filter ? 'true' : undefined}>{label}</a>
+<!-- 和 LRR 一样一排：新书、各个分类，按钮样式相同，只靠图标区分；最右边是开关和本数。 -->
+<nav class="facets" aria-label="筛选和分类">
+	<a href={filterHref('new')} aria-current={data.filter === 'new' ? 'true' : undefined}>
+		<span class="dot" aria-hidden="true"></span>
+		<span>新书</span>
+		{#if data.newCount !== null}<span class="count">{data.newCount}</span>{/if}
+	</a>
+	{#each shelves as category (category.id)}
+		<a
+			href={categoryHref(category.id)}
+			aria-current={data.category === category.id ? 'true' : undefined}
+			title={category.dynamic ? '动态分类' : undefined}
+		>
+			{#if category.bookmark}<Icon name="bookmark" size={13} filled />{/if}
+			<span>{category.name}</span>
+			<span class="count">{category.count}</span>
+		</a>
 	{/each}
+	<span class="end">
+		<button aria-pressed={prefs.hideFinished} onclick={toggleHideFinished}>隐藏读完的</button>
+		{#if data.result}<span class="total">共 {data.result.total} 本</span>{/if}
+	</span>
 </nav>
-{#if categoryList.length > 0}
-	<nav class="facets" aria-label="分类">
-		{#each categoryList as category (category.id)}
-			<a
-				href={categoryHref(category.id)}
-				aria-current={data.category === category.id ? 'true' : undefined}
-				title={category.dynamic ? '动态分类' : undefined}
-			>
-				<span>{category.pinned ? '📌' : ''}{category.name}</span>
-				<span class="count">{category.count}</span>
-			</a>
-		{/each}
-	</nav>
-{/if}
 
 {#if data.recent.length > 0}
 	<RecentRow items={data.recent} />
@@ -611,7 +625,7 @@
 	<div class="bar-space"></div>
 	<BatchBar
 		selection={selectAll
-			? { search: { q: data.q, category: data.category, filter: data.filter } }
+			? { search: { q: data.q, category: data.category, filters: data.filters } }
 			: { ids: [...selected] }}
 		count={selectAll ? (data.result?.total ?? 0) : selected.size}
 		total={data.result?.total ?? 0}
@@ -756,24 +770,30 @@
 		scrollbar-width: none;
 	}
 
-	.facets a {
+	.facets a,
+	.facets button {
 		flex: none;
 		display: inline-flex;
-		align-items: baseline;
+		align-items: center;
 		gap: 0.35rem;
-		padding: 0.1rem 0.5rem;
+		padding: 0.15rem 0.55rem;
 		border: 1px solid var(--chip-border);
 		border-radius: 5px;
 		background: var(--chip);
+		color: inherit;
+		font: inherit;
 		font-size: 0.8rem;
 		text-decoration: none;
+		cursor: pointer;
 	}
 
-	.facets a:hover {
+	.facets a:hover,
+	.facets button:hover {
 		color: var(--link);
 	}
 
-	.facets a[aria-current='true'] {
+	.facets a[aria-current='true'],
+	.facets button[aria-pressed='true'] {
 		background: var(--fg);
 		border-color: var(--fg);
 		color: var(--bg);
@@ -782,6 +802,37 @@
 	.facets a[aria-current='true'] .count {
 		color: inherit;
 		opacity: 0.7;
+	}
+
+	/* “新书”的图标，和卡片上“新”角标同色。 */
+	.facets .dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--new);
+	}
+
+	.facets .end {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: 0.6rem;
+		margin-left: auto;
+		padding-left: 0.6rem;
+	}
+
+	.facets .total {
+		color: var(--muted);
+		font-size: 0.8rem;
+		white-space: nowrap;
+	}
+
+	/* 宽屏上放不下时换行；手机上一排横向滑动。 */
+	@media (min-width: 600px) {
+		.facets {
+			flex-wrap: wrap;
+			row-gap: 0.4rem;
+		}
 	}
 
 	@media (min-width: 1024px) {

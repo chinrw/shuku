@@ -95,6 +95,8 @@ async fn quick_filters_combine_with_each_other_and_the_query() {
         ("new,untagged", vec!["c"]),
         ("reading, untagged", vec!["b"]),
         ("finished,untagged", vec![]),
+        ("unfinished", vec!["b", "c"]),
+        ("new,unfinished", vec!["c"]),
         ("", vec!["a", "b", "c"]),
     ];
     for (filter, expected) in cases {

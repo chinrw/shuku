@@ -311,6 +311,8 @@ pub(crate) enum Filter {
     Reading,
     /// 读到了最后一页。
     Finished,
+    /// 没读到最后一页，包括没读过的。书库页的“隐藏读完的”开关。
+    Unfinished,
 }
 
 pub(crate) fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
@@ -323,8 +325,9 @@ pub(crate) fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
             "unread" => Ok(Filter::Unread),
             "reading" => Ok(Filter::Reading),
             "finished" => Ok(Filter::Finished),
+            "unfinished" => Ok(Filter::Unfinished),
             _ => Err(Error::bad_request(format!(
-                "filter 只能是 new、untagged、unread、reading、finished：{name}"
+                "filter 只能是 new、untagged、unread、reading、finished、unfinished：{name}"
             ))),
         })
         .collect()
@@ -405,13 +408,48 @@ fn restrict_by_filter(
         Filter::Unread => query.exclude.push(Term::Archives(read_ids(None))),
         Filter::Reading => query.include.push(Term::Archives(read_ids(Some(false)))),
         Filter::Finished => query.include.push(Term::Archives(read_ids(Some(true)))),
+        Filter::Unfinished => query.exclude.push(Term::Archives(read_ids(Some(true)))),
     }
+}
+
+/// LRR 默认把书签按钮连到叫 Favorites 的分类，Shuku 用户也可能叫它“收藏”。
+/// 迁移工具不读 LRR 的设置库，所以按名字认，同名的取编号最小的静态分类。
+const BOOKMARK_NAMES: [&str; 2] = ["favorites", "收藏"];
+/// LRR 查重插件把疑似重复的书放进这个分类。它是待处理的问题，不在书库页上显示。
+const DUPLICATES_NAME: &str = "DuplicateArchives";
+
+/// 名字符合条件的静态分类里编号最小的一个。分类名可以重复，按名字认的分类只取一个，
+/// 书库页隐藏的和控制台列出的才是同一个。
+fn first_static(
+    snapshot: &crate::snapshot::Snapshot,
+    matches: impl Fn(&str) -> bool,
+) -> Option<i64> {
+    snapshot
+        .categories()
+        .iter()
+        .filter(|category| category.search.is_empty() && matches(&category.name))
+        .map(|category| category.id)
+        .min()
+}
+
+/// 书签按钮对应的分类。
+pub(crate) fn bookmark_category(snapshot: &crate::snapshot::Snapshot) -> Option<i64> {
+    first_static(snapshot, |name| {
+        BOOKMARK_NAMES.contains(&name.trim().to_lowercase().as_str())
+    })
+}
+
+/// LRR 标记的疑似重复分类。
+pub(crate) fn duplicates_category(snapshot: &crate::snapshot::Snapshot) -> Option<i64> {
+    first_static(snapshot, |name| name == DUPLICATES_NAME)
 }
 
 /// 书库页的分类按钮。`count` 是分类里在快照中的本数。
 pub(crate) async fn categories(State(app): State<App>) -> Result<Json<Value>> {
     app.blocking(|app| {
         let snapshot = app.snapshot();
+        let bookmark = bookmark_category(&snapshot);
+        let duplicates = duplicates_category(&snapshot);
         let mut categories = Vec::new();
         for category in snapshot.categories() {
             let mut query = shuku_index::Query {
@@ -427,6 +465,7 @@ pub(crate) async fn categories(State(app): State<App>) -> Result<Json<Value>> {
             categories.push(json!({
                 "id": category.id, "name": category.name, "pinned": category.pinned,
                 "dynamic": !category.search.is_empty(), "count": count,
+                "bookmark": bookmark == Some(category.id), "duplicates": duplicates == Some(category.id),
             }));
         }
         Ok(Json(json!({ "categories": categories })))

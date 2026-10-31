@@ -118,7 +118,7 @@ fn search_properties() -> Value {
     json!({
         "q": { "type": "string", "description": "LRR 风格的搜索语句，空串是全部" },
         "category": { "type": "integer", "description": "只在这个分类里找" },
-        "filter": { "type": "string", "description": "逗号分隔的 new、unread、reading、finished、untagged" },
+        "filter": { "type": "string", "description": "逗号分隔的 new、unread、reading、finished、unfinished、untagged" },
     })
 }
 

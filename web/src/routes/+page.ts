@@ -4,7 +4,8 @@ import {
 	recent,
 	search,
 	type ArchiveItem,
-	type Category
+	type Category,
+	type Filter
 } from '#lib/api.ts';
 import { parseCategory, parseFilter, parseOrder, parseSort } from '#lib/libraryUrl.ts';
 import { settings } from '#lib/settings.svelte.ts';
@@ -17,12 +18,30 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const category = parseCategory(url.searchParams.get('c'));
 	const filter = parseFilter(url.searchParams.get('f'));
 	const prefs = settings();
+	// 地址里的筛选加上“隐藏读完的”开关，两者同时生效。
+	const filters: Filter[] = [
+		...(filter ? [filter] : []),
+		...(prefs.hideFinished ? (['unfinished'] as const) : [])
+	];
 	const group: 'series' | null = prefs.groupSeries && !prefs.ungroupForBatch ? 'series' : null;
 	// 分类按钮加载失败不影响列表，只是不显示这一排。
 	const shelves: Promise<Category[]> = categories(fetch).catch((error) => {
 		console.warn('加载分类失败', error);
 		return [];
 	});
+	// “新书”按钮上的本数是全库的，和当前搜索无关。取不到时按钮照样能点，只是不显示本数。
+	const newBooks: Promise<number | null> = search(fetch, {
+		q: '',
+		sort: 'title',
+		filters: ['new'],
+		limit: 1
+	}).then(
+		(result) => result.total,
+		(error) => {
+			console.warn('统计新书失败', error);
+			return null;
+		}
+	);
 	// 最近阅读只在书库首页显示。它加载失败不影响列表，只是不显示这一栏。
 	const reading: Promise<ArchiveItem[]> = q || category !== null || filter !== null
 		? Promise.resolve([])
@@ -32,10 +51,11 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			});
 	try {
 		// 几个请求互不依赖，并行发出；语句写错或分类不存在时搜索返回 400。
-		const [result, categoryList, recentItems] = await Promise.all([
-			search(fetch, { q, sort, order, category, filter, group }),
+		const [result, categoryList, recentItems, newCount] = await Promise.all([
+			search(fetch, { q, sort, order, category, filters, group }),
 			shelves,
-			reading
+			reading,
+			newBooks
 		]);
 		return {
 			q,
@@ -43,9 +63,11 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			order,
 			category,
 			filter,
+			filters,
 			group,
 			result,
 			categories: categoryList,
+			newCount,
 			recent: recentItems,
 			queryError: null
 		};
@@ -58,9 +80,11 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				order,
 				category,
 				filter,
+				filters,
 				group,
 				result: null,
 				categories: await shelves,
+				newCount: await newBooks,
 				recent: [],
 				queryError: error.message
 			};

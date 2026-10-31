@@ -1,11 +1,3 @@
-<script module lang="ts">
-	import { SvelteSet } from 'svelte/reactivity';
-
-	// 正在提交的“归档:分类”。放在模块里而不是组件里：阅读器关掉菜单会销毁组件，
-	// 重新打开时也要知道上一次的请求还没回来，同一本书的同一个分类不能同时有两个请求。
-	const pending = new SvelteSet<string>();
-</script>
-
 <script lang="ts">
 	// 详情页和阅读器菜单里把这本书加进或移出静态分类。每次勾选立即提交，失败时恢复那一项。
 	import {
@@ -15,6 +7,7 @@
 		setCategoryMember,
 		type Category
 	} from '#lib/api.ts';
+	import { pending, pendingKey } from '#lib/membership.svelte.ts';
 
 	let {
 		archive,
@@ -50,7 +43,7 @@
 	async function toggle(category: Category) {
 		// 同一个分类同时只有一个请求，否则先发的 DELETE 和后发的 PUT 可能倒序提交。
 		const target = archive;
-		const key = `${target}:${category.id}`;
+		const key = pendingKey(target, category.id);
 		if (pending.has(key)) return;
 		const member = !members.includes(category.id);
 		setMember(category.id, member);
@@ -92,7 +85,15 @@
 			// 先放进本地列表，取列表失败时新分类也在，再输入同名不会重复新建。
 			// 等待期间别的勾选触发的刷新可能已经取到了它，按 ID 去重。
 			if (!categories.some((category) => category.id === id)) {
-				categories = [...categories, { id, name: trimmed, pinned: false, dynamic: false, count: 1 }];
+				categories = [...categories, {
+						id,
+						name: trimmed,
+						pinned: false,
+						dynamic: false,
+						count: 1,
+						bookmark: false,
+						duplicates: false
+					}];
 			}
 			name = '';
 			await reload();
@@ -117,7 +118,7 @@
 					<input
 						type="checkbox"
 						checked={members.includes(category.id)}
-						disabled={pending.has(`${archive}:${category.id}`)}
+						disabled={pending.has(pendingKey(archive, category.id))}
 						onchange={() => toggle(category)}
 					/>
 					<span class="name">{category.name}</span>

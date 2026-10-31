@@ -52,7 +52,10 @@ async fn adding_to_a_category_shows_up_in_search_and_detail_immediately() {
     let listed = json(&router, "/api/categories").await;
     assert_eq!(
         listed["categories"],
-        value!([{"id": favorites, "name": "收藏", "pinned": false, "dynamic": false, "count": 1}])
+        value!([{
+            "id": favorites, "name": "收藏", "pinned": false, "dynamic": false, "count": 1,
+            "bookmark": true, "duplicates": false
+        }])
     );
     let search = json(&router, &format!("/api/search?category={favorites}")).await;
     assert_eq!(ids(&search), [all[1]]);
@@ -192,4 +195,57 @@ async fn category_writes_reject_bad_input_and_cross_site_requests() {
     assert_eq!(code, StatusCode::FORBIDDEN);
     let search = json(&router, &format!("/api/search?category={favorites}")).await;
     assert!(ids(&search).is_empty());
+}
+
+#[tokio::test]
+async fn favorites_is_the_bookmark_and_lrr_duplicates_are_flagged() {
+    let fixture = Fixture::new();
+    fixture.archive("a.cbz", 10, 20);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    // 动态的 Favorites 不能当书签：书签要能加进、移出。编号小的同名静态分类优先。
+    for body in [
+        value!({"name": "Favorites", "search": "artist:alpha"}),
+        value!({"name": "favorites"}),
+        value!({"name": "收藏"}),
+        value!({"name": "DuplicateArchives"}),
+        value!({"name": "DuplicateArchives", "search": "artist:alpha"}),
+        value!({"name": "其他"}),
+    ] {
+        let (code, _, _) = request(&router, "POST", "/api/categories", Some(body), &[]).await;
+        assert_eq!(code, StatusCode::CREATED);
+    }
+    let listed = json(&router, "/api/categories").await;
+    let flags: Vec<_> = listed["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|category| {
+            (
+                category["name"].as_str().unwrap().to_owned(),
+                category["bookmark"].as_bool().unwrap(),
+                category["duplicates"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    let flag = |name: &str| {
+        flags
+            .iter()
+            .find(|(category, _, _)| category == name)
+            .map(|(_, bookmark, duplicates)| (*bookmark, *duplicates))
+            .unwrap()
+    };
+    assert_eq!(flag("Favorites"), (false, false));
+    assert_eq!(flag("favorites"), (true, false));
+    assert_eq!(flag("收藏"), (false, false));
+    // 同名的只有编号最小的静态分类被认出，书库页隐藏的和控制台列出的是同一个。
+    let duplicates: Vec<_> = flags
+        .iter()
+        .filter(|(name, _, _)| name == "DuplicateArchives")
+        .map(|(_, _, duplicates)| *duplicates)
+        .collect();
+    assert_eq!(duplicates.iter().filter(|flag| **flag).count(), 1);
+    assert_eq!(flag("DuplicateArchives"), (false, true));
+    assert_eq!(flag("其他"), (false, false));
 }

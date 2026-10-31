@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { archive as loadArchive, downloadUrl, type ArchiveItem, type Category } from '#lib/api.ts';
+	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { artistQueries } from '#lib/related.ts';
@@ -71,6 +72,9 @@
 	</div>
 	<div class="actions">
 		<a class="primary" href="/a/{book.id}/read">{book.progress ? '继续阅读' : '开始阅读'}</a>
+		{#if detail?.id === book.id}
+			<BookmarkButton archive={book.id} bind:members={detail.members} bind:categories />
+		{/if}
 		{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
 		<a href="/a/{book.id}/read?panel=detail">详情</a>
 		<a href={downloadUrl(book.id)} download>下载</a>

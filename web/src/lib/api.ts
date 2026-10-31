@@ -74,7 +74,7 @@ export type Sort = 'title' | 'date' | 'pages' | `ns:${string}`;
 export type Order = 'asc' | 'desc';
 
 /** 书库页的快捷筛选，见 docs/api.md 的搜索接口。 */
-export type Filter = 'new' | 'unread' | 'reading' | 'finished' | 'untagged';
+export type Filter = 'new' | 'unread' | 'reading' | 'finished' | 'untagged' | 'unfinished';
 
 export interface Category {
 	id: number;
@@ -83,6 +83,10 @@ export interface Category {
 	/** 动态分类的成员是一条搜索语句的结果。 */
 	dynamic: boolean;
 	count: number;
+	/** 书签按钮对应的分类（LRR 的 Favorites）。 */
+	bookmark: boolean;
+	/** LRR 查重插件标记的疑似重复，只在控制台的问题页里列出。 */
+	duplicates: boolean;
 }
 
 /** `tag` 是小写的完整标签名，例如 `artist:某某`。 */
@@ -125,7 +129,8 @@ export function search(
 		sort: Sort;
 		order?: Order | null;
 		category?: number | null;
-		filter?: Filter | null;
+		/** 同时生效的快捷筛选。 */
+		filters?: Filter[];
 		after?: number;
 		limit?: number;
 		/** 同一系列只返回一卷，书库页每个系列一张卡。 */
@@ -135,7 +140,7 @@ export function search(
 	const query = new URLSearchParams({ q: params.q, sort: params.sort });
 	if (params.order != null) query.set('order', params.order);
 	if (params.category != null) query.set('category', String(params.category));
-	if (params.filter != null) query.set('filter', params.filter);
+	if (params.filters?.length) query.set('filter', params.filters.join(','));
 	if (params.after !== undefined) query.set('after', String(params.after));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	if (params.group != null) query.set('group', params.group);
@@ -171,11 +176,11 @@ export async function setCategoryMember(category: number, archive: number, membe
 export async function random(params: {
 	q: string;
 	category: number | null;
-	filter: Filter | null;
+	filters: Filter[];
 }): Promise<number | null> {
 	const query = new URLSearchParams({ q: params.q });
 	if (params.category !== null) query.set('category', String(params.category));
-	if (params.filter !== null) query.set('filter', params.filter);
+	if (params.filters.length) query.set('filter', params.filters.join(','));
 	try {
 		return (await request<{ id: number }>(fetch, `/api/random?${query}`)).id;
 	} catch (error) {
@@ -210,7 +215,7 @@ export function fetchMetadata(
 /** 批量操作要改的书：一串 ID，或者和搜索相同的条件选出的全部结果。 */
 export type BatchSelection =
 	| { ids: number[] }
-	| { search: { q: string; category: number | null; filter: Filter | null } };
+	| { search: { q: string; category: number | null; filters: Filter[] } };
 
 export interface BatchChange {
 	add_tags?: string[];
@@ -228,7 +233,7 @@ export async function batch(selection: BatchSelection, change: BatchChange): Pro
 					search: {
 						q: selection.search.q,
 						category: selection.search.category ?? undefined,
-						filter: selection.search.filter ?? ''
+						filter: selection.search.filters.join(',')
 					}
 				};
 	const result = await request<{ archives: number }>(fetch, '/api/batch', {

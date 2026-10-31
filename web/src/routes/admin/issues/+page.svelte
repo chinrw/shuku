@@ -6,6 +6,7 @@
 		type DuplicateFile,
 		type Issues
 	} from '#lib/admin.ts';
+	import { categories, search, type ArchiveItem } from '#lib/api.ts';
 	import { bytes, clock, count } from '#lib/format.ts';
 
 	type Tab = 'failed' | 'broken' | 'unreadable' | 'missing' | 'duplicates';
@@ -15,6 +16,51 @@
 	let tab = $state<Tab>('failed');
 	let error = $state<string | null>(null);
 	let loading = $state(false);
+
+	// LRR 查重插件放进 DuplicateArchives 分类的书。分类里只有书没有分组，按标题排，
+	// 同一部作品的几个版本挨在一起。几千本，分页取。
+	const LRR_PAGE = 200;
+	let lrrDuplicates = $state<{
+		category: number | null;
+		total: number;
+		items: ArchiveItem[];
+		next: number | null;
+	} | null>(null);
+	let lrrLoading = $state(false);
+	let lrrError = $state<string | null>(null);
+
+	async function loadLrrDuplicates(more = false) {
+		if (lrrLoading) return;
+		lrrLoading = true;
+		lrrError = null;
+		try {
+			let current = more ? lrrDuplicates : null;
+			if (!current) {
+				const category = (await categories(fetch)).find((shelf) => shelf.duplicates);
+				current = { category: category?.id ?? null, total: 0, items: [], next: null };
+			}
+			if (current.category !== null) {
+				const result = await search(fetch, {
+					q: '',
+					sort: 'title',
+					category: current.category,
+					limit: LRR_PAGE,
+					after: current.next ?? undefined
+				});
+				current = {
+					...current,
+					total: result.total,
+					items: [...current.items, ...result.items],
+					next: result.next_after
+				};
+			}
+			lrrDuplicates = current;
+		} catch (cause) {
+			lrrError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			lrrLoading = false;
+		}
+	}
 
 	let deleting = $state(false);
 	let deleteNote = $state('');
@@ -42,7 +88,10 @@
 		try {
 			data = await issues();
 			// 重复文件要全表分组，切到这一栏时才查。
-			if (tab === 'duplicates') groups = await duplicates();
+			if (tab === 'duplicates') {
+				groups = await duplicates();
+				loadLrrDuplicates();
+			}
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
 		} finally {
@@ -65,7 +114,8 @@
 		unreadable: '没有读权限的子目录。里面已入库的记录不当作丢失。',
 		missing:
 			'库里有记录、内容目录里已经找不到的文件。改名或移动的文件扫描时会自动认回；确实删掉了的，可以在这里删除记录。',
-		duplicates: '完整指纹相同的文件，每组列出全部路径。只统计已经算好指纹的书。'
+		duplicates:
+			'完整指纹相同的文件，每组列出全部路径，只统计已经算好指纹的书。下面另列 LRR 查重插件标记的疑似重复（迁移来的 DuplicateArchives 分类），它们不一定完全相同。'
 	};
 
 	let tabs = $derived<{ key: Tab; label: string; total: number | null }[]>([
@@ -191,6 +241,39 @@
 				{#if groups.total > groups.groups.length}
 					<p class="adm-empty">只列出前 {groups.groups.length} 组，共 {count(groups.total)} 组</p>
 				{/if}
+
+				<h2 class="lrr-head">
+					LRR 标记的疑似重复{#if lrrDuplicates?.category != null}（{count(lrrDuplicates.total)} 本）{/if}
+				</h2>
+				{#if lrrError}
+					<p class="adm-empty">没有加载出来：{lrrError}</p>
+				{:else if lrrDuplicates === null}
+					<p class="adm-empty">加载中…</p>
+				{:else if lrrDuplicates.category === null}
+					<p class="adm-empty">没有从 LRR 导入 DuplicateArchives 分类。</p>
+				{:else}
+					<table class="adm-table">
+						<thead><tr><th>标题</th><th class="num">页数</th></tr></thead>
+						<tbody>
+							{#each lrrDuplicates.items as item (item.id)}
+								<tr>
+									<td><a href="/a/{item.id}">{item.title}</a></td>
+									<td class="num">{item.page_count}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+					{#if lrrDuplicates.items.length === 0}<p class="adm-empty">分类是空的。</p>{/if}
+					{#if lrrDuplicates.next !== null}
+						<button
+							class="adm-button small more"
+							disabled={lrrLoading}
+							onclick={() => loadLrrDuplicates(true)}
+						>
+							{lrrLoading ? '加载中…' : `再列 ${LRR_PAGE} 本`}
+						</button>
+					{/if}
+				{/if}
 			{:else}
 				<p class="adm-empty">加载中…</p>
 			{/if}
@@ -199,6 +282,15 @@
 </div>
 
 <style>
+	.lrr-head {
+		margin: 1.5rem 0 0.5rem;
+		font-size: 0.95rem;
+	}
+
+	.more {
+		margin-top: 0.75rem;
+	}
+
 	.small {
 		min-height: 1.9rem;
 		padding: 0 0.7rem;

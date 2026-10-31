@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { downloadUrl } from '#lib/api.ts';
+	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { fittedWidth, pageUrl, widthTier } from '#lib/image.ts';
@@ -322,6 +323,7 @@
 					<Icon name="chevron-right" />
 				</button>
 			{/if}
+			<BookmarkButton archive={book.id} bind:members bind:categories={categoryList} bar />
 			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
@@ -473,6 +475,7 @@
 				</div>
 			{:else}
 				<div class="actions">
+					<BookmarkButton archive={book.id} bind:members bind:categories={categoryList} />
 					<a href="/a/{book.id}">相关作品</a>
 					{#if book.series}
 						<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>
@@ -559,7 +562,8 @@
 			padding-inline: 0.25rem;
 		}
 
-		.top .bar-button {
+		.top .bar-button,
+		.top :global(.bookmark) {
 			width: 2rem;
 		}
 

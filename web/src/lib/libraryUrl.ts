@@ -1,19 +1,17 @@
 import type { Filter, Order, Sort } from './api';
 
-// 地址里认得的筛选值和它们在结果说明里的名字。`untagged` 没有按钮了，旧链接里的照样生效，
-// 结果说明里也照样写出来，免得筛选着却看不出来。
-const FILTER_LABELS: Record<Filter, string> = {
+/** 地址栏 `f=` 里的筛选。“隐藏读完的”是单独的开关，不进地址。 */
+export type UrlFilter = Exclude<Filter, 'unfinished'>;
+
+// 地址里认得的筛选值和它们在结果说明里的名字。书库页现在只有“新书”一个按钮，其余几个
+// 是早先的按钮，旧链接里的照样生效，结果说明里也照样写出来，免得筛选着却看不出来。
+const FILTER_LABELS: Record<UrlFilter, string> = {
 	new: '新书',
 	unread: '没读过',
 	reading: '读了一半',
 	finished: '读完',
 	untagged: '未打标签'
 };
-
-/** 快捷筛选按钮，按书库页上的顺序。 */
-export const FILTERS: [Filter, string][] = (['new', 'unread', 'reading', 'finished'] as const).map(
-	(filter) => [filter, FILTER_LABELS[filter]]
-);
 
 /** 排序下拉框的选项。命名空间排序只列常用的几个，接口接受任意命名空间。 */
 export const SORTS: [Sort, string][] = [
@@ -36,7 +34,7 @@ export function libraryHref(params: {
 	sort: Sort;
 	order?: Order | null;
 	category: number | null;
-	filter?: Filter | null;
+	filter?: UrlFilter | null;
 }): string {
 	const query = new URLSearchParams();
 	if (params.q) query.set('q', params.q);
@@ -54,11 +52,11 @@ export function parseCategory(raw: string | null): number | null {
 }
 
 /** 地址里的快捷筛选，不认识的值当作没有。 */
-export function parseFilter(raw: string | null): Filter | null {
-	return raw !== null && Object.hasOwn(FILTER_LABELS, raw) ? (raw as Filter) : null;
+export function parseFilter(raw: string | null): UrlFilter | null {
+	return raw !== null && Object.hasOwn(FILTER_LABELS, raw) ? (raw as UrlFilter) : null;
 }
 
-export function filterLabel(filter: Filter): string {
+export function filterLabel(filter: UrlFilter): string {
 	return FILTER_LABELS[filter];
 }
 

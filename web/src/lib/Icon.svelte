@@ -4,6 +4,7 @@
 		grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
 		list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
 		back: 'M15 18l-6-6 6-6',
+		bookmark: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
 		'chevron-left': 'M15 18l-6-6 6-6',
 		'chevron-right': 'M9 18l6-6-6-6',
 		maximize:
@@ -27,14 +28,18 @@
 		'check-square': 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'
 	};
 
-	let { name, size = 20 }: { name: keyof typeof paths; size?: number } = $props();
+	let {
+		name,
+		size = 20,
+		filled = false
+	}: { name: keyof typeof paths; size?: number; filled?: boolean } = $props();
 </script>
 
 <svg
 	width={size}
 	height={size}
 	viewBox="0 0 24 24"
-	fill="none"
+	fill={filled ? 'currentColor' : 'none'}
 	stroke="currentColor"
 	stroke-width="2"
 	stroke-linecap="round"

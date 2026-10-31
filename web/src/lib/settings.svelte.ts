@@ -15,6 +15,8 @@ class Settings {
 	view = $state<LibraryView>('grid');
 	/** 书库页同一系列的各卷合成一张卡。 */
 	groupSeries = $state(true);
+	/** 书库页不显示读到最后一页的书，和别的筛选同时生效。 */
+	hideFinished = $state(false);
 	/**
 	 * 批量操作时临时展开各卷，不保存：系列卡只代表一卷，按它选择或按合并后的总数全选，
 	 * 都和服务端实际修改的书对不上。
@@ -31,6 +33,7 @@ class Settings {
 		if (typeof saved.spread === 'boolean') this.spread = saved.spread;
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
 		if (typeof saved.groupSeries === 'boolean') this.groupSeries = saved.groupSeries;
+		if (typeof saved.hideFinished === 'boolean') this.hideFinished = saved.hideFinished;
 		if (saved.webtoon && typeof saved.webtoon === 'object') {
 			for (const [id, value] of Object.entries(saved.webtoon)) {
 				if (typeof value === 'boolean') this.webtoon[Number(id)] = value;
@@ -39,10 +42,10 @@ class Settings {
 	}
 
 	save() {
-		const { mode, direction, fit, spread, view, groupSeries, webtoon } = this;
+		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoon } = this;
 		localStorage.setItem(
 			KEY,
-			JSON.stringify({ mode, direction, fit, spread, view, groupSeries, webtoon })
+			JSON.stringify({ mode, direction, fit, spread, view, groupSeries, hideFinished, webtoon })
 		);
 	}
 }
