@@ -136,10 +136,17 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 ```json
 {
   "pages": [
-    { "width": 1200, "height": 1700, "url": "/api/archives/42/pages/0?v=<quick_hash>" }
+    {
+      "width": 1200,
+      "height": 1700,
+      "url": "/api/archives/42/pages/0?v=<quick_hash>",
+      "thumbnail_url": "/api/archives/42/pages/0/thumbnail?v=<quick_hash>"
+    }
   ]
 }
 ```
+
+`thumbnail_url` 是这一页的缩略图，详情页的页面总览用。
 
 ## 图片
 
@@ -151,7 +158,17 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 返回封面（第 0 页）缩到 500 宽的 JPEG。
 
+`GET /api/archives/{id}/pages/{n}/thumbnail?v=<quick_hash>`
+
+返回第 `n` 页缩到 500 宽的 JPEG，规则和封面相同，第 0 页与封面共用同一份缓存。
+
 两个图片接口都带 `Cache-Control: public, max-age=31536000, immutable` 和 `ETag`，请求带匹配的 `If-None-Match` 时返回 304。
+
+## 下载原文件
+
+`GET /api/archives/{id}/file`
+
+返回原始归档文件，带 `Content-Disposition: attachment` 和原文件名（`filename*` 是 UTF-8 原名）。`Content-Type` 固定为 `application/octet-stream`，免得浏览器按类型改扩展名。支持 `Range` 断点续传（`If-Range` 只认响应里的 `Last-Modified`，不一致时返回整个文件）和 `If-Modified-Since`；Range 越界时返回 416，带 `Content-Range: bytes */<长度>`；不带内容指纹，所以不加永久缓存头。归档不存在或文件已经不在内容目录里时返回 404。
 
 ## 阅读进度
 

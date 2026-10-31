@@ -5,6 +5,7 @@
 
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
+	import { downloadUrl } from '#lib/api.ts';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { relatedQueries } from '#lib/related.ts';
@@ -72,6 +73,7 @@
 			{:else}
 				<a class="primary" href="/a/{book.id}/read?page=0">开始阅读</a>
 			{/if}
+			<a href={downloadUrl(book.id)} download>下载</a>
 		</div>
 	</section>
 
@@ -85,6 +87,23 @@
 
 	{#if book.summary}
 		<section class="summary"><p>{book.summary}</p></section>
+	{/if}
+
+	{#if data.pages.length}
+		<section class="pages" aria-label="页面">
+			{#each data.pages as page, index (index)}
+				<a href="/a/{book.id}/read?page={index}" class:current={book.progress && index === resumePage}>
+					<img
+						src={page.thumbnail_url}
+						width={page.width}
+						height={page.height}
+						loading="lazy"
+						alt="第 {index + 1} 页"
+					/>
+					<span>{index + 1}</span>
+				</a>
+			{/each}
+		</section>
 	{/if}
 
 	<div class="related">
@@ -109,6 +128,7 @@
 			'categories categories'
 			'tags tags'
 			'summary summary'
+			'pages pages'
 			'related related';
 		gap: 1rem;
 		max-width: 64rem;
@@ -119,12 +139,13 @@
 	@media (min-width: 720px) {
 		main {
 			grid-template-columns: 280px minmax(0, 1fr);
-			grid-template-rows: auto auto auto 1fr auto;
+			grid-template-rows: auto auto auto 1fr auto auto;
 			grid-template-areas:
 				'cover head'
 				'cover categories'
 				'cover tags'
 				'cover summary'
+				'pages pages'
 				'related related';
 			column-gap: 1.75rem;
 		}
@@ -202,6 +223,51 @@
 		grid-area: summary;
 		line-height: 1.7;
 		overflow-wrap: anywhere;
+	}
+
+	/* 缩略图按原图宽高比占位，懒加载时网格不会跳动。 */
+	.pages {
+		grid-area: pages;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+		gap: 0.75rem 0.6rem;
+		margin-top: 0.5rem;
+	}
+
+	@media (min-width: 720px) {
+		.pages {
+			grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+		}
+	}
+
+	.pages a {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.25rem;
+		color: var(--muted);
+		font-size: 0.8rem;
+		text-decoration: none;
+	}
+
+	/* 长条漫画的页很长，只显示顶部一截。 */
+	.pages img {
+		width: 100%;
+		height: auto;
+		max-height: 18rem;
+		object-fit: cover;
+		object-position: top;
+		border: 2px solid transparent;
+		border-radius: 4px;
+		background: var(--chip);
+	}
+
+	.pages a.current img {
+		border-color: var(--accent);
+	}
+
+	.pages a.current {
+		color: var(--accent);
 	}
 
 	.related {

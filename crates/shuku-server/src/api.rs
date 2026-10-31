@@ -45,9 +45,14 @@ impl App {
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
             .route(
+                "/api/archives/{id}/pages/{n}/thumbnail",
+                get(crate::images::page_thumbnail),
+            )
+            .route(
                 "/api/archives/{id}/thumbnail",
                 get(crate::images::thumbnail),
             )
+            .route("/api/archives/{id}/file", get(crate::download::file))
             .route("/api/archives/{id}/progress", put(write_progress))
             .merge(self.categories_router())
             .merge(self.admin_router())
@@ -437,10 +442,18 @@ async fn pages(
             .reader()?
             .archive_with_pages(id)?
             .ok_or_else(Error::not_found)?;
-        let pages: Vec<_> = pages.into_iter().enumerate().map(|(n, page)| json!({
-            "width": page.width, "height": page.height,
-            "url": format!("/api/archives/{id}/pages/{n}?v={}", archive.metadata.quick_hash),
-        })).collect();
+        let hash = &archive.metadata.quick_hash;
+        let pages: Vec<_> = pages
+            .into_iter()
+            .enumerate()
+            .map(|(n, page)| {
+                json!({
+                    "width": page.width, "height": page.height,
+                    "url": format!("/api/archives/{id}/pages/{n}?v={hash}"),
+                    "thumbnail_url": format!("/api/archives/{id}/pages/{n}/thumbnail?v={hash}"),
+                })
+            })
+            .collect();
         Ok(Json(json!({"pages": pages})))
     })
     .await

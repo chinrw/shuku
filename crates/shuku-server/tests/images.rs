@@ -247,6 +247,120 @@ async fn thumbnail_of_small_cover_is_jpeg_without_enlargement() {
 }
 
 #[tokio::test]
+async fn page_thumbnails_are_500_wide_and_share_the_cover_cache() {
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 900, 1200);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let item = &json(&router, "/api/search").await["items"][0];
+    let listing = json(&router, &format!("/api/archives/{}/pages", item["id"])).await;
+    let mut etags = Vec::new();
+    for page in listing["pages"].as_array().unwrap() {
+        let (status, headers, bytes) = request(
+            &router,
+            "GET",
+            page["thumbnail_url"].as_str().unwrap(),
+            None,
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers["content-type"], "image/jpeg");
+        assert_eq!(
+            image::load_from_memory(&bytes).unwrap().dimensions(),
+            (500, 666)
+        );
+        etags.push(headers["etag"].clone());
+    }
+    assert_ne!(etags[0], etags[1]);
+    let (_, cover, _) = request(
+        &router,
+        "GET",
+        item["cover_url"].as_str().unwrap(),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(cover["etag"], etags[0]);
+    let missing = listing["pages"][0]["thumbnail_url"]
+        .as_str()
+        .unwrap()
+        .replace("/pages/0/", "/pages/2/");
+    assert_eq!(
+        request(&router, "GET", &missing, None, &[]).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn download_returns_the_original_file_as_an_attachment() {
+    let fixture = Fixture::new();
+    fixture.archive("作品/第1卷.cbz", 20, 30);
+    let original = std::fs::read(fixture.config.content_dir.join("作品/第1卷.cbz")).unwrap();
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let id = json(&router, "/api/search").await["items"][0]["id"].clone();
+    let uri = format!("/api/archives/{id}/file");
+    let (status, headers, bytes) = request(&router, "GET", &uri, None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, original);
+    assert_eq!(headers["content-type"], "application/octet-stream");
+    assert_eq!(
+        headers["content-disposition"],
+        "attachment; filename=\"_1_.cbz\"; filename*=UTF-8''%E7%AC%AC1%E5%8D%B7.cbz"
+    );
+    let (status, headers, bytes) =
+        request(&router, "GET", &uri, None, &[("range", "bytes=0-9")]).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(bytes, original[..10]);
+    assert!(headers.contains_key("content-disposition"));
+    let last_modified = headers["last-modified"].to_str().unwrap().to_owned();
+    let (status, _, bytes) = request(
+        &router,
+        "GET",
+        &uri,
+        None,
+        &[("range", "bytes=10-19"), ("if-range", &last_modified)],
+    )
+    .await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(bytes, original[10..20]);
+    // 条件不成立时（文件换过、或者是 ETag 形式）忽略 Range，返回整个文件。
+    let beyond = format!("bytes={}-", original.len() + 10);
+    for (range, condition) in [
+        ("bytes=10-19", "Thu, 01 Jan 1970 00:00:01 GMT"),
+        ("bytes=10-19", "\"etag\""),
+        (beyond.as_str(), "Thu, 01 Jan 1970 00:00:01 GMT"),
+    ] {
+        let (status, _, bytes) = request(
+            &router,
+            "GET",
+            &uri,
+            None,
+            &[("range", range), ("if-range", condition)],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{range} {condition}");
+        assert_eq!(bytes, original);
+    }
+    let (status, headers, bytes) = request(&router, "GET", &uri, None, &[("range", &beyond)]).await;
+    assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        headers["content-range"],
+        format!("bytes */{}", original.len())
+    );
+    assert!(!headers.contains_key("content-disposition"));
+    assert!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["error"].is_string());
+
+    std::fs::remove_file(fixture.config.content_dir.join("作品/第1卷.cbz")).unwrap();
+    let (status, _, bytes) = request(&router, "GET", &uri, None, &[]).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["error"].is_string());
+}
+
+#[tokio::test]
 async fn refuses_to_resize_pages_above_the_pixel_limit() {
     let fixture = Fixture::new();
     let original = fixture.archive("book.cbz", 800, 1200);

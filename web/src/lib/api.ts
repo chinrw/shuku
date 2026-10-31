@@ -41,6 +41,8 @@ export interface PageInfo {
 	width: number;
 	height: number;
 	url: string;
+	/** 缩到 500 宽的 JPEG，详情页的页面总览用。 */
+	thumbnail_url: string;
 }
 
 export type Sort = 'title' | 'date';
@@ -155,6 +157,11 @@ export function archive(fetch: Fetch, id: number): Promise<ArchiveDetail> {
 
 export async function pages(fetch: Fetch, id: number): Promise<PageInfo[]> {
 	return (await request<{ pages: PageInfo[] }>(fetch, `/api/archives/${id}/pages`)).pages;
+}
+
+/** 原始归档文件，响应带 `Content-Disposition: attachment`。 */
+export function downloadUrl(id: number): string {
+	return `/api/archives/${id}/file`;
 }
 
 export function putProgress(

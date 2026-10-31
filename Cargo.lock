@@ -2139,6 +2139,7 @@ dependencies = [
  "bytemuck",
  "clap",
  "fast_image_resize",
+ "httpdate",
  "image",
  "jxl-oxide",
  "rayon",

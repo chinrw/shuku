@@ -5,6 +5,7 @@ mod api;
 mod categories;
 mod db;
 mod decode;
+mod download;
 mod hash;
 mod images;
 mod logs;

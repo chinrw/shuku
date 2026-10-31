@@ -287,6 +287,13 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
         pages["pages"][0]["url"],
         format!("/api/archives/{id}/pages/0?v={}", metadata.quick_hash)
     );
+    assert_eq!(
+        pages["pages"][1]["thumbnail_url"],
+        format!(
+            "/api/archives/{id}/pages/1/thumbnail?v={}",
+            metadata.quick_hash
+        )
+    );
     for uri in [
         "/api/search?limit=0",
         "/api/search?limit=201",
@@ -306,6 +313,7 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
         "/api/missing",
         "/api/archives/999999",
         "/api/archives/999999/pages",
+        "/api/archives/999999/file",
     ] {
         let (status, _, bytes) = request(&router, "GET", uri, None, &[]).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");

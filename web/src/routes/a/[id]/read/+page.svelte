@@ -29,6 +29,8 @@
 	let innerHeight = $state(window.innerHeight);
 	let devicePixelRatio = $state(window.devicePixelRatio);
 	let scroller = $state<HTMLElement>();
+	let pagedView = $state<HTMLElement>();
+	let fitWidth = $derived(prefs.fit === 'width');
 
 	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。
 	let spreads = $derived(
@@ -74,10 +76,31 @@
 		return pageUrl(pages[index], widthTier(cssWidth, devicePixelRatio));
 	}
 
-	// 双页时每页只占半个屏幕宽。
+	// 双页时每页只占半个屏幕宽。适应宽度时页面比屏幕高的部分靠上下滚动，不受屏幕高度限制。
 	function pagedSrc(index: number, count: number) {
 		const viewport = { width: innerWidth / count, height: innerHeight };
-		return src(index, fittedWidth(pages[index], viewport));
+		return src(index, fitWidth ? viewport.width : fittedWidth(pages[index], viewport));
+	}
+
+	// 适应宽度时翻到新的一屏从顶部开始看。
+	$effect(() => {
+		void spreadIndex;
+		if (pagedView) pagedView.scrollTop = 0;
+	});
+
+	/** 适应宽度时在这一屏里滚动一段；已经到头、或者整页模式时返回 false。 */
+	function scrollWithin(delta: 1 | -1, fraction: number): boolean {
+		const view = pagedView;
+		if (!fitWidth || !view) return false;
+		const room = delta > 0 ? view.scrollHeight - view.clientHeight - view.scrollTop : view.scrollTop;
+		if (room <= 1) return false;
+		view.scrollBy({ top: delta * view.clientHeight * fraction });
+		return true;
+	}
+
+	// 空格和 PageDown 先把这一屏看完再翻页。
+	function advance(delta: 1 | -1) {
+		if (!scrollWithin(delta, 0.9)) step(delta);
 	}
 
 	// 预取前后的几屏，翻页时直接从 HTTP 缓存取图。
@@ -128,10 +151,18 @@
 				break;
 			case ' ':
 			case 'PageDown':
-				step(1);
+				advance(event.shiftKey && event.key === ' ' ? -1 : 1);
 				break;
 			case 'PageUp':
-				step(-1);
+				advance(-1);
+				break;
+			case 'ArrowDown':
+				if (!fitWidth) return;
+				scrollWithin(1, 0.2);
+				break;
+			case 'ArrowUp':
+				if (!fitWidth) return;
+				scrollWithin(-1, 0.2);
 				break;
 			default:
 				return;
@@ -178,7 +209,13 @@
 		<p class="empty">这本书没有可显示的页面。</p>
 	{:else if prefs.mode === 'paged'}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div class="paged" class:rtl={prefs.direction === 'rtl'} onclick={tap}>
+		<div
+			class="paged"
+			class:rtl={prefs.direction === 'rtl'}
+			class:fit-width={fitWidth}
+			bind:this={pagedView}
+			onclick={tap}
+		>
 			{#each visible as index (index)}
 				<img
 					class="page"
@@ -260,6 +297,15 @@
 							onclick={() => update(() => (prefs.direction = 'ltr'))}>左→右</button
 						>
 					</div>
+					<span>缩放</span>
+					<div class="segmented">
+						<button class:on={prefs.fit === 'screen'} onclick={() => update(() => (prefs.fit = 'screen'))}
+							>整页</button
+						>
+						<button class:on={prefs.fit === 'width'} onclick={() => update(() => (prefs.fit = 'width'))}
+							>适应宽度</button
+						>
+					</div>
 					<span>横屏双页</span>
 					<div class="segmented">
 						<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
@@ -313,6 +359,24 @@
 
 	.page.half {
 		max-width: 50%;
+	}
+
+	/* 上下的 auto 外边距让比屏幕矮的页居中，比屏幕高的页从顶部开始。 */
+	.paged.fit-width {
+		align-items: flex-start;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.paged.fit-width .page {
+		width: 100%;
+		max-width: none;
+		max-height: none;
+		margin: auto 0;
+	}
+
+	.paged.fit-width .page.half {
+		width: 50%;
 	}
 
 	.scroll {

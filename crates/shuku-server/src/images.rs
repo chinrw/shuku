@@ -53,6 +53,19 @@ pub(crate) async fn thumbnail(
         .await
 }
 
+/// 详情页页面总览里的一格。和封面同样缩到 500 宽，第 0 页与封面共用缓存。
+pub(crate) async fn page_thumbnail(
+    State(app): State<App>,
+    path: std::result::Result<UrlPath<(i64, usize)>, PathRejection>,
+    params: std::result::Result<Query<ImageParams>, QueryRejection>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let UrlPath((id, n)) = path.map_err(Error::bad_request)?;
+    let Query(params) = params.map_err(Error::bad_request)?;
+    app.blocking(move |app| respond(&app, id, n, params, headers, true))
+        .await
+}
+
 fn respond(
     app: &App,
     id: i64,
