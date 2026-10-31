@@ -51,6 +51,7 @@ pub(crate) struct ScanSettings {
     /// 每隔多少小时自动扫描一次，0（默认）表示只在启动时和手动扫描。文件监视的后备。
     pub(crate) scan_interval_hours: u32,
     /// 额外跳过的目录或文件名，可以用 `*` 通配，不分大小写，例如 `@eaDir`、`*.part`。
+    /// 不作用于文件夹书里的单张图片，要跳过整本就写文件夹的名字。
     pub(crate) extra_skip: Vec<String>,
 }
 

@@ -64,7 +64,7 @@ impl App {
         let settings = self.settings().scan;
         let walk = walkdir::WalkDir::new(content)
             .into_iter()
-            .filter_entry(|entry| entry.depth() == 0 || !excluded(&settings, entry.file_name()));
+            .filter_entry(|entry| entry.depth() == 0 || !skipped_entry(&settings, entry));
         for entry in walk {
             match entry {
                 // 只扫认得的格式，其他文件只计数，不列进问题页。
@@ -272,6 +272,21 @@ fn excluded(settings: &crate::settings::ScanSettings, name: &std::ffi::OsStr) ->
     (hidden && !settings.scan_hidden) || name.to_str().is_some_and(|name| settings.skips(name))
 }
 
+/// 遍历时跳过的条目。“额外跳过”不作用于单张图片：文件夹书的页面清单和指纹总是包含其中全部
+/// 图片，只跳过一张会让两边对不上；要跳过整本，写文件夹的名字。
+fn skipped_entry(settings: &crate::settings::ScanSettings, entry: &walkdir::DirEntry) -> bool {
+    let image = entry.file_type().is_file()
+        && entry
+            .file_name()
+            .to_str()
+            .is_some_and(shuku_archive::is_image);
+    if image {
+        entry.file_name().as_encoded_bytes().starts_with(b".") && !settings.scan_hidden
+    } else {
+        excluded(settings, entry.file_name())
+    }
+}
+
 enum Kind {
     /// zip、cbz，或者改成图片扩展名的 ZIP（按魔数认出）。
     Archive,
@@ -291,12 +306,15 @@ fn classify(entry: &walkdir::DirEntry) -> Kind {
     if matches!(extension.as_deref(), Some("zip" | "cbz")) {
         return Kind::Archive;
     }
-    if name.starts_with('.') || !shuku_archive::is_image(name) {
+    if !shuku_archive::is_image(name) {
         return Kind::Other;
     }
     // 读不了魔数时当归档，交给后面的扫描报错，不悄悄算成图片。
     if shuku_archive::has_zip_magic(entry.path()).unwrap_or(true) {
         Kind::Archive
+    } else if name.starts_with('.') {
+        // 打开了扫描隐藏条目时才会走到这里；隐藏的图片不是文件夹的页面。
+        Kind::Other
     } else {
         Kind::Image
     }

@@ -146,7 +146,7 @@
 					<button class="adm-button" disabled={saving}>保存</button>
 				</div>
 			</form>
-			<p class="adm-note">目录或文件名，逗号分隔，可以用 * 通配，不分大小写。跳过的地方已入库的书保持原样。</p>
+			<p class="adm-note">目录或文件名，逗号分隔，可以用 * 通配，不分大小写。对文件夹里的单张图片不起作用，要跳过整本就写文件夹名。跳过的地方已入库的书保持原样。</p>
 			<div class="option">
 				<span class="adm-label">定时扫描</span>
 				<div class="adm-tabs" role="group" aria-label="定时扫描">

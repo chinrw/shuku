@@ -506,3 +506,36 @@ async fn only_known_formats_are_scanned_and_extra_skip_names_are_left_alone() {
     let issues = common::json(&router, "/api/admin/issues").await;
     assert_eq!(issues["missing"]["total"], 0);
 }
+
+#[tokio::test]
+async fn extra_skip_ignores_single_folder_pages_and_hidden_zips_are_still_archives() {
+    let fixture = Fixture::new();
+    let png = fixture.archive("zip.cbz", 30, 40);
+    let content = &fixture.config.content_dir;
+    std::fs::rename(content.join("zip.cbz"), content.join(".book.jpg")).unwrap();
+    let pictures = content.join("pictures");
+    std::fs::create_dir(&pictures).unwrap();
+    std::fs::write(pictures.join("001.jpg"), &png).unwrap();
+    std::fs::write(pictures.join("cover.jpg"), &png).unwrap();
+    let app = fixture.app().await;
+    let router = app.router();
+    common::request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"scan_hidden": true, "extra_skip": ["cover.jpg", "*.jpg"]})),
+        &[],
+    )
+    .await;
+    let report = app.scan().await.unwrap();
+    assert_eq!((report.added, report.failed), (2, 0));
+    let store = Store::open(fixture.database()).unwrap();
+    // 隐藏的、图片扩展名的 ZIP 按魔数入库。
+    assert!(store.find_by_path(".book.jpg").unwrap().is_some());
+    // 规则命中单张图片也不影响文件夹书：页面清单仍然是全部图片，也不会被当成失踪。
+    let id = store.find_by_path("pictures").unwrap().unwrap();
+    assert_eq!(store.archive(id).unwrap().unwrap().page_count, 2);
+    app.scan().await.unwrap();
+    let issues = common::json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["missing"]["total"], 0);
+}

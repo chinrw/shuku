@@ -405,7 +405,7 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 { "detect_webtoons": true, "allowed_hosts": ["nas.example.ts.net"] }
 ```
 
-- `scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0（默认）表示不定时，最大 720。`extra_skip` 是额外跳过的目录或文件名，`*` 通配、不分大小写，不能带路径分隔符。
+- `scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0（默认）表示不定时，最大 720。`extra_skip` 是额外跳过的目录或文件名，`*` 通配、不分大小写，不能带路径分隔符；它不作用于文件夹书里的单张图片，要跳过整本就写文件夹的名字。
 - `detect_webtoons` 见页面清单的 `webtoon`。`allowed_hosts` 是除 IP、`localhost`、不带点的主机名以外允许的 Host，不带端口和通配。
 - PUT 只需带要改的项，列表整体替换（去掉空白和重复项，最多 100 项）；未知字段或无效值返回 400，响应是改后的这一组设置。
 
