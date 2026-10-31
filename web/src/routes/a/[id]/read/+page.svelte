@@ -274,9 +274,18 @@
 		});
 	}
 
+	/**
+	 * 超过这个像素数的原图预取时不解码（约 48 MiB 的 RGBA）。离屏的 `decode()` 按原尺寸解码，
+	 * 7000×4700 的图要占 125 MiB，超过 Chrome 的解码缓存预算，翻过去时多半已被淘汰；
+	 * 显示时浏览器可以按屏幕尺寸缩小着解码，反而更快。
+	 */
+	const PREDECODE_PIXELS = 12_000_000;
+
 	// 预取后两屏和前一屏，翻页时直接从 HTTP 缓存取图。原图可能有二十几 MB，一起下载会和
-	// 当前这屏抢带宽，所以等当前这屏加载完，再一张一张地取；下一屏顺便解码好，翻过去马上能显示，
-	// 其余的只下载不解码，免得手机上同时占着几张大图解码后的内存。翻走时取消还没取完的。
+	// 当前这屏抢带宽，所以等当前这屏加载完，再一张一张地取；下一屏不太大的图下载完顺便解码，
+	// 翻过去马上能显示，其余的只下载不解码，免得手机上同时占着几张大图解码后的内存。
+	// 解码不等，下一张接着下载：等解码完再下载会让网络空着，大图上能把速率拉低一半以上。
+	// 翻走时取消还没取完的。
 	$effect(() => {
 		if (mode !== 'paged') return;
 		const next = spreads[spreadIndex + 1] ?? [];
@@ -295,7 +304,11 @@
 				const image = new Image();
 				started.push(image);
 				image.src = src(index);
-				await (decode ? image.decode().catch(() => {}) : settled(image));
+				await settled(image);
+				const { width, height } = pages[index];
+				if (decode && !cancelled && width * height <= PREDECODE_PIXELS) {
+					image.decode().catch(() => {});
+				}
 			}
 		})();
 		return () => {
@@ -611,6 +624,7 @@
 						style:background-image="url({pages[index].thumbnail_url})"
 						onload={(event) => event.currentTarget.classList.add('loaded')}
 						onerror={(event) => fallback(event, index)}
+						decoding="async"
 						width={pages[index].width}
 						height={pages[index].height}
 						alt="第 {index + 1} 页"
@@ -633,6 +647,7 @@
 						data-index={index}
 						src={src(index)}
 						onerror={(event) => fallback(event, index)}
+						decoding="async"
 						width={page.width}
 						height={page.height}
 						loading={Math.abs(index - current) <= 1 ? 'eager' : 'lazy'}
