@@ -22,7 +22,7 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
   --content-dir /path/to/comics --data-dir /path/to/shuku-data
 ```
 
-默认监听 `0.0.0.0:3002`，LRR 占用 3001。启动先从 SQLite 构建索引，再开始监听并在后台扫描。日志中的 `count` 和 `elapsed_ms` 分别是索引本数和从 SQLite 读取、构建索引的总耗时。后台扫描结束后换入新索引，正在使用旧快照的请求可以继续完成。
+默认监听 `0.0.0.0:3002`。启动先从 SQLite 构建索引，再开始监听并在后台扫描。日志中的 `count` 和 `elapsed_ms` 分别是索引本数和从 SQLite 读取、构建索引的总耗时。后台扫描结束后换入新索引，正在使用旧快照的请求可以继续完成。
 
 四项配置都支持环境变量，命令行参数优先：
 
@@ -55,12 +55,12 @@ JPEG、PNG、GIF、WebP、AVIF、JXL 和 BMP 都可以读取原图并生成 JPEG
 
 ```bash
 nix develop -c cargo run -p shuku-migrate-lrr -- \
-  --redis redis://127.0.0.1:6381/0 \
+  --redis redis://127.0.0.1:6379/0 \
   --lrr-content-dir /LRR/看到的/内容目录 \
   --data-dir /path/to/shuku-data
 ```
 
-media-lxc 上 LRR 的 Redis（valkey）监听 6381，不是默认的 6379。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。找不到对应文件的记录会列在输出里。
+`--redis` 填 LRR 所用 Redis 的地址，路径部分是元数据所在的库编号。`--lrr-content-dir` 填 LRR 自己记录的内容目录，工具用它把 LRR 里的绝对路径换成相对内容目录的路径；它和 Shuku 的 `--content-dir` 可以不同。找不到对应文件的记录会列在输出里。
 
 ## 使用发布包
 
