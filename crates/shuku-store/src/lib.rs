@@ -37,6 +37,7 @@ const MIGRATIONS: &[Migration] = &[
         Some(store::pack_page_lists),
     ),
     (include_str!("migrations/004_lrr_pending.sql"), None),
+    (include_str!("migrations/005_category_ids.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +50,12 @@ pub enum Error {
     VersionMismatch { found: i64, supported: i64 },
     #[error("归档 {0} 不存在")]
     ArchiveNotFound(i64),
+    #[error("分类 {0} 不存在")]
+    CategoryNotFound(i64),
+    #[error("分类 {0} 是动态分类，成员由它的搜索语句决定")]
+    DynamicCategory(i64),
+    #[error("分类 {0} 不能在静态分类和动态分类之间转换")]
+    CategoryKindChange(i64),
     #[error("SQLite 已经回滚了整个事务")]
     TransactionAborted,
     #[error("页面清单编码错误：{0}")]

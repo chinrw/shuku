@@ -5,6 +5,7 @@
 
 <script lang="ts">
 	import { afterNavigate } from '$app/navigation';
+	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { relatedQueries } from '#lib/related.ts';
 	import RelatedRow from '#lib/RelatedRow.svelte';
@@ -14,6 +15,12 @@
 	let { data } = $props();
 	let book = $derived(data.archive);
 	let resumePage = $derived(book.progress?.page ?? 0);
+	// 勾选分类时就地改写，换到另一本书时跟着数据重置。
+	let members = $derived(book.categories);
+	let categoryList = $derived(data.categories);
+	let memberCategories = $derived(
+		categoryList.filter((category) => members.includes(category.id))
+	);
 
 	afterNavigate(({ from, type }) => {
 		if (from?.route.id === '/') libraryBehind = true;
@@ -52,6 +59,11 @@
 		<p class="meta">
 			{book.page_count} 页 · {formatSize(book.file_size)}
 			{#if book.progress}<br />读到第 {resumePage + 1} 页{/if}
+			{#if memberCategories.length}
+				<br />分类：{#each memberCategories as category, index (category.id)}{#if index}、{/if}<a
+						href="/?c={category.id}">{category.name}</a
+					>{/each}
+			{/if}
 		</p>
 		<div class="actions">
 			{#if book.progress}
@@ -62,6 +74,10 @@
 			{/if}
 		</div>
 	</section>
+
+	<div class="categories">
+		<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
+	</div>
 
 	<section class="tags">
 		<TagTable rows={tagRows(book)} />
@@ -90,6 +106,7 @@
 		grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
 		grid-template-areas:
 			'cover head'
+			'categories categories'
 			'tags tags'
 			'summary summary'
 			'related related';
@@ -102,9 +119,10 @@
 	@media (min-width: 720px) {
 		main {
 			grid-template-columns: 280px minmax(0, 1fr);
-			grid-template-rows: auto auto 1fr auto;
+			grid-template-rows: auto auto auto 1fr auto;
 			grid-template-areas:
 				'cover head'
+				'cover categories'
 				'cover tags'
 				'cover summary'
 				'related related';
@@ -166,6 +184,11 @@
 		border-color: var(--accent);
 		background: var(--accent);
 		color: white;
+	}
+
+	.categories {
+		grid-area: categories;
+		min-width: 0;
 	}
 
 	.tags {

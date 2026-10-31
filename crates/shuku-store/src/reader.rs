@@ -187,6 +187,23 @@ impl Reader {
         })
     }
 
+    /// 全部分类和静态分类的成员，置顶在前，再按名字。
+    pub fn categories(&self) -> Result<Vec<Category>> {
+        read_categories(&self.connection)
+    }
+
+    /// 一本归档所在的静态分类，按分类 ID 升序。
+    pub fn archive_categories(&self, id: i64) -> Result<Vec<i64>> {
+        Ok(self
+            .connection
+            .prepare_cached(
+                "SELECT category_id FROM category_archive WHERE archive_id = ?1
+                 ORDER BY category_id",
+            )?
+            .query_map([id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// 全部归档的阅读进度。
     pub fn progress(&self) -> Result<HashMap<i64, Progress>> {
         read_all_progress(&self.connection)

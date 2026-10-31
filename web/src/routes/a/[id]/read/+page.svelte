@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { afterNavigate, replaceState } from '$app/navigation';
+	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { fittedWidth, pageUrl, widthTier } from '#lib/image.ts';
 	import { ProgressReporter } from '#lib/progress.ts';
@@ -16,6 +17,8 @@
 	const prefs = settings();
 	const book = untrack(() => data.archive);
 	const pages = untrack(() => data.pages);
+	let categoryList = $state(untrack(() => data.categories));
+	let members = $state(untrack(() => data.archive.categories));
 
 	let current = $state(untrack(() => data.start));
 	let toolbar = $state(false);
@@ -266,6 +269,7 @@
 					</div>
 				{/if}
 			</div>
+			<CategoryPicker archive={book.id} bind:categories={categoryList} bind:members />
 			<TagTable rows={tagRows(book)} />
 			{#if book.summary}<p class="summary">{book.summary}</p>{/if}
 		</aside>

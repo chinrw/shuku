@@ -72,6 +72,18 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 { "categories": [{ "id": 2, "name": "收藏", "pinned": true, "dynamic": false, "count": 812 }] }
 ```
 
+下面几个接口修改分类。M1 没有认证，它们和进度上报一样只在局域网里用；和控制台一样，`Sec-Fetch-Site` 不是 `same-origin` 或 `none`、或者 `Origin` 与 `Host` 不一致的请求返回 403。写入提交后服务端立即刷新快照里的分类，紧接着的分类列表和按分类搜索已经是新的。
+
+`POST /api/categories`：新建分类，请求体 `{"name": "收藏", "search": "", "pinned": false}`，`search` 和 `pinned` 可省略。`name` 去掉首尾空白后不能为空，最多 100 个字。`search` 非空是动态分类，语句要能被搜索接口解析，否则返回 400。成功返回 201 和 `{"id": 7}`。名字可以重复。
+
+`PATCH /api/categories/{id}`：改 `name`、`search`、`pinned` 中给出的字段，校验同上，成功返回 204。静态分类和动态分类不能互相转换：给静态分类设非空的 `search`、或者把动态分类的 `search` 设为空，返回 400。
+
+`DELETE /api/categories/{id}`：删除分类和它的成员关系，归档本身不动，返回 204。
+
+`PUT /api/categories/{id}/archives/{archive}`、`DELETE /api/categories/{id}/archives/{archive}`：把归档加进静态分类或移出，返回 204。已经在（或已经不在）分类里时同样返回 204。动态分类返回 400。
+
+以上接口在分类或归档不存在时返回 404。迁移工具重新导入 LRR 的分类时，会按 LRR 的现状整体替换那些从 LRR 来的分类的成员，在 Shuku 里对它们做的增删会被覆盖；在 Shuku 里新建的分类不受影响。
+
 ## 标签统计和补全
 
 `GET /api/facets?q=&category=&limit=`
@@ -104,12 +116,15 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
   "file_size": 123456789,
   "progress": null,
   "cover_url": "/api/archives/42/thumbnail?v=<quick_hash>",
+  "categories": [2],
   "tags": [
     { "namespace": "", "values": ["独立标签"] },
     { "namespace": "artist", "values": ["某某"] }
   ]
 }
 ```
+
+`categories` 是这本书所在的静态分类的 ID，按 ID 升序；动态分类不列出。
 
 `tags` 按命名空间分组，组按命名空间名排序，没有命名空间的标签放在 `namespace` 为空字符串的组里。
 

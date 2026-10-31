@@ -8,7 +8,7 @@ use shuku_store::{Error, Store, open_connection};
 fn rejects_newer_schema_versions_without_changing_them() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    for version in [5, 8] {
+    for version in [6, 9] {
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "user_version", version)
@@ -60,7 +60,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(pragma("user_version"), 4);
+    assert_eq!(pragma("user_version"), 5);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
     assert_eq!(pragma("mmap_size"), 0x7fff_0000);
@@ -204,4 +204,54 @@ fn migrates_page_rows_into_one_list_per_archive() {
         )
         .unwrap();
     assert_eq!(old_table, 0);
+}
+
+#[test]
+fn migration_keeps_categories_and_members_and_stops_reusing_category_ids() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shuku.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(concat!(
+            include_str!("../src/migrations/001_initial.sql"),
+            include_str!("../src/migrations/002_lrr_ids.sql"),
+            include_str!("../src/migrations/003_page_list.sql"),
+            include_str!("../src/migrations/004_lrr_pending.sql"),
+            "PRAGMA user_version = 4;
+             INSERT INTO archive (path, title, summary, page_count, file_size, mtime, quick_hash,
+                 content_hash, is_new, date_added, source_url)
+                 VALUES ('a.cbz', 'A', '', 1, 1, 0, 'h', NULL, 0, 0, NULL);
+             INSERT INTO category (id, name, search, pinned, lrr_id)
+                 VALUES (1, '收藏', '', 1, 'SET_1'), (2, '动态', 'artist:a', 0, NULL);
+             INSERT INTO category_archive VALUES (1, 1);"
+        ))
+        .unwrap();
+    drop(connection);
+
+    let mut store = Store::open(&path).unwrap();
+    let categories = store.categories().unwrap();
+    assert_eq!(
+        categories
+            .iter()
+            .map(|c| (c.id, c.name.as_str(), c.archives.clone()))
+            .collect::<Vec<_>>(),
+        [(1, "收藏", vec![1]), (2, "动态", vec![])]
+    );
+    store.write(|writer| writer.delete_category(2)).unwrap();
+    let created = store
+        .write(|writer| writer.create_category("新的", "", false))
+        .unwrap();
+    assert_eq!(created, 3);
+    drop(store);
+    // 删除归档仍然级联删除成员关系，外键在重建后的表上照样生效。
+    let connection = open_connection(&path).unwrap();
+    connection
+        .execute("DELETE FROM archive WHERE id = 1", [])
+        .unwrap();
+    let members: i64 = connection
+        .query_row("SELECT count(*) FROM category_archive", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(members, 0);
 }

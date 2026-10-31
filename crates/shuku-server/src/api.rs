@@ -19,7 +19,12 @@ impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::Http { status, .. } => *status,
-            Self::Store(shuku_store::Error::ArchiveNotFound(_)) => StatusCode::NOT_FOUND,
+            Self::Store(
+                shuku_store::Error::ArchiveNotFound(_) | shuku_store::Error::CategoryNotFound(_),
+            ) => StatusCode::NOT_FOUND,
+            Self::Store(
+                shuku_store::Error::DynamicCategory(_) | shuku_store::Error::CategoryKindChange(_),
+            ) => StatusCode::BAD_REQUEST,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         if status.is_server_error() {
@@ -36,7 +41,6 @@ impl App {
             .route("/api/facets", get(facets))
             .route("/api/tags", get(suggest_tags))
             .route("/api/recent", get(recent))
-            .route("/api/categories", get(categories))
             .route("/api/archives/{id}", get(detail))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
@@ -45,6 +49,7 @@ impl App {
                 get(crate::images::thumbnail),
             )
             .route("/api/archives/{id}/progress", put(write_progress))
+            .merge(self.categories_router())
             .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
             .route("/api/", any(|| async { Error::not_found() }))
@@ -191,7 +196,7 @@ fn restrict_to_category(
 }
 
 /// 书库页的分类按钮。`count` 是分类里在快照中的本数。
-async fn categories(State(app): State<App>) -> Result<Json<Value>> {
+pub(crate) async fn categories(State(app): State<App>) -> Result<Json<Value>> {
     app.blocking(|app| {
         let snapshot = app.snapshot();
         let mut categories = Vec::new();
@@ -297,7 +302,9 @@ async fn detail(
 ) -> Result<Json<Value>> {
     let Path(id) = id.map_err(Error::bad_request)?;
     app.blocking(move |app| {
-        let archive = require_archive(&*app.reader()?, id)?;
+        let reader = app.reader()?;
+        let archive = require_archive(&reader, id)?;
+        let categories = reader.archive_categories(id)?;
         let tags = tag_groups(&archive.tags);
         Ok(Json(json!({
             "id": archive.id, "title": archive.metadata.title,
@@ -305,7 +312,7 @@ async fn detail(
             "is_new": archive.metadata.is_new, "date_added": archive.metadata.date_added,
             "source_url": archive.metadata.source_url, "file_size": archive.metadata.file_size,
             "progress": progress(archive.progress.as_ref()), "tags": tags,
-            "cover_url": cover_url(id, &archive.metadata.quick_hash),
+            "categories": categories, "cover_url": cover_url(id, &archive.metadata.quick_hash),
         })))
     })
     .await

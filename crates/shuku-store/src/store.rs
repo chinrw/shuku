@@ -284,6 +284,69 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 新建分类，返回它的 ID。`search` 为空是静态分类，成员用 [`Writer::set_category_member`] 增删。
+    pub fn create_category(&mut self, name: &str, search: &str, pinned: bool) -> Result<i64> {
+        Ok(self.connection.query_row(
+            "INSERT INTO category (name, search, pinned) VALUES (?1, ?2, ?3) RETURNING id",
+            params![name, search, pinned],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// 改分类的名字、搜索语句或置顶，`None` 的不变。静态分类和动态分类不能互相转换：
+    /// 转换会让静态分类的成员失效，或者让动态分类变成空的静态分类。
+    pub fn update_category(
+        &mut self,
+        id: i64,
+        name: Option<&str>,
+        search: Option<&str>,
+        pinned: Option<bool>,
+    ) -> Result<()> {
+        let dynamic = category_is_dynamic(self.connection, id)?;
+        if search.is_some_and(|search| search.is_empty() == dynamic) {
+            return Err(Error::CategoryKindChange(id));
+        }
+        self.connection.execute(
+            "UPDATE category SET name = coalesce(?2, name), search = coalesce(?3, search),
+                pinned = coalesce(?4, pinned)
+             WHERE id = ?1",
+            params![id, name, search, pinned],
+        )?;
+        Ok(())
+    }
+
+    /// 删除分类和它的成员关系，归档本身不动。
+    pub fn delete_category(&mut self, id: i64) -> Result<()> {
+        if self
+            .connection
+            .execute("DELETE FROM category WHERE id = ?1", [id])?
+            == 0
+        {
+            return Err(Error::CategoryNotFound(id));
+        }
+        Ok(())
+    }
+
+    /// 把归档加进静态分类（`member` 为真）或移出，返回成员关系是否有变化。
+    pub fn set_category_member(
+        &mut self,
+        category: i64,
+        archive: i64,
+        member: bool,
+    ) -> Result<bool> {
+        if category_is_dynamic(self.connection, category)? {
+            return Err(Error::DynamicCategory(category));
+        }
+        require_archive(self.connection, archive)?;
+        let sql = if member {
+            "INSERT INTO category_archive (category_id, archive_id) VALUES (?1, ?2)
+             ON CONFLICT DO NOTHING"
+        } else {
+            "DELETE FROM category_archive WHERE category_id = ?1 AND archive_id = ?2"
+        };
+        Ok(self.connection.execute(sql, [category, archive])? > 0)
+    }
+
     /// 按 LRR ID 新建或更新 Tankoubon，标签和归档成员整体替换。
     pub fn import_lrr_tankoubon(&mut self, tankoubon: &LrrTankoubon) -> Result<()> {
         let transaction = self.connection;
@@ -468,6 +531,18 @@ fn ensure_tag(connection: &Connection, tag: &Tag) -> Result<i64> {
              RETURNING id",
         )?
         .query_row(params![tag.namespace, tag.value, full], |row| row.get(0))?)
+}
+
+/// 分类是否是动态分类；分类不存在时返回 [`Error::CategoryNotFound`]。
+fn category_is_dynamic(connection: &Connection, id: i64) -> Result<bool> {
+    connection
+        .query_row(
+            "SELECT search != '' FROM category WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(Error::CategoryNotFound(id))
 }
 
 fn require_archive(connection: &Connection, id: i64) -> Result<()> {

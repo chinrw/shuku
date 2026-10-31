@@ -246,7 +246,7 @@ impl App {
 /// 拒绝别的网站发来的写请求。没有认证时，用户浏览的任意网页都能让浏览器向局域网里的
 /// 服务端发一个不带请求体的 POST（简单请求不经过 CORS 预检）。浏览器会带上
 /// `Sec-Fetch-Site`，旧浏览器至少带 `Origin`；两个都没有的是 curl 之类的工具，放行。
-async fn same_origin(
+pub(crate) async fn same_origin(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -266,7 +266,7 @@ async fn same_origin(
     if cross_site {
         return Error::Http {
             status: StatusCode::FORBIDDEN,
-            message: "控制台的写操作只接受同源请求".into(),
+            message: "写操作只接受同源请求".into(),
         }
         .into_response();
     }

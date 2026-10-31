@@ -33,6 +33,8 @@ export interface TagGroup {
 export interface ArchiveDetail extends ArchiveItem {
 	summary: string;
 	file_size: number;
+	/** 这本书所在的静态分类的 ID。 */
+	categories: number[];
 }
 
 export interface PageInfo {
@@ -69,14 +71,18 @@ export class ApiError extends Error {
 
 type Fetch = typeof fetch;
 
-async function request<T>(fetch: Fetch, path: string, init?: RequestInit): Promise<T> {
+async function send(fetch: Fetch, path: string, init?: RequestInit): Promise<Response> {
 	const response = await fetch(path, init);
 	if (!response.ok) {
 		// 服务端的错误统一是 {"error": "..."}；代理或网络层的错误可能不是 JSON。
 		const body = await response.json().catch(() => null);
 		throw new ApiError(response.status, body?.error ?? response.statusText);
 	}
-	return response.json();
+	return response;
+}
+
+async function request<T>(fetch: Fetch, path: string, init?: RequestInit): Promise<T> {
+	return (await send(fetch, path, init)).json();
 }
 
 export function search(
@@ -93,6 +99,22 @@ export function search(
 /** 书库页的分类按钮，置顶的在前。 */
 export async function categories(fetch: Fetch): Promise<Category[]> {
 	return (await request<{ categories: Category[] }>(fetch, '/api/categories')).categories;
+}
+
+/** 新建分类，`search` 为空是静态分类。 */
+export function createCategory(name: string, search = ''): Promise<{ id: number }> {
+	return request(fetch, '/api/categories', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ name, search })
+	});
+}
+
+/** 把归档加进静态分类或移出。 */
+export async function setCategoryMember(category: number, archive: number, member: boolean) {
+	await send(fetch, `/api/categories/${category}/archives/${archive}`, {
+		method: member ? 'PUT' : 'DELETE'
+	});
 }
 
 /** 最近读过的归档，按翻页时间从新到旧。 */

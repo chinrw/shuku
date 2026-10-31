@@ -24,6 +24,8 @@ pub(crate) struct Snapshot {
     timing: Timing,
     /// 进度变得最勤，单独刷新，不用重建索引和列表。
     progress: Arc<HashMap<i64, Progress>>,
+    /// 置顶在前，再按名字。分类很少，改动后立即单独刷新，加进分类后马上能按分类筛到。
+    categories: Arc<Vec<Category>>,
 }
 
 #[derive(Clone, Copy, serde::Serialize)]
@@ -46,8 +48,6 @@ pub(crate) struct NamespaceCount {
 
 struct Listing {
     tags: Vec<LibraryTag>,
-    /// 置顶在前，再按名字。
-    categories: Vec<Category>,
     /// 按 ID 升序，按 ID 二分查找。
     archives: Vec<LibraryArchive>,
 }
@@ -95,15 +95,15 @@ impl Snapshot {
             index: Arc::new(index),
             listing: Arc::new(Listing {
                 tags: library.tags,
-                categories: library.categories,
                 archives: library.archives,
             }),
             progress: Arc::new(library.progress),
+            categories: Arc::new(library.categories),
         })
     }
 
     pub(crate) fn categories(&self) -> &[Category] {
-        &self.listing.categories
+        &self.categories
     }
 
     pub(crate) fn timing(&self) -> Timing {
@@ -245,6 +245,26 @@ impl App {
             listing: current.listing.clone(),
             timing: current.timing,
             progress: Arc::new(progress),
+            categories: current.categories.clone(),
+        }));
+        Ok(())
+    }
+
+    /// 分类或成员变了：马上只换掉快照里的分类，不等刷新延迟。
+    pub(crate) fn refresh_categories(&self) -> Result<()> {
+        let _refresh = self
+            .0
+            .refresh_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let categories = self.reader()?.categories()?;
+        let current = self.snapshot();
+        self.0.snapshot.store(Arc::new(Snapshot {
+            index: current.index.clone(),
+            listing: current.listing.clone(),
+            timing: current.timing,
+            progress: current.progress.clone(),
+            categories: Arc::new(categories),
         }));
         Ok(())
     }

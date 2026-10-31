@@ -2,6 +2,7 @@
 
 mod admin;
 mod api;
+mod categories;
 mod db;
 mod decode;
 mod hash;
