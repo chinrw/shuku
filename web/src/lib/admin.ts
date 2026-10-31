@@ -123,8 +123,10 @@ export interface ScanSettings {
 	extra_skip: string[];
 }
 
-/** 条漫判断和允许的主机名。 */
+/** 书库名、条漫判断和允许的主机名。 */
 export interface ServerSettings {
+	/** 空字符串表示用默认的“书库”。 */
+	name: string;
 	detect_webtoons: boolean;
 	allowed_hosts: string[];
 }

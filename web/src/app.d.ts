@@ -7,6 +7,11 @@ declare global {
 			drawer?: number;
 		}
 	}
+
+	interface Window {
+		/** 只在桌面和 Android 客户端里有，见 `#lib/nativeApp.ts`。 */
+		shukuApp?: { home: string };
+	}
 }
 
 export {};

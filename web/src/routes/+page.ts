@@ -4,6 +4,7 @@ import {
 	recent,
 	savedTags,
 	search,
+	serverInfo,
 	type ArchiveItem,
 	type Category,
 	type Filter
@@ -63,6 +64,14 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			return null;
 		}
 	);
+	// 左上角的书库名，取不到时显示默认的“书库”。
+	const libraryName: Promise<string> = serverInfo(fetch).then(
+		(info) => info.name,
+		(error) => {
+			console.warn('读取服务器信息失败', error);
+			return '书库';
+		}
+	);
 	// 最近阅读只在书库首页显示。它加载失败不影响列表，只是不显示这一栏。
 	const reading: Promise<ArchiveItem[]> =
 		q || tags.length > 0 || category !== null || filter !== null || page > 1
@@ -73,7 +82,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			});
 	try {
 		// 几个请求互不依赖，并行发出；语句写错或分类不存在时搜索返回 400。
-		const [result, categoryList, recentItems, newCount, pinnedTags] = await Promise.all([
+		const [result, categoryList, recentItems, newCount, pinnedTags, name] = await Promise.all([
 			search(fetch, {
 				q,
 				sort,
@@ -88,7 +97,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			shelves,
 			reading,
 			newBooks,
-			pinned
+			pinned,
+			libraryName
 		]);
 		if (pinnedTags) savedTagStore().set(pinnedTags, pinnedMark);
 		return {
@@ -105,6 +115,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			categories: categoryList,
 			newCount,
 			recent: recentItems,
+			libraryName: name,
 			queryError: null
 		};
 	} catch (error) {
@@ -124,6 +135,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				categories: await shelves,
 				newCount: await newBooks,
 				recent: [],
+				libraryName: await libraryName,
 				queryError: error.message
 			};
 		}

@@ -14,6 +14,7 @@
 	} from '#lib/api.ts';
 	import { afterNavigate, invalidateAll, pushState, replaceState } from '$app/navigation';
 	import { page as route } from '$app/state';
+	import { serverListHref } from '#lib/nativeApp.ts';
 	import BatchBar from '#lib/BatchBar.svelte';
 	import BookDrawer from '#lib/BookDrawer.svelte';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
@@ -34,6 +35,8 @@
 
 	let { data } = $props();
 	const prefs = settings();
+	// 在桌面和 Android 客户端里，左上角的书库名打开客户端的服务器列表，用来切换服务器。
+	let serverList = $derived(serverListHref(route.url.href));
 
 	let items = $derived<ArchiveItem[]>(data.result?.items ?? []);
 	let query = $derived(data.q);
@@ -431,7 +434,11 @@
 </script>
 
 <header>
-	<a class="brand" href="/" onclick={() => (query = '')}>书库</a>
+	{#if serverList}
+		<a class="brand" href={serverList} title="切换服务器">{data.libraryName}</a>
+	{:else}
+		<a class="brand" href="/" onclick={() => (query = '')}>{data.libraryName}</a>
+	{/if}
 	<form onsubmit={submit} role="search">
 		<Icon name="search" size={16} />
 		<input

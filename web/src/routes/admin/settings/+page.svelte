@@ -20,6 +20,7 @@
 	// 逗号分隔的输入框，保存时再拆成列表。
 	let skipText = $state('');
 	let hostsText = $state('');
+	let nameText = $state('');
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
@@ -41,6 +42,7 @@
 			.then((loaded) => {
 				general = loaded;
 				hostsText = loaded.allowed_hosts.join(', ');
+				nameText = loaded.name;
 			})
 			.catch((cause) => (error = message(cause)));
 	});
@@ -67,6 +69,7 @@
 		save(async () => {
 			general = await updateServerSettings(patch);
 			hostsText = general.allowed_hosts.join(', ');
+			nameText = general.name;
 		});
 
 	// 定时扫描是文件监视的后备，默认不开，间隔都比较长。
@@ -187,6 +190,20 @@
 	<section class="adm-card">
 		<h2>阅读和访问</h2>
 		{#if general}
+			<form
+				class="option"
+				onsubmit={(event) => {
+					event.preventDefault();
+					changeGeneral({ name: nameText });
+				}}
+			>
+				<label class="adm-label" for="library-name">书库名</label>
+				<div class="field">
+					<input id="library-name" bind:value={nameText} placeholder="书库" maxlength="100" />
+					<button class="adm-button" disabled={saving}>保存</button>
+				</div>
+			</form>
+			<p class="adm-note">显示在书库页左上角。同一台机器上开了几个实例时，桌面和手机客户端用它区分服务器。</p>
 			<div class="option">
 				<span class="adm-label">条漫判断</span>
 				<div class="adm-tabs" role="group" aria-label="条漫判断">

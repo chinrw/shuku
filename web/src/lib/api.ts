@@ -155,6 +155,19 @@ export function search(
 	return request(fetch, `/api/search?${query}`);
 }
 
+/** 不需要令牌的服务器信息。 */
+export interface ServerInfo {
+	/** 控制台设置的书库名，没设置时是“书库”。 */
+	name: string;
+	version: string;
+	archives: number;
+	require_token: boolean;
+}
+
+export function serverInfo(fetch: Fetch): Promise<ServerInfo> {
+	return request(fetch, '/api/info');
+}
+
 export function series(fetch: Fetch, id: number): Promise<Series> {
 	return request(fetch, `/api/series/${id}`);
 }
