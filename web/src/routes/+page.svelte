@@ -14,6 +14,7 @@
 	import BookDrawer from '#lib/BookDrawer.svelte';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import { forgetMembers } from '#lib/membership.svelte.ts';
+	import { savedTagStore } from '#lib/savedTags.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
@@ -47,7 +48,9 @@
 
 	// 换排序方式时方向回到它的默认方向。
 	function navigate(q: string, sort: Sort, order: Order | null = sort === data.sort ? data.order : null) {
-		goto(libraryHref({ q, sort, order, category: data.category, filter: data.filter }));
+		goto(
+			libraryHref({ q, sort, order, category: data.category, filter: data.filter, tags: data.tags })
+		);
 	}
 
 	let order = $derived(data.order ?? defaultOrder(data.sort));
@@ -63,7 +66,9 @@
 	let batchMessage = $state<string | null>(null);
 
 	// 换了搜索条件才清空选择；同一个条件重新加载（例如批量改完后的刷新）时保留。
-	let listKey = $derived(JSON.stringify([data.q, data.sort, data.order, data.category, data.filters]));
+	let listKey = $derived(
+		JSON.stringify([data.q, data.tags, data.sort, data.order, data.category, data.filters])
+	);
 	$effect(() => {
 		void listKey;
 		untrack(() => {
@@ -141,7 +146,12 @@
 		picking = true;
 		randomError = null;
 		try {
-			const id = await random({ q: data.q, category: data.category, filters: data.filters });
+			const id = await random({
+				q: data.q,
+				category: data.category,
+				filters: data.filters,
+				tags: data.tags
+			});
 			if (id === null) randomError = '没有符合条件的书，随机不到';
 			else await goto(`/a/${id}/read`);
 		} catch (error) {
@@ -219,7 +229,8 @@
 			sort: data.sort,
 			order: data.order,
 			category: data.category === id ? null : id,
-			filter: data.filter
+			filter: data.filter,
+			tags: data.tags
 		});
 	}
 
@@ -230,9 +241,32 @@
 			sort: data.sort,
 			order: data.order,
 			category: data.category,
-			filter: data.filter === filter ? null : filter
+			filter: data.filter === filter ? null : filter,
+			tags: data.tags
 		});
 	}
+
+	// 收藏的标签可以选好几个，选中的都要有（交集），再点一次取消这一个。
+	function tagHref(tag: string) {
+		return libraryHref({
+			q: data.q,
+			sort: data.sort,
+			order: data.order,
+			category: data.category,
+			filter: data.filter,
+			tags: data.tags.includes(tag)
+				? data.tags.filter((other) => other !== tag)
+				: [...data.tags, tag]
+		});
+	}
+
+	const pinnedTags = savedTagStore();
+
+	// 选中后又取消收藏的标签也照样显示，免得筛选着却看不到、取消不了。
+	let tagButtons = $derived([
+		...pinnedTags.tags,
+		...data.tags.filter((tag) => !pinnedTags.has(tag))
+	]);
 
 	// 早先的阅读状态和未打标签筛选没有按钮了，旧链接打开时在结果说明里写出来。
 	let hiddenFilter = $derived(
@@ -280,6 +314,7 @@
 		try {
 			const result = await search(fetch, {
 				q: data.q,
+				tags: data.tags,
 				sort: data.sort,
 				order: data.order,
 				category: data.category,
@@ -488,6 +523,17 @@
 			<span class="count">{category.count}</span>
 		</a>
 	{/each}
+	{#each tagButtons as tag (tag)}
+		<a
+			class={namespaceClass(splitTag(tag).namespace)}
+			href={tagHref(tag)}
+			aria-current={data.tags.includes(tag) ? 'true' : undefined}
+			title="收藏的标签，可以同时选几个"
+		>
+			<Icon name="tag" size={13} />
+			<span>{tag}</span>
+		</a>
+	{/each}
 	<span class="end">
 		<button aria-pressed={prefs.hideFinished} onclick={toggleHideFinished}>隐藏读完的</button>
 		{#if data.result}<span class="total">共 {data.result.total} 本</span>{/if}
@@ -646,7 +692,7 @@
 	<div class="bar-space"></div>
 	<BatchBar
 		selection={selectAll
-			? { search: { q: data.q, category: data.category, filters: data.filters } }
+			? { search: { q: data.q, category: data.category, filters: data.filters, tags: data.tags } }
 			: { ids: [...selected] }}
 		count={selectAll ? (data.result?.total ?? 0) : selected.size}
 		total={data.result?.total ?? 0}

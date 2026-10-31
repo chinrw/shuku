@@ -131,6 +131,8 @@ export function search(
 		category?: number | null;
 		/** 同时生效的快捷筛选。 */
 		filters?: Filter[];
+		/** 每个都要完整匹配的标签，书库筛选行上选中的收藏标签。 */
+		tags?: string[];
 		after?: number;
 		limit?: number;
 		/** 同一系列只返回一卷，书库页每个系列一张卡。 */
@@ -141,6 +143,7 @@ export function search(
 	if (params.order != null) query.set('order', params.order);
 	if (params.category != null) query.set('category', String(params.category));
 	if (params.filters?.length) query.set('filter', params.filters.join(','));
+	for (const tag of params.tags ?? []) query.append('tag', tag);
 	if (params.after !== undefined) query.set('after', String(params.after));
 	if (params.limit !== undefined) query.set('limit', String(params.limit));
 	if (params.group != null) query.set('group', params.group);
@@ -165,6 +168,21 @@ export function createCategory(name: string, search = ''): Promise<{ id: number 
 	});
 }
 
+/** 收藏的标签，所有设备共用，按收藏的先后排列。 */
+export async function savedTags(fetch: Fetch): Promise<string[]> {
+	return (await request<{ tags: string[] }>(fetch, '/api/saved-tags')).tags;
+}
+
+/** 收藏或取消收藏一个标签，返回改完的整个列表。 */
+export async function setSavedTag(tag: string, saved: boolean): Promise<string[]> {
+	const body = await request<{ tags: string[] }>(fetch, '/api/saved-tags', {
+		method: saved ? 'PUT' : 'DELETE',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ tag })
+	});
+	return body.tags;
+}
+
 /** 把归档加进静态分类或移出。 */
 export async function setCategoryMember(category: number, archive: number, member: boolean) {
 	await send(fetch, `/api/categories/${category}/archives/${archive}`, {
@@ -177,10 +195,12 @@ export async function random(params: {
 	q: string;
 	category: number | null;
 	filters: Filter[];
+	tags: string[];
 }): Promise<number | null> {
 	const query = new URLSearchParams({ q: params.q });
 	if (params.category !== null) query.set('category', String(params.category));
 	if (params.filters.length) query.set('filter', params.filters.join(','));
+	for (const tag of params.tags) query.append('tag', tag);
 	try {
 		return (await request<{ id: number }>(fetch, `/api/random?${query}`)).id;
 	} catch (error) {
@@ -215,7 +235,7 @@ export function fetchMetadata(
 /** 批量操作要改的书：一串 ID，或者和搜索相同的条件选出的全部结果。 */
 export type BatchSelection =
 	| { ids: number[] }
-	| { search: { q: string; category: number | null; filters: Filter[] } };
+	| { search: { q: string; category: number | null; filters: Filter[]; tags: string[] } };
 
 export interface BatchChange {
 	add_tags?: string[];
@@ -233,7 +253,8 @@ export async function batch(selection: BatchSelection, change: BatchChange): Pro
 					search: {
 						q: selection.search.q,
 						category: selection.search.category ?? undefined,
-						filter: selection.search.filters.join(',')
+						filter: selection.search.filters.join(','),
+						tags: selection.search.tags
 					}
 				};
 	const result = await request<{ archives: number }>(fetch, '/api/batch', {

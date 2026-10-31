@@ -4,7 +4,8 @@ import {
 	parseCategory,
 	parseFilter,
 	parseOrder,
-	parseSort
+	parseSort,
+	parseTags
 } from './libraryUrl';
 
 describe('libraryHref', () => {
@@ -63,5 +64,14 @@ describe('sort and order', () => {
 		expect(libraryHref({ q: '', sort: 'ns:artist', order: 'desc', category: null })).toBe(
 			'/?sort=ns%3Aartist&o=desc'
 		);
+	});
+});
+
+describe('saved tag selection', () => {
+	it('keeps the selected tags in the address', () => {
+		expect(
+			libraryHref({ q: '', sort: 'title', category: null, tags: ['artist:a', 'long hair'] })
+		).toBe('/?t=artist%3Aa&t=long+hair');
+		expect(parseTags([' Artist:A ', '', 'artist:a', 'x'])).toEqual(['artist:a', 'x']);
 	});
 });

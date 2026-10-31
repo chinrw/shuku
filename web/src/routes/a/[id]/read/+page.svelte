@@ -543,7 +543,7 @@
 					<a href={downloadUrl(book.id)} download>下载</a>
 				</div>
 				<CategoryPicker archive={book.id} bind:categories={categoryList} {members} />
-				<TagTable rows={tagRows(book)} />
+				<TagTable rows={tagRows(book)} saveable />
 				{#if book.summary}<p class="summary">{book.summary}</p>{/if}
 				<div class="overview-pages">
 					<PageGrid

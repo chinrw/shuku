@@ -35,6 +35,8 @@ export function libraryHref(params: {
 	order?: Order | null;
 	category: number | null;
 	filter?: UrlFilter | null;
+	/** 筛选行上选中的收藏标签。 */
+	tags?: string[];
 }): string {
 	const query = new URLSearchParams();
 	if (params.q) query.set('q', params.q);
@@ -42,7 +44,13 @@ export function libraryHref(params: {
 	if (params.order && params.order !== defaultOrder(params.sort)) query.set('o', params.order);
 	if (params.category !== null) query.set('c', String(params.category));
 	if (params.filter) query.set('f', params.filter);
+	for (const tag of params.tags ?? []) query.append('t', tag);
 	return query.size ? `/?${query}` : '/';
+}
+
+/** 地址里选中的收藏标签，去掉空的和重复的。 */
+export function parseTags(raw: string[]): string[] {
+	return [...new Set(raw.map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
 }
 
 /** 地址里的分类 ID，不是正整数时当作没有。 */

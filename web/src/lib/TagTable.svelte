@@ -1,8 +1,20 @@
 <script lang="ts">
+	import Icon from './Icon.svelte';
+	import { savedTagStore } from './savedTags.svelte';
 	import { namespaceClass, type TagRow } from './tags';
 
 	// LRR 的标签表：左列是命名空间，右列是可点的标签。compact 用在列表视图里。
-	let { rows, compact = false }: { rows: TagRow[]; compact?: boolean } = $props();
+	// saveable 时每个标签后面有书签图标，点一下收藏到书库的筛选行或取消。
+	let {
+		rows,
+		compact = false,
+		saveable = false
+	}: { rows: TagRow[]; compact?: boolean; saveable?: boolean } = $props();
+
+	const saved = savedTagStore();
+	$effect(() => {
+		if (saveable) saved.ensure();
+	});
 </script>
 
 <dl class:compact>
@@ -16,6 +28,20 @@
 					<a class="chip" href={value.href} target="_blank" rel="noreferrer">{value.text}</a>
 				{:else}
 					<a class="chip" href={value.href}>{value.text}</a>
+				{/if}
+				{#if saveable && value.tag}
+					{@const on = saved.has(value.tag)}
+					<button
+						class="save"
+						class:on
+						aria-pressed={on}
+						aria-label={on ? `取消收藏标签 ${value.text}` : `收藏标签 ${value.text}`}
+						title={saved.error ? `没有保存：${saved.error}` : on ? '已收藏，点一下取消' : '收藏这个标签'}
+						disabled={saved.isPending(value.tag)}
+						onclick={() => value.tag && saved.toggle(value.tag)}
+					>
+						<Icon name="bookmark" size={12} filled={on} />
+					</button>
 				{/if}
 			{/each}
 		</dd>
@@ -62,6 +88,23 @@
 
 	a.chip:hover {
 		color: var(--link);
+	}
+
+	/* 收藏按钮紧跟在标签后面，平时淡一些，收藏了用强调色。 */
+	.save {
+		display: inline-flex;
+		align-items: center;
+		margin-left: -0.2rem;
+		padding: 0.1rem;
+		border: none;
+		background: transparent;
+		color: var(--faint, #7c8087);
+		cursor: pointer;
+	}
+
+	.save:hover,
+	.save.on {
+		color: var(--accent, #3b97ea);
 	}
 
 	.chip.plain {

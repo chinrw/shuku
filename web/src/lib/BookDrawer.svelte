@@ -80,7 +80,7 @@
 		<a href={downloadUrl(book.id)} download>下载</a>
 	</div>
 	<div class="tags">
-		<TagTable rows={tagRows(book)} />
+		<TagTable rows={tagRows(book)} saveable />
 	</div>
 	{#if detail?.id === book.id}
 		<CategoryPicker archive={book.id} bind:categories members={detail.members} />

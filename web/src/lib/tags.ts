@@ -9,6 +9,8 @@ export interface TagValue {
 	/** 普通标签链接到精确搜索，来源是外链，加入日期不可点。 */
 	href: string | null;
 	external: boolean;
+	/** 小写的完整标签名，可以收藏；加入日期和来源不是真正的标签，为 `null`。 */
+	tag: string | null;
 }
 
 export interface TagRow {
@@ -26,14 +28,24 @@ export function formatDate(seconds: number): string {
 
 function sourceValue(raw: string): TagValue {
 	const href = httpUrl(/^https?:\/\//.test(raw) ? raw : `https://${raw}`);
-	return { text: raw, href, external: true };
+	return { text: raw, href, external: true, tag: null };
 }
 
 function tagValue(namespace: string, value: string): TagValue {
 	if (namespace === 'source') return sourceValue(value);
 	const seconds = Number(value);
 	const text = TIME.test(namespace) && Number.isFinite(seconds) ? formatDate(seconds) : value;
-	return { text, href: `/?q=${encodeURIComponent(tagTerm(namespace, value))}`, external: false };
+	return {
+		text,
+		href: `/?q=${encodeURIComponent(tagTerm(namespace, value))}`,
+		external: false,
+		tag: fullTag(namespace, value)
+	};
+}
+
+/** 搜索和收藏用的完整标签名：小写的“命名空间:值”，没有命名空间时只有值。 */
+export function fullTag(namespace: string, value: string): string {
+	return (namespace ? `${namespace}:${value}` : value).toLowerCase();
 }
 
 // 没有命名空间的标签在 LRR 里归入 other。
@@ -59,7 +71,7 @@ export function tagRows(item: {
 	for (const group of item.tags) {
 		for (const value of group.values) add(groupKey(group.namespace), tagValue(group.namespace, value));
 	}
-	add('date_added', { text: formatDate(item.date_added), href: null, external: false });
+	add('date_added', { text: formatDate(item.date_added), href: null, external: false, tag: null });
 	if (item.source_url) add('source', sourceValue(item.source_url));
 	return [...rows.keys()]
 		.sort()

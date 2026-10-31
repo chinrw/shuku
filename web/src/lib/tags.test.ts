@@ -39,16 +39,26 @@ describe('tagRows', () => {
 		expect(other.values[1].href).toBe(`/?q=${encodeURIComponent('"other:full color"')}`);
 	});
 
+	it('names each real tag in lower case so it can be saved', () => {
+		const other = rows.find((row) => row.label === 'Other')!;
+		expect(other.values.map((value) => value.tag)).toEqual(['独立标签', 'other:full color']);
+	});
+
 	it('shows times as dates and the source as an external link', () => {
 		const date = new Date(1_700_000_000 * 1000).toLocaleDateString();
 		expect(rows.find((row) => row.label === 'Date Added')?.values).toEqual([
-			{ text: date, href: null, external: false }
+			{ text: date, href: null, external: false, tag: null }
 		]);
 		expect(rows.find((row) => row.label === 'Timestamp')?.values[0].text).toBe(
 			new Date(1_600_000_000 * 1000).toLocaleDateString()
 		);
 		expect(rows.find((row) => row.label === 'Source')?.values).toEqual([
-			{ text: 'https://example.com/g/1', href: 'https://example.com/g/1', external: true }
+			{
+				text: 'https://example.com/g/1',
+				href: 'https://example.com/g/1',
+				external: true,
+				tag: null
+			}
 		]);
 	});
 

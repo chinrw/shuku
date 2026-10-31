@@ -2,12 +2,20 @@ import {
 	ApiError,
 	categories,
 	recent,
+	savedTags,
 	search,
 	type ArchiveItem,
 	type Category,
 	type Filter
 } from '#lib/api.ts';
-import { parseCategory, parseFilter, parseOrder, parseSort } from '#lib/libraryUrl.ts';
+import {
+	parseCategory,
+	parseFilter,
+	parseOrder,
+	parseSort,
+	parseTags
+} from '#lib/libraryUrl.ts';
+import { savedTagStore } from '#lib/savedTags.svelte.ts';
 import { settings } from '#lib/settings.svelte.ts';
 import type { PageLoad } from './$types';
 
@@ -17,6 +25,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const order = parseOrder(url.searchParams.get('o'));
 	const category = parseCategory(url.searchParams.get('c'));
 	const filter = parseFilter(url.searchParams.get('f'));
+	// 筛选行上选中的收藏标签，每个都要完整匹配，和其他条件取交集。
+	const tags = parseTags(url.searchParams.getAll('t'));
 	const prefs = settings();
 	// 地址里的筛选加上“隐藏读完的”开关，两者同时生效。
 	const filters: Filter[] = [
@@ -28,6 +38,12 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const shelves: Promise<Category[]> = categories(fetch).catch((error) => {
 		console.warn('加载分类失败', error);
 		return [];
+	});
+	// 收藏的标签加载失败不影响列表，只是筛选行上不显示它们。
+	const pinnedMark = savedTagStore().mark();
+	const pinned: Promise<string[] | null> = savedTags(fetch).catch((error) => {
+		console.warn('加载收藏的标签失败', error);
+		return null;
 	});
 	// “新书”按钮上的本数是全库的，和当前搜索无关。取不到时按钮照样能点，只是不显示本数。
 	const newBooks: Promise<number | null> = search(fetch, {
@@ -43,7 +59,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		}
 	);
 	// 最近阅读只在书库首页显示。它加载失败不影响列表，只是不显示这一栏。
-	const reading: Promise<ArchiveItem[]> = q || category !== null || filter !== null
+	const reading: Promise<ArchiveItem[]> =
+		q || tags.length > 0 || category !== null || filter !== null
 		? Promise.resolve([])
 		: recent(fetch).catch((error) => {
 				console.warn('加载最近阅读失败', error);
@@ -51,12 +68,14 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			});
 	try {
 		// 几个请求互不依赖，并行发出；语句写错或分类不存在时搜索返回 400。
-		const [result, categoryList, recentItems, newCount] = await Promise.all([
-			search(fetch, { q, sort, order, category, filters, group }),
+		const [result, categoryList, recentItems, newCount, pinnedTags] = await Promise.all([
+			search(fetch, { q, sort, order, category, filters, tags, group }),
 			shelves,
 			reading,
-			newBooks
+			newBooks,
+			pinned
 		]);
+		if (pinnedTags) savedTagStore().set(pinnedTags, pinnedMark);
 		return {
 			q,
 			sort,
@@ -64,6 +83,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			category,
 			filter,
 			filters,
+			tags,
 			group,
 			result,
 			categories: categoryList,
@@ -81,6 +101,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				category,
 				filter,
 				filters,
+				tags,
 				group,
 				result: null,
 				categories: await shelves,

@@ -55,7 +55,7 @@
 			<a class="title" href="/a/{item.id}">{item.title}</a>
 		</div>
 	{/if}
-	<TagTable rows={tagRows(item)} />
+	<TagTable rows={tagRows(item)} saveable />
 </div>
 
 <style>

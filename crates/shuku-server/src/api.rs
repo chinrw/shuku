@@ -76,6 +76,7 @@ impl App {
             .route("/api/archives/{id}/progress", put(write_progress))
             .merge(self.edit_router())
             .merge(self.categories_router())
+            .merge(self.saved_tags_router())
             .merge(self.metadata_router())
             .merge(self.batch_router())
             .merge(self.auth_router())
@@ -151,11 +152,25 @@ struct SearchParams {
     group: Option<String>,
 }
 
+/// 查询参数里重复的 `tag=`。`Query` 的结构体反序列化收不了重复的键，另外按键值对取一遍。
+type QueryPairs = std::result::Result<Query<Vec<(String, String)>>, QueryRejection>;
+
+fn exact_tags(pairs: QueryPairs) -> Result<Vec<String>> {
+    let Query(pairs) = pairs.map_err(Error::bad_request)?;
+    Ok(pairs
+        .into_iter()
+        .filter(|(key, _)| key == "tag")
+        .map(|(_, tag)| tag)
+        .collect())
+}
+
 async fn search(
     State(app): State<App>,
     params: std::result::Result<Query<SearchParams>, QueryRejection>,
+    pairs: QueryPairs,
 ) -> Result<Json<Value>> {
     let Query(params) = params.map_err(Error::bad_request)?;
+    let tags = exact_tags(pairs)?;
     let limit = params.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
         return Err(Error::bad_request("limit 必须在 1 到 200 之间"));
@@ -169,7 +184,7 @@ async fn search(
     };
     app.blocking(move |app| {
         let snapshot = app.snapshot();
-        let (mut query, degraded) = build_query(&snapshot, &params.q, params.category, &filters)?;
+        let (mut query, degraded) = build_query(&snapshot, &params.q, params.category, &filters, &tags)?;
         query.sort = sort;
         query.reverse = reverse;
         query.after = params.after;
@@ -223,14 +238,16 @@ struct RandomParams {
 async fn random(
     State(app): State<App>,
     params: std::result::Result<Query<RandomParams>, QueryRejection>,
+    pairs: QueryPairs,
 ) -> Result<Json<Value>> {
     let Query(params) = params.map_err(Error::bad_request)?;
     let filters = parse_filters(&params.filter)?;
+    let tags = exact_tags(pairs)?;
     // 不为一个随机数引入 rand：标准库每个 RandomState 的种子都不同。
     let seed = std::hash::BuildHasher::hash_one(&std::collections::hash_map::RandomState::new(), 0);
     app.blocking(move |app| {
         let snapshot = app.snapshot();
-        let (query, _) = build_query(&snapshot, &params.q, params.category, &filters)?;
+        let (query, _) = build_query(&snapshot, &params.q, params.category, &filters, &tags)?;
         let id = snapshot
             .index
             .random(&query, seed)
@@ -333,15 +350,22 @@ pub(crate) fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
         .collect()
 }
 
-/// 把搜索语句、分类和快捷筛选合成一个查询，返回查询和语句是否被降级。
+/// 把搜索语句、分类、快捷筛选和精确标签合成一个查询，返回查询和语句是否被降级。
+/// `tags` 是书库筛选行上选中的收藏标签，每个都要完整匹配：搜索语句里没有命名空间的词条
+/// 总是子串匹配（和 LRR 一样），表达不了“正好是这个标签”。
 pub(crate) fn build_query(
     snapshot: &crate::snapshot::Snapshot,
     q: &str,
     category: Option<i64>,
     filters: &[Filter],
+    tags: &[String],
 ) -> Result<(shuku_index::Query, bool)> {
     let parsed = shuku_index::parse_query(q).map_err(Error::bad_request)?;
     let mut query = parsed.query;
+    query.include.extend(
+        tags.iter()
+            .map(|tag| shuku_index::Term::Tag(tag.trim().to_lowercase())),
+    );
     let mut degraded = parsed.degraded;
     for condition in parsed.read {
         restrict_by_read(snapshot, &mut query, condition);
@@ -572,7 +596,7 @@ async fn facets(
     let filters = parse_filters(&params.filter)?;
     app.blocking(move |app| {
         let snapshot = app.snapshot();
-        let (query, _) = build_query(&snapshot, &params.q, params.category, &filters)?;
+        let (query, _) = build_query(&snapshot, &params.q, params.category, &filters, &[])?;
         Ok(Json(tag_counts(snapshot.index.facets(&query, limit))))
     })
     .await

@@ -43,6 +43,9 @@ struct Selection {
     category: Option<i64>,
     #[serde(default)]
     filter: String,
+    /// 书库筛选行上选中的收藏标签，和搜索接口的 `tag=` 一样每个都要完整匹配。
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 struct Batch {
@@ -66,8 +69,13 @@ impl App {
             (None, Some(search)) => {
                 let filters = crate::api::parse_filters(&search.filter)?;
                 let snapshot = self.snapshot();
-                let (mut query, _) =
-                    crate::api::build_query(&snapshot, &search.q, search.category, &filters)?;
+                let (mut query, _) = crate::api::build_query(
+                    &snapshot,
+                    &search.q,
+                    search.category,
+                    &filters,
+                    &search.tags,
+                )?;
                 // 多取一本，才知道是不是超过了上限。
                 query.limit = ARCHIVE_LIMIT + 1;
                 snapshot

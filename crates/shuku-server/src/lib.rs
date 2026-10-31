@@ -15,6 +15,7 @@ mod images;
 mod logs;
 mod mcp;
 mod metadata;
+mod saved_tags;
 mod scan;
 mod series;
 mod settings;
