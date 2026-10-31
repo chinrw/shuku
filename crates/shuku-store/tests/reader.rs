@@ -98,3 +98,59 @@ fn savepoints_undo_one_step_and_failed_writes_undo_the_whole_transaction() {
     assert!(failed.is_err());
     assert_eq!(store.find_by_path("rolled-back.cbz").unwrap(), None);
 }
+
+#[test]
+fn a_checkpoint_blocked_by_another_checkpointer_is_not_complete() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shuku.sqlite");
+    let mut store = Store::open(&path).unwrap();
+    store.disable_auto_checkpoint().unwrap();
+    store
+        .save_archive(None, &metadata("one.cbz"), &pages())
+        .unwrap();
+    // 旧快照上的读事务让 FULL checkpoint 一直等，等待期间它占着 checkpoint 锁。
+    let old_read = open_connection(&path).unwrap();
+    old_read
+        .execute_batch("BEGIN; SELECT count(*) FROM archive;")
+        .unwrap();
+    store
+        .save_archive(None, &metadata("two.cbz"), &pages())
+        .unwrap();
+    // 探测用的连接要在 FULL checkpoint 开始前打开：打开连接时的迁移检查要写锁，
+    // 而 FULL 等待期间占着写锁。
+    let probe = open_connection(&path).unwrap();
+    let (started, blocked) = std::sync::mpsc::channel();
+    let checkpointer = std::thread::spawn({
+        let path = path.clone();
+        move || {
+            let connection = open_connection(&path).unwrap();
+            connection
+                .busy_timeout(std::time::Duration::from_secs(3))
+                .unwrap();
+            started.send(()).unwrap();
+            connection
+                .query_row("PRAGMA wal_checkpoint(FULL)", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        }
+    });
+    blocked.recv().unwrap();
+    // 等另一个连接拿到锁并进入忙等：这时 PASSIVE checkpoint 返回 (1, -1, -1)。
+    // 旧读事务本身也会让 checkpoint 写不完，所以先确认处于锁竞争，再检查返回值。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let busy: i64 = probe
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(0))
+            .unwrap();
+        if busy == 1 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "没有等到锁竞争");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!store.checkpoint().unwrap());
+    old_read.execute_batch("COMMIT").unwrap();
+    checkpointer.join().unwrap();
+    assert!(store.checkpoint().unwrap());
+}
