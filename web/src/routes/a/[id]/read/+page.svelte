@@ -5,7 +5,7 @@
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
-	import { fittedWidth, pageUrl, widthTier } from '#lib/image.ts';
+	import { bytes } from '#lib/format.ts';
 	import PageGrid from '#lib/PageGrid.svelte';
 	import { ProgressReporter } from '#lib/progress.ts';
 	import { settings, WEBTOON_WIDTH } from '#lib/settings.svelte.ts';
@@ -33,7 +33,6 @@
 	// 关闭了 SSR，这里一定在浏览器里运行。先取一次真实值，免得第一次渲染按宽度 0 请求图片。
 	let innerWidth = $state(window.innerWidth);
 	let innerHeight = $state(window.innerHeight);
-	let devicePixelRatio = $state(window.devicePixelRatio);
 	// 图片区域的大小，不含工具栏。挂载前先按整个窗口估计。
 	let stageWidth = $state(window.innerWidth);
 	let stageHeight = $state(window.innerHeight);
@@ -50,9 +49,14 @@
 		!webtoon ? SCROLL_MAX_WIDTH : innerHeight > innerWidth ? Infinity : prefs.webtoonWidth
 	);
 
-	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。
+	// 手机和 iPad 上可以把页面转 90 度看横跨两页的图，不用转设备方向锁。只在翻页模式下有。
+	const touchDevice = window.matchMedia('(pointer: coarse)').matches;
+	let rotated = $state(false);
+
+	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。页面转了 90 度时横竖对调。
+	let landscape = $derived(rotated ? innerHeight > innerWidth : innerWidth > innerHeight);
 	let spreads = $derived(
-		prefs.spread && innerWidth > innerHeight ? buildSpreads(pages) : pages.map((_, index) => [index])
+		prefs.spread && landscape ? buildSpreads(pages) : pages.map((_, index) => [index])
 	);
 	let spreadIndex = $derived(Math.max(spreads.findIndex((spread) => spread.includes(current)), 0));
 	let visible = $derived(spreads[spreadIndex] ?? []);
@@ -138,15 +142,32 @@
 		finishedVolume = !target && delta > 0 && nextVolume !== null;
 	}
 
-	function src(index: number, cssWidth: number) {
-		return pageUrl(pages[index], widthTier(cssWidth, devicePixelRatio));
+	// 阅读器总是用原图。原来按屏幕宽度和像素密度请求缩小的 JPEG，电脑上整页显示时只有
+	// 720 宽，放大或在高分屏上看会糊。缩略图另有接口，不受影响。
+	function src(index: number) {
+		return pages[index].url;
 	}
 
-	// 双页时每页只占半个屏幕宽。适应宽度时页面比屏幕高的部分靠上下滚动，不受屏幕高度限制。
-	function pagedSrc(index: number, count: number) {
-		const viewport = { width: stageWidth / count, height: stageHeight };
-		return src(index, fitWidth ? viewport.width : fittedWidth(pages[index], viewport));
+	// 浏览器解不了原图的格式（例如 Chrome 不支持的 JPEG XL）时，改要服务端转出的 JPEG：
+	// 取比原图窄的最宽一档，服务端只缩不放，不比原图窄就会原样返回。
+	const JPEG_WIDTHS = [2160, 1440, 1080, 720];
+
+	function fallback(event: Event, index: number) {
+		const image = event.currentTarget as HTMLImageElement;
+		const width = JPEG_WIDTHS.find((tier) => tier < pages[index].width);
+		const jpeg = width ? `${pages[index].url}&w=${width}` : null;
+		if (jpeg && !image.src.endsWith(jpeg)) image.src = jpeg;
 	}
+
+	// 非全屏时工具栏上显示的当前页分辨率和文件大小，和 LRR 一样；双页时两页都写。
+	let pageInfo = $derived(
+		(mode === 'paged' ? visible : [current])
+			.filter((index) => pages[index])
+			.map((index) => `${pages[index].width}×${pages[index].height} · ${bytes(pages[index].size)}`)
+			.join(' | ')
+	);
+
+	let stage = $state<HTMLElement>();
 
 	// 适应宽度时翻到新的一屏从顶部开始看。
 	$effect(() => {
@@ -174,7 +195,7 @@
 		if (mode !== 'paged') return;
 		for (const offset of [1, 2, -1]) {
 			const spread = spreads[spreadIndex + offset];
-			for (const index of spread ?? []) new Image().src = pagedSrc(index, spread.length);
+			for (const index of spread ?? []) new Image().src = src(index);
 		}
 	});
 
@@ -191,14 +212,62 @@
 		};
 	});
 
-	// 两侧三分之一翻页，中间在全屏时叫出或收起底栏。
+	/**
+	 * 读者眼里的横向位置（0 到 1，左到右）。页面转了 90 度（顺时针）时，读者把设备逆时针
+	 * 转过来看，屏幕的上方成了读者的左边，所以按屏幕的纵向算。
+	 */
+	function across(event: { clientX: number; clientY: number }): number {
+		const box = stage?.getBoundingClientRect();
+		if (!box) return event.clientX / stageWidth;
+		return rotated
+			? (event.clientY - box.top) / box.height
+			: (event.clientX - box.left) / box.width;
+	}
+
+	// 两侧三分之一翻页，中间在全屏时叫出或收起底栏。刚滑动翻过页时浏览器可能还补一次点击，忽略它。
 	function tap(event: MouseEvent) {
-		const x = event.clientX / stageWidth;
+		if (swiped) return;
+		const x = across(event);
 		if (x > 1 / 3 && x < 2 / 3) {
 			if (immersive) overlay = !overlay;
 			return;
 		}
 		const forward = x >= 2 / 3 === (prefs.direction === 'ltr');
+		step(forward ? 1 : -1);
+	}
+
+	// 手指左右滑动翻页，方向和点两侧一致：从右往左读时往右滑是下一页。两指缩放、
+	// 页面已经放大（这时单指是拖动）或者主要是上下滑时不翻页，留给浏览器。
+	const SWIPE_DISTANCE = 50;
+	const SWIPE_TIME = 800;
+	let swipe: { x: number; y: number; time: number; pinch: boolean } | null = null;
+	let swiped = false;
+
+	function touchStart(event: TouchEvent) {
+		if (event.touches.length > 1) {
+			if (swipe) swipe.pinch = true;
+			return;
+		}
+		const touch = event.touches[0];
+		swipe = { x: touch.clientX, y: touch.clientY, time: event.timeStamp, pinch: false };
+	}
+
+	function touchEnd(event: TouchEvent) {
+		const start = swipe;
+		if (!start || event.touches.length > 0) return;
+		swipe = null;
+		if (start.pinch || (window.visualViewport?.scale ?? 1) > 1.01) return;
+		const touch = event.changedTouches[0];
+		const screenX = touch.clientX - start.x;
+		const screenY = touch.clientY - start.y;
+		// 转了 90 度时读者的横向是屏幕的纵向，见 across()。
+		const dx = rotated ? screenY : screenX;
+		const dy = rotated ? -screenX : screenY;
+		const horizontal = Math.abs(dx) >= SWIPE_DISTANCE && Math.abs(dx) > Math.abs(dy) * 1.5;
+		if (!horizontal || event.timeStamp - start.time > SWIPE_TIME) return;
+		swiped = true;
+		setTimeout(() => (swiped = false), 400);
+		const forward = dx < 0 === (prefs.direction === 'ltr');
 		step(forward ? 1 : -1);
 	}
 
@@ -346,13 +415,16 @@
 	<title>{book.title} · Shuku</title>
 </svelte:head>
 
-<svelte:window bind:innerWidth bind:innerHeight bind:devicePixelRatio onkeydown={key} />
+<svelte:window bind:innerWidth bind:innerHeight onkeydown={key} />
 
 <div class="reader" class:immersive>
 	{#if !immersive}
 		<header class="top">
 			<a class="bar-button" href="/" onclick={back} aria-label="返回书库"><Icon name="back" /></a>
-			<h1 title={book.title}>{book.title}</h1>
+			<div class="title">
+				<h1 title={book.title}>{book.title}</h1>
+				{#if pageInfo}<span class="page-info">{pageInfo}</span>{/if}
+			</div>
 			{#if pages.length > 0}
 				<button class="bar-button" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
 					<Icon name="chevron-left" />
@@ -364,8 +436,19 @@
 					<Icon name="chevron-right" />
 				</button>
 			{/if}
+			{#if touchDevice && mode === 'paged' && pages.length > 0}
+				<button
+					class="bar-button"
+					class:on={rotated}
+					aria-pressed={rotated}
+					onclick={() => (rotated = !rotated)}
+					aria-label="把页面转 90 度"
+				>
+					<Icon name="rotate" />
+				</button>
+			{/if}
 			<BookmarkButton archive={book.id} {members} bind:categories={categoryList} bar />
-			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
+			<button class="bar-button detail" onclick={() => (panel = 'detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
 			<button class="bar-button" onclick={() => (panel = 'settings')} aria-label="阅读设置">
@@ -380,7 +463,14 @@
 		</header>
 	{/if}
 
-	<div class="stage" bind:clientWidth={stageWidth} bind:clientHeight={stageHeight}>
+	<div
+		class="stage"
+		bind:this={stage}
+		bind:clientWidth={stageWidth}
+		bind:clientHeight={stageHeight}
+		style:--stage-width="{stageWidth}px"
+		style:--stage-height="{stageHeight}px"
+	>
 		{#if pages.length === 0}
 			<p class="empty">这本书没有可显示的页面。</p>
 		{:else if mode === 'paged'}
@@ -389,14 +479,18 @@
 				class="paged"
 				class:rtl={prefs.direction === 'rtl'}
 				class:fit-width={fitWidth}
+				class:rotated
 				bind:this={pagedView}
 				onclick={tap}
+				ontouchstart={touchStart}
+				ontouchend={touchEnd}
 			>
 				{#each visible as index (index)}
 					<img
 						class="page"
 						class:half={visible.length === 2}
-						src={pagedSrc(index, visible.length)}
+						src={src(index)}
+						onerror={(event) => fallback(event, index)}
 						width={pages[index].width}
 						height={pages[index].height}
 						alt="第 {index + 1} 页"
@@ -417,7 +511,8 @@
 				{#each pages as page, index (index)}
 					<img
 						data-index={index}
-						src={src(index, Math.min(stageWidth, columnWidth))}
+						src={src(index)}
+						onerror={(event) => fallback(event, index)}
 						width={page.width}
 						height={page.height}
 						loading={Math.abs(index - current) <= 1 ? 'eager' : 'lazy'}
@@ -584,10 +679,16 @@
 		inset: 0;
 		display: flex;
 		flex-direction: column;
-		background: #000;
-		color: #eee;
+		background: var(--bg);
+		color: var(--fg);
 		user-select: none;
 		-webkit-user-select: none;
+	}
+
+	/* 全屏时四周全黑；平时用和书库一样的底色，不让整页黑着。 */
+	.reader.immersive {
+		background: #000;
+		color: #eee;
 	}
 
 	.top {
@@ -597,19 +698,39 @@
 		gap: 0.25rem;
 		padding: 0.3rem 0.5rem;
 		padding-top: max(0.3rem, env(safe-area-inset-top));
-		background: #2b2c31;
-		border-bottom: 1px solid #43464e;
+		background: var(--sunken);
+		border-bottom: 1px solid var(--border);
 	}
 
-	.top h1 {
+	.title {
+		display: flex;
 		flex: 1;
+		flex-direction: column;
 		min-width: 0;
 		margin: 0 0.4rem;
+	}
+
+	.title h1,
+	.page-info {
 		overflow: hidden;
-		font-size: 0.95rem;
-		font-weight: 500;
 		white-space: nowrap;
 		text-overflow: ellipsis;
+	}
+
+	.title h1 {
+		margin: 0;
+		font-size: 0.95rem;
+		font-weight: 500;
+	}
+
+	.page-info {
+		color: var(--muted);
+		font-size: 0.72rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.bar-button.on {
+		color: var(--accent);
 	}
 
 	/* 320px 宽的手机上要放下六个按钮和三位数页码，按钮收窄、标题让位。 */
@@ -624,14 +745,21 @@
 			width: 2rem;
 		}
 
-		.top h1 {
+		.top .title {
 			margin: 0 0.2rem;
 		}
 	}
 
 	@media (max-width: 360px) {
-		.top h1 {
+		.top .title {
 			visibility: hidden;
+		}
+	}
+
+	/* 手机上多了旋转按钮，详情按钮让位：点页码同样打开详情面板。 */
+	@media (max-width: 400px) and (pointer: coarse) {
+		.top .detail {
+			display: none;
 		}
 	}
 
@@ -648,6 +776,16 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+	}
+
+	/* 转 90 度：把翻页区域的宽高对调后整体顺时针转过去，里面的图照常按“放进屏幕”排版。 */
+	.paged.rotated {
+		inset: auto;
+		top: 50%;
+		left: 50%;
+		width: var(--stage-height);
+		height: var(--stage-width);
+		transform: translate(-50%, -50%) rotate(90deg);
 	}
 
 	/* 从右往左读时，第一页放在右边。 */
@@ -736,7 +874,7 @@
 		background: transparent;
 		font-size: 0.85rem;
 		font-variant-numeric: tabular-nums;
-		color: #bbb;
+		color: var(--muted);
 	}
 
 	input[type='range'] {

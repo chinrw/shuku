@@ -718,7 +718,7 @@ async fn pages(
                     (page.width, page.height)
                 };
                 json!({
-                    "width": width, "height": height, "broken": broken,
+                    "width": width, "height": height, "broken": broken, "size": page.size,
                     "url": format!("/api/archives/{id}/pages/{n}?v={hash}"),
                     "thumbnail_url": format!("/api/archives/{id}/pages/{n}/thumbnail?v={hash}"),
                 })

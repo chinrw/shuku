@@ -287,6 +287,7 @@ async fn search_paginates_and_returns_details_pages_and_query_errors() {
     assert_eq!(pages["pages"].as_array().unwrap().len(), 2);
     assert_eq!(pages["pages"][0]["width"], 80);
     assert_eq!(pages["pages"][0]["height"], 120);
+    assert!(pages["pages"][0]["size"].as_u64().unwrap() > 0);
     assert_eq!(
         pages["pages"][0]["url"],
         format!("/api/archives/{id}/pages/0?v={}", metadata.quick_hash)

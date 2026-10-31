@@ -13,7 +13,8 @@ use serde::Deserialize;
 use shuku_store::CompressionMethod;
 use std::{fs, io::Write, path::Path};
 
-/// 每个宽度都会在数据目录里缓存一份 JPEG，任意宽度会让缓存无限增长。网页端也只用这几档。
+/// 每个宽度都会在数据目录里缓存一份 JPEG，任意宽度会让缓存无限增长。网页端的阅读器用原图，
+/// 这几档留给需要省流量的客户端。
 const WIDTHS: [u32; 4] = [720, 1080, 1440, 2160];
 
 /// 缩放要把整张图解码进内存，超过这个像素数的图片不缩放。

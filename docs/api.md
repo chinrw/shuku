@@ -293,6 +293,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
       "width": 1200,
       "height": 1700,
       "broken": false,
+      "size": 482133,
       "url": "/api/archives/42/pages/0?v=<quick_hash>",
       "thumbnail_url": "/api/archives/42/pages/0/thumbnail?v=<quick_hash>"
     }
@@ -300,7 +301,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 }
 ```
 
-`thumbnail_url` 是这一页的缩略图，详情页和阅读器详情面板里的页面缩略图用。
+`size` 是这一页图片文件的字节数，阅读器在工具栏上显示。`thumbnail_url` 是这一页的缩略图，详情页和阅读器详情面板里的页面缩略图用。
 
 响应另有 `"webtoon": true/false`：页面高宽比的中位数达到 2 时为 `true`，网页端据此把这本当条漫，用上下连续滚动阅读。控制台设置里关掉条漫判断时总是 `false`。阅读器里的手动开关存在浏览器里，优先于这个值。
 
