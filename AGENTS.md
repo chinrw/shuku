@@ -33,7 +33,7 @@ nix develop -c cargo fmt --all
 - 和 LRR 一样，个别页读不出尺寸的书照样入库：坏页留在页面清单里，宽和高记为 0，`archive.broken_pages`（迁移 006）记坏页数，控制台问题页列出它们；ZIP 结构损坏仍然整本失败。
 - JPEG 头部的标记段之间夹着多余字节时 imagesize 读不出尺寸，`shuku-archive` 会像 libjpeg 一样跳过这些字节再读一遍。
 - 书库页的“批量操作”按钮进入选择模式，选中的书或整个搜索结果可以一次加减标签、加进或移出分类（`POST /api/batch`，一个事务，最多 10000 本）。
-- 服务运行时用 notify 监视内容目录，有变化时等安静 10 秒（最多 2 分钟）整体扫描一次，`--no-watch` 关闭，细节见 `docs/server.md`。监视只调用 `App::scan` 和 `App::hash_contents`，不改扫描本身。
+- 服务运行时用 notify 监视内容目录，有变化时等安静 10 秒（最多 2 分钟）整体扫描一次，控制台扫描设置里的 `watch` 开关随时开关，细节见 `docs/server.md`。监视只调用 `App::scan` 和 `App::hash_contents`，不改扫描本身。
 - 系列和卷（`series` 表，归档的 `series_id`、`volume` 列）：扫描新书时按路径认卷（`shuku-server/src/series.rs`，规则见 `docs/server.md`），书库页用 `/api/search?group=series` 每个系列只显示一张卡，系列页是 `/s/{id}`。一本书最多属于一个系列；只有一卷的系列不当作系列显示。LRR 的 Tankoubon 照旧导入原来的表，还没有映射成系列。已经入库的书不会重新认卷，ComicInfo 的 Series/Volume 也还没用来归组。按卷出版的普通漫画用另起一个 Shuku 实例的方式管理（另一个内容目录和数据目录），不做多内容目录。
 - 服务启动扫描后，在后台逐本补算整文件 BLAKE3（`content_hash`），目前只记录，还没用于去重或认出移动的文件。
 - 还没做的：

@@ -6,7 +6,7 @@
 //! （例如下载工具建的、只有它自己能读的隐藏临时目录）就整体失败。逐个加时按扫描的
 //! 规则跳过隐藏目录，加不上的目录记一条警告，其余照常监视。
 
-use crate::{App, Result};
+use crate::{App, Inner, Result};
 use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::{AccessKind, AccessMode, ModifyKind, RenameMode},
@@ -14,7 +14,7 @@ use notify::{
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, PoisonError,
+        Arc, Mutex, PoisonError, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -76,6 +76,31 @@ impl Drop for ContentWatcher {
 }
 
 impl App {
+    /// 按扫描设置里的开关开始或停止监视。服务启动时和改了扫描设置后调用。监视建不起来时
+    /// 记一条警告，照常运行，新文件要等手动扫描、定时扫描或重启才入库。
+    pub fn sync_watcher(&self) {
+        let mut watcher = self
+            .0
+            .watcher
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // 拿到锁以后再读设置：两个请求先后改开关时，后一个看到的一定是最新的值。
+        let wanted = self.settings().scan.watch;
+        match (wanted, watcher.is_some()) {
+            (true, false) => {
+                *watcher = self
+                    .watch_content(QUIET, MAX_DELAY)
+                    .inspect_err(|error| tracing::warn!(%error, "不监视内容目录"))
+                    .ok();
+            }
+            (false, true) => {
+                *watcher = None;
+                tracing::info!("停止监视内容目录");
+            }
+            _ => {}
+        }
+    }
+
     /// 开始监视内容目录，返回的句柄丢掉时停止。监视器建不起来时（例如 inotify 的
     /// 监视数用完，或内容目录在不支持 inotify 的网络文件系统上）返回错误，调用方可以
     /// 不监视、照常运行。`quiet` 和 `max_delay` 见 [`QUIET`]、[`MAX_DELAY`]。
@@ -90,8 +115,9 @@ impl App {
             rewatch: AtomicBool::new(false),
         });
         let content = self.0.config.content_dir.clone();
-        // 是否扫描隐藏条目可以在控制台里随时改，每个事件现读。
-        let (recorder, app) = (changes.clone(), self.clone());
+        // 是否扫描隐藏条目可以在控制台里随时改，每个事件现读。回调和后台任务只持有弱引用：
+        // `App` 自己持有监视句柄，强引用会让它永远释放不了。
+        let (recorder, app) = (changes.clone(), Arc::downgrade(&self.0));
         let mut watcher = RecommendedWatcher::new(
             move |event: notify::Result<notify::Event>| match event {
                 Ok(event) => {
@@ -113,7 +139,8 @@ impl App {
                             .unwrap_or_else(PoisonError::into_inner)
                             .extend(dirs);
                     }
-                    let scan_hidden = app.settings().scan.scan_hidden;
+                    let Some(inner) = app.upgrade() else { return };
+                    let scan_hidden = App(inner).settings().scan.scan_hidden;
                     if event.need_rescan() || is_change(&event, &content, scan_hidden) {
                         recorder.record();
                     }
@@ -136,7 +163,8 @@ impl App {
         let scan_hidden = self.settings().scan.scan_hidden;
         watch_tree(&mut watcher, content, content, scan_hidden);
         let watcher = Arc::new(Mutex::new(watcher));
-        tokio::spawn(self.clone().watch_loop(
+        tokio::spawn(Self::watch_loop(
+            Arc::downgrade(&self.0),
             watcher,
             changes.clone(),
             scan_hidden,
@@ -147,9 +175,10 @@ impl App {
         Ok(ContentWatcher { changes })
     }
 
-    /// 监视器归这个任务所有，任务退出时停止监视。
+    /// 监视器归这个任务所有，任务退出时停止监视。等事件和去抖时不持有 `App`，
+    /// `App` 释放后句柄跟着释放，任务在下一次醒来时退出。
     async fn watch_loop(
-        self,
+        app: Weak<Inner>,
         watcher: Arc<Mutex<RecommendedWatcher>>,
         changes: Arc<Changes>,
         mut watched_hidden: bool,
@@ -179,23 +208,25 @@ impl App {
                 }
                 tokio::time::sleep(wait).await;
             }
+            let Some(inner) = app.upgrade() else { return };
+            let this = App(inner);
             // 控制台里改了是否扫描隐藏条目，要监视的目录也跟着变。
-            let scan_hidden = self.settings().scan.scan_hidden;
+            let scan_hidden = this.settings().scan.scan_hidden;
             if scan_hidden != watched_hidden {
                 changes.rewatch.store(true, Ordering::Release);
                 watched_hidden = scan_hidden;
             }
-            self.add_watches(&watcher, &changes, scan_hidden).await;
-            if !self.claim_scan(&changes, quiet).await {
+            this.add_watches(&watcher, &changes, scan_hidden).await;
+            if !this.claim_scan(&changes, quiet).await {
                 return;
             }
             handled = changes.count.load(Ordering::Acquire);
             tracing::info!("内容目录有变化，开始扫描");
-            if let Err(error) = self.scan().await {
+            if let Err(error) = this.scan().await {
                 tracing::error!(%error, "扫描失败");
                 continue;
             }
-            hashing.request(&self);
+            hashing.request(&this);
         }
     }
 
@@ -387,5 +418,44 @@ mod tests {
         assert_eq!(scan_started_at(&app).await, serde_json::Value::Null);
         // 等待已经结束，扫描状态没有被占着。
         assert!(app.tasks(|tasks| tasks.scan.claim()));
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use crate::{App, Config};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_scan_setting_turns_watching_on_and_off() {
+        let root = tempfile::tempdir().unwrap();
+        let config = Config {
+            content_dir: root.path().join("content"),
+            data_dir: root.path().join("data"),
+            web_dir: root.path().join("web"),
+            listen: "127.0.0.1:0".parse().unwrap(),
+        };
+        std::fs::create_dir(&config.content_dir).unwrap();
+        let app = App::open(config).await.unwrap();
+        let watching = |app: &App| app.0.watcher.lock().unwrap().is_some();
+        assert!(!watching(&app));
+        // 默认打开。
+        app.sync_watcher();
+        assert!(watching(&app));
+        let off = serde_json::from_str(r#"{"watch": false}"#).unwrap();
+        app.update_settings(off, |all| &mut all.scan).unwrap();
+        app.sync_watcher();
+        assert!(!watching(&app));
+        let on = serde_json::from_str(r#"{"watch": true}"#).unwrap();
+        app.update_settings(on, |all| &mut all.scan).unwrap();
+        app.sync_watcher();
+        assert!(watching(&app));
+
+        // 监视中的 App 也能释放：后台任务和回调只持有弱引用。
+        let content = app.0.config.content_dir.clone();
+        let weak = std::sync::Arc::downgrade(&app.0);
+        drop(app);
+        std::fs::write(content.join("a.cbz"), b"x").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(weak.upgrade().is_none());
     }
 }

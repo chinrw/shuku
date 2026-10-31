@@ -589,8 +589,16 @@ async fn write_scan_settings(
     >,
 ) -> Result<Json<crate::settings::ScanSettings>> {
     let Json(patch) = body.map_err(Error::bad_request)?;
-    app.blocking(move |app| Ok(Json(app.update_settings(patch, |all| &mut all.scan)?)))
-        .await
+    // 每次都按库里最新的开关对齐，两个请求交错改开关时也不会漏掉。打开监视要遍历书库
+    // 给每个目录加监视，放在阻塞线程里做。
+    let updated = app
+        .blocking(move |app| {
+            let updated = app.update_settings(patch, |all| &mut all.scan)?;
+            app.sync_watcher();
+            Ok(updated)
+        })
+        .await?;
+    Ok(Json(updated))
 }
 
 async fn read_server_settings(State(app): State<App>) -> Json<crate::settings::ServerSettings> {

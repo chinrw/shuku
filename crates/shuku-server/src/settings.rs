@@ -42,9 +42,12 @@ pub(crate) trait Group: Clone + Default + Serialize + DeserializeOwned {
 }
 
 /// 缺的字段用默认值，加字段不用迁移。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct ScanSettings {
+    /// 监视书库目录，有变化时自动扫描。默认打开；书库在不支持 inotify 的网络盘上时关掉，
+    /// 改用定时扫描。
+    pub(crate) watch: bool,
     /// 也扫描以 `.` 开头的目录和文件。默认跳过：它们通常是下载工具的临时目录，
     /// 往往只有那个程序自己能读。
     pub(crate) scan_hidden: bool,
@@ -55,9 +58,21 @@ pub(crate) struct ScanSettings {
     pub(crate) extra_skip: Vec<String>,
 }
 
+impl Default for ScanSettings {
+    fn default() -> Self {
+        Self {
+            watch: true,
+            scan_hidden: false,
+            scan_interval_hours: 0,
+            extra_skip: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScanPatch {
+    watch: Option<bool>,
     scan_hidden: Option<bool>,
     scan_interval_hours: Option<u32>,
     extra_skip: Option<Vec<String>>,
@@ -79,6 +94,9 @@ impl Group for ScanSettings {
         }
         if let Some(hidden) = patch.scan_hidden {
             updated.scan_hidden = hidden;
+        }
+        if let Some(watch) = patch.watch {
+            updated.watch = watch;
         }
         if let Some(patterns) = patch.extra_skip {
             updated.extra_skip = clean_list("extra_skip", patterns, |pattern| {
@@ -342,13 +360,19 @@ mod tests {
     #[test]
     fn patches_change_only_the_given_fields_and_are_validated() {
         let settings = ScanSettings {
+            watch: true,
             scan_hidden: true,
             scan_interval_hours: 12,
             extra_skip: Vec::new(),
         };
         let patch = serde_json::from_str(r#"{"scan_interval_hours": 24}"#).unwrap();
         let updated = settings.apply(patch).unwrap();
-        assert!(updated.scan_hidden);
+        assert!(updated.scan_hidden && updated.watch);
+        let patch = serde_json::from_str(r#"{"watch": false}"#).unwrap();
+        assert!(!settings.apply(patch).unwrap().watch);
+        // 存过的旧设置没有 watch 字段，按默认的打开。
+        let stored: ScanSettings = serde_json::from_str(r#"{"scan_hidden": true}"#).unwrap();
+        assert!(stored.watch);
         assert_eq!(updated.scan_interval_hours, 24);
         let patch = serde_json::from_str(r#"{"scan_interval_hours": 721}"#).unwrap();
         assert!(settings.apply(patch).is_err());

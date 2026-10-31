@@ -135,6 +135,8 @@ struct Inner {
     metadata: metadata::MetadataState,
     /// 设备令牌的设置。
     auth: auth::AuthState,
+    /// 文件监视，按扫描设置里的开关开关。
+    watcher: Mutex<Option<watch::ContentWatcher>>,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
     stopping: AtomicBool,
 }
@@ -184,6 +186,7 @@ impl App {
                 scan_batch_hook: Mutex::new(None),
                 metadata,
                 auth,
+                watcher: Mutex::new(None),
                 stopping: AtomicBool::new(false),
             })))
         })

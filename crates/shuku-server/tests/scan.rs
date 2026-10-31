@@ -286,7 +286,7 @@ async fn hidden_entries_are_skipped_unless_enabled() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-        serde_json::json!({"scan_hidden": true, "scan_interval_hours": 0, "extra_skip": []})
+        serde_json::json!({"watch": true, "scan_hidden": true, "scan_interval_hours": 0, "extra_skip": []})
     );
     let report = app.scan().await.unwrap();
     assert_eq!((report.added, report.unchanged), (3, 1));
@@ -325,7 +325,7 @@ async fn hidden_entries_are_skipped_unless_enabled() {
     let settings = common::json(&reopened.router(), "/api/admin/settings/scan").await;
     assert_eq!(
         settings,
-        serde_json::json!({"scan_hidden": false, "scan_interval_hours": 24, "extra_skip": []})
+        serde_json::json!({"watch": true, "scan_hidden": false, "scan_interval_hours": 24, "extra_skip": []})
     );
 }
 

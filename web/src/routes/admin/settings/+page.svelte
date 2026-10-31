@@ -110,6 +110,26 @@
 		</p>
 		{#if scan}
 			<div class="option">
+				<span class="adm-label">自动扫描新文件</span>
+				<div class="adm-tabs" role="group" aria-label="自动扫描新文件">
+					<button
+						class="adm-tab"
+						aria-pressed={scan.watch}
+						disabled={saving}
+						onclick={() => changeScan({ watch: true })}>开</button
+					>
+					<button
+						class="adm-tab"
+						aria-pressed={!scan.watch}
+						disabled={saving}
+						onclick={() => changeScan({ watch: false })}>关</button
+					>
+				</div>
+			</div>
+			<p class="adm-note">
+				监视书库目录，有文件变化后安静 10 秒自动扫描。书库在网络盘上监视不到变化时关掉，改用下面的定时扫描。
+			</p>
+			<div class="option">
 				<span class="adm-label">隐藏目录</span>
 				<div class="adm-tabs" role="group" aria-label="隐藏目录">
 					<button

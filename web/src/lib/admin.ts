@@ -114,6 +114,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 /** 扫描设置，存在服务端数据库里，所有设备共用。 */
 export interface ScanSettings {
+	/** 监视书库目录，有变化时自动扫描。 */
+	watch: boolean;
 	scan_hidden: boolean;
 	/** 0 表示不定时扫描。 */
 	scan_interval_hours: number;

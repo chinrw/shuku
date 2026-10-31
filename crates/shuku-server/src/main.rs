@@ -37,13 +37,6 @@ struct Cli {
         help = "HTTP 监听地址"
     )]
     listen: SocketAddr,
-    #[arg(
-        long,
-        env = "SHUKU_NO_WATCH",
-        global = true,
-        help = "不监视内容目录的变化（默认监视，有变化时自动扫描）"
-    )]
-    no_watch: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -110,14 +103,7 @@ async fn main() -> Result<()> {
         );
         return Ok(());
     }
-    // 监视器建不起来时照常运行，只是新文件要等手动或下次启动扫描才入库。
-    let _watcher = if cli.no_watch {
-        None
-    } else {
-        app.watch_content(shuku_server::WATCH_QUIET, shuku_server::WATCH_MAX_DELAY)
-            .inspect_err(|error| tracing::warn!(%error, "不监视内容目录"))
-            .ok()
-    };
+    app.sync_watcher();
     let listener = tokio::net::TcpListener::bind(cli.listen).await?;
     tracing::info!(listen = %listener.local_addr()?, "HTTP 服务已启动");
     app.spawn_scheduler();
