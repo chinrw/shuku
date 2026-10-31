@@ -35,6 +35,7 @@ impl App {
             .route("/api/search", get(search))
             .route("/api/facets", get(facets))
             .route("/api/tags", get(suggest_tags))
+            .route("/api/recent", get(recent))
             .route("/api/archives/{id}", get(detail))
             .route("/api/archives/{id}/pages", get(pages))
             .route("/api/archives/{id}/pages/{n}", get(crate::images::page))
@@ -121,15 +122,44 @@ async fn search(
         let snapshot = app.snapshot();
         let result = snapshot.index.search(&parsed.query).map_err(Error::bad_request)?;
         // 结果和列表元数据来自同一个快照，结果里的每本都查得到。
-        let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| json!({
-            "id": item.archive.id, "title": item.archive.title,
-            "page_count": item.archive.page_count, "is_new": item.archive.is_new,
-            "progress": progress(item.progress), "tags": tag_groups(item.tags()),
-            "cover_url": cover_url(item.archive.id, &item.archive.quick_hash),
-            "date_added": item.archive.date_added, "source_url": item.archive.source_url,
-        })).collect();
+        let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| list_item(&item)).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": parsed.degraded, "items": items})))
     }).await
+}
+
+#[derive(Default, Deserialize)]
+struct RecentParams {
+    limit: Option<usize>,
+}
+
+/// 最近读过的归档，按翻页时间从新到旧。
+async fn recent(
+    State(app): State<App>,
+    params: std::result::Result<Query<RecentParams>, QueryRejection>,
+) -> Result<Json<Value>> {
+    let Query(params) = params.map_err(Error::bad_request)?;
+    let limit = tag_limit(params.limit, 20)?;
+    app.blocking(move |app| {
+        let snapshot = app.snapshot();
+        let items: Vec<_> = snapshot
+            .recently_read(limit)
+            .iter()
+            .map(list_item)
+            .collect();
+        Ok(Json(json!({ "items": items })))
+    })
+    .await
+}
+
+/// 搜索结果和最近阅读里的一项。
+fn list_item(item: &crate::snapshot::Item<'_>) -> Value {
+    json!({
+        "id": item.archive.id, "title": item.archive.title,
+        "page_count": item.archive.page_count, "is_new": item.archive.is_new,
+        "progress": progress(item.progress), "tags": tag_groups(item.tags()),
+        "cover_url": cover_url(item.archive.id, &item.archive.quick_hash),
+        "date_added": item.archive.date_added, "source_url": item.archive.source_url,
+    })
 }
 
 #[derive(Default, Deserialize)]
@@ -174,6 +204,7 @@ async fn suggest_tags(
     .await
 }
 
+/// 标签统计、标签补全和最近阅读共用的 `limit` 检查。
 fn tag_limit(limit: Option<usize>, default: usize) -> Result<usize> {
     let limit = limit.unwrap_or(default);
     if !(1..=100).contains(&limit) {

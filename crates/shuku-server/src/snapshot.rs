@@ -69,6 +69,26 @@ impl Snapshot {
         })
     }
 
+    /// 有阅读进度的归档里翻页时间最新的 `limit` 本，从新到旧。进度表里的归档
+    /// 不在列表里时（快照之间被删除）跳过。
+    pub(crate) fn recently_read(&self, limit: usize) -> Vec<Item<'_>> {
+        let mut read: Vec<(i64, i64)> = self
+            .progress
+            .iter()
+            .map(|(&id, progress)| (progress.client_time, id))
+            .collect();
+        // 时间相同时按 ID 从大到小，结果不随 HashMap 的遍历顺序变化。
+        let newest = |a: &(i64, i64), b: &(i64, i64)| b.cmp(a);
+        if read.len() > limit {
+            read.select_nth_unstable_by(limit, newest);
+            read.truncate(limit);
+        }
+        read.sort_unstable_by(newest);
+        read.into_iter()
+            .filter_map(|(_, id)| self.item(id))
+            .collect()
+    }
+
     pub(crate) fn item(&self, id: i64) -> Option<Item<'_>> {
         let archives = &self.listing.archives;
         let position = archives

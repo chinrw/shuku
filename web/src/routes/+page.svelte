@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { search, suggestTags, type ArchiveItem, type TagCount } from '#lib/api.ts';
 	import Icon from '#lib/Icon.svelte';
+	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
@@ -271,6 +272,10 @@
 			{/each}
 		</nav>
 	{/if}
+{/if}
+
+{#if data.recent.length > 0}
+	<RecentRow items={data.recent} />
 {/if}
 
 {#if prefs.view === 'grid'}

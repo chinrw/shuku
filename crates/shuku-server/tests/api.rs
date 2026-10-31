@@ -422,3 +422,52 @@ async fn escaped_wildcards_match_tags_literally_in_search() {
     assert_eq!(degraded["total"], 2);
     assert_eq!(degraded["degraded"], true);
 }
+
+#[tokio::test]
+async fn recent_lists_read_archives_newest_first_and_validates_limit() {
+    let fixture = Fixture::new();
+    for name in ["a.cbz", "b.cbz", "c.cbz", "unread.cbz"] {
+        fixture.archive(name, 10, 20);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    assert_eq!(json(&router, "/api/recent").await, value!({"items": []}));
+
+    let mut store = Store::open(fixture.database()).unwrap();
+    let id = |name: &str| store.find_by_path(name).unwrap().unwrap();
+    let (a, b, c) = (id("a.cbz"), id("b.cbz"), id("c.cbz"));
+    // b 读得最近，a 其次，c 最早；没读过的不出现。
+    for (archive, page, time) in [(a, 1, 2000), (b, 0, 3000), (c, 1, 1000)] {
+        store.write_progress(archive, page, time).unwrap();
+    }
+    app.refresh().await.unwrap();
+
+    let ids = |body: Value| -> Vec<i64> {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect()
+    };
+    let all = json(&router, "/api/recent").await;
+    assert_eq!(ids(all.clone()), [b, a, c]);
+    assert_eq!(
+        all["items"][0]["progress"],
+        value!({"page": 0, "client_time": 3000})
+    );
+    assert!(all["items"][0]["cover_url"].is_string());
+    assert_eq!(ids(json(&router, "/api/recent?limit=2").await), [b, a]);
+    for uri in [
+        "/api/recent?limit=0",
+        "/api/recent?limit=101",
+        "/api/recent?limit=x",
+    ] {
+        assert_eq!(
+            request(&router, "GET", uri, None, &[]).await.0,
+            StatusCode::BAD_REQUEST,
+            "{uri}"
+        );
+    }
+}

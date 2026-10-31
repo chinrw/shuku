@@ -80,6 +80,12 @@ export function search(
 	return request(fetch, `/api/search?${query}`);
 }
 
+/** 最近读过的归档，按翻页时间从新到旧。 */
+export async function recent(fetch: Fetch, limit?: number): Promise<ArchiveItem[]> {
+	const query = limit === undefined ? '' : `?${new URLSearchParams({ limit: String(limit) })}`;
+	return (await request<{ items: ArchiveItem[] }>(fetch, `/api/recent${query}`)).items;
+}
+
 export async function facets(fetch: Fetch, q: string): Promise<TagCount[]> {
 	const query = new URLSearchParams({ q });
 	return (await request<{ tags: TagCount[] }>(fetch, `/api/facets?${query}`)).tags;
