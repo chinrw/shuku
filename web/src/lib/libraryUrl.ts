@@ -1,13 +1,19 @@
 import type { Filter, Order, Sort } from './api';
 
-/** 快捷筛选的按钮文字，也是它们在书库页上的顺序。 */
-export const FILTERS: [Filter, string][] = [
-	['new', '新书'],
-	['unread', '没读过'],
-	['reading', '读了一半'],
-	['finished', '读完'],
-	['untagged', '未打标签']
-];
+// 地址里认得的筛选值和它们在结果说明里的名字。`untagged` 没有按钮了，旧链接里的照样生效，
+// 结果说明里也照样写出来，免得筛选着却看不出来。
+const FILTER_LABELS: Record<Filter, string> = {
+	new: '新书',
+	unread: '没读过',
+	reading: '读了一半',
+	finished: '读完',
+	untagged: '未打标签'
+};
+
+/** 快捷筛选按钮，按书库页上的顺序。 */
+export const FILTERS: [Filter, string][] = (['new', 'unread', 'reading', 'finished'] as const).map(
+	(filter) => [filter, FILTER_LABELS[filter]]
+);
 
 /** 排序下拉框的选项。命名空间排序只列常用的几个，接口接受任意命名空间。 */
 export const SORTS: [Sort, string][] = [
@@ -49,7 +55,11 @@ export function parseCategory(raw: string | null): number | null {
 
 /** 地址里的快捷筛选，不认识的值当作没有。 */
 export function parseFilter(raw: string | null): Filter | null {
-	return FILTERS.find(([filter]) => filter === raw)?.[0] ?? null;
+	return raw !== null && Object.hasOwn(FILTER_LABELS, raw) ? (raw as Filter) : null;
+}
+
+export function filterLabel(filter: Filter): string {
+	return FILTER_LABELS[filter];
 }
 
 /** 地址里的排序，不认识的值当作按标题。`ns:` 后面是任意命名空间。 */

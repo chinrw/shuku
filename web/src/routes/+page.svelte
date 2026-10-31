@@ -18,7 +18,7 @@
 	import TagLine from '#lib/TagLine.svelte';
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
-	import { defaultOrder, FILTERS, libraryHref, SORTS } from '#lib/libraryUrl.ts';
+	import { defaultOrder, filterLabel, FILTERS, libraryHref, SORTS } from '#lib/libraryUrl.ts';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { onDestroy, untrack } from 'svelte';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
@@ -220,7 +220,7 @@
 		});
 	}
 
-	// 新书、阅读状态和未打标签的快捷筛选，一次只选一个，再点一次取消。
+	// 新书和阅读状态的快捷筛选，一次只选一个，再点一次取消。
 	function filterHref(filter: (typeof FILTERS)[number][0]) {
 		return libraryHref({
 			q: data.q,
@@ -231,7 +231,7 @@
 		});
 	}
 
-	let currentFilter = $derived(FILTERS.find(([filter]) => filter === data.filter)?.[1]);
+	let currentFilter = $derived(data.filter ? filterLabel(data.filter) : undefined);
 
 	// 分类按钮和抽屉共用。抽屉里新建分类或改了成员后重新取一次带本数的列表，
 	// 按钮跟着变；换一次搜索又回到这一页加载的数据。

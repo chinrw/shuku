@@ -31,9 +31,11 @@ describe('parseCategory', () => {
 describe('parseFilter', () => {
 	it('accepts the known filters and ignores anything else', () => {
 		expect(parseFilter('reading')).toBe('reading');
+		expect(parseFilter('untagged')).toBe('untagged');
 		expect(parseFilter(null)).toBeNull();
 		expect(parseFilter('Reading')).toBeNull();
 		expect(parseFilter('bogus')).toBeNull();
+		expect(parseFilter('toString')).toBeNull();
 	});
 
 	it('round-trips through libraryHref', () => {
