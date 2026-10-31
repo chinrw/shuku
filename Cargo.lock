@@ -2164,7 +2164,9 @@ dependencies = [
 name = "shuku-store"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "postcard",
+ "rand",
  "rusqlite",
  "serde",
  "shuku-index",

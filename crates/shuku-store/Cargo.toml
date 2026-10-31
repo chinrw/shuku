@@ -14,4 +14,6 @@ shuku-index = { path = "../shuku-index" }
 thiserror.workspace = true
 
 [dev-dependencies]
+libc = "0.2"
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
 tempfile = "3"

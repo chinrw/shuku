@@ -167,6 +167,8 @@ impl Reader {
         drop(associations);
         for archive in &mut archives {
             archive.tags.sort_unstable();
+            // 逐个压入时容量会翻倍到 16，30 万本要多占几 MiB。
+            archive.tags.shrink_to_fit();
         }
         let progress = read_all_progress(&transaction)?;
         transaction.commit()?;
