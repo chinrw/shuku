@@ -8,7 +8,7 @@ on:
       - "docs/**"
   workflow_dispatch:
 
-# 私有仓库按分钟计费：同一分支上新的推送取消还在跑的旧运行。
+# 同一分支上新的推送取消还在跑的旧运行，旧提交的结果已经没人看。
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

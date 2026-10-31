@@ -60,7 +60,7 @@ jobs:
         run: |
           name="shuku-${TAG}-x86_64-linux"
           mkdir -p "dist/$name/web"
-          cp "target/$TARGET/release/shuku" "target/$TARGET/release/shuku-migrate-lrr" "dist/$name/"
+          cp "target/$TARGET/release/shuku" "target/$TARGET/release/shuku-migrate-lrr" LICENSE "dist/$name/"
           cp -r web/build "dist/$name/web/build"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")

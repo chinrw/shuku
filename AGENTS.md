@@ -16,7 +16,7 @@ nix develop -c cargo fmt --all
 
 需要新的系统库（例如 libvips）时，加进 `flake.nix` 的 `packages`。提交前必须通过 fmt、clippy（`-D warnings`）和全部测试。
 
-推到 main 后，GitHub Actions（`.github/workflows/ci.yml`）在同一个 flake 环境里重跑这些检查，外加网页端的 `pnpm check`、`pnpm test` 和 `pnpm build`。推送 `v*` 标签会触发 `release.yml`，发布静态链接的 x86_64 Linux 二进制和网页端构建产物，用法见 `docs/server.md`。flake 的 rustc 没有 musl 目标，这是唯一不在 flake 环境里编译的地方：它用 rustup 安装与 flake 相同版本的 rustc。仓库是私有的，Actions 按分钟计费，所以只改 Markdown 或 `docs/` 的推送不触发 CI。
+推到 main 后，GitHub Actions（`.github/workflows/ci.yml`）在同一个 flake 环境里重跑这些检查，外加网页端的 `pnpm check`、`pnpm test` 和 `pnpm build`。推送 `v*` 标签会触发 `release.yml`，发布静态链接的 x86_64 Linux 二进制和网页端构建产物，用法见 `docs/server.md`。flake 的 rustc 没有 musl 目标，这是唯一不在 flake 环境里编译的地方：它用 rustup 安装与 flake 相同版本的 rustc。只改 Markdown 或 `docs/` 的推送不影响构建和测试，所以不触发 CI。
 
 ## 当前进度
 
