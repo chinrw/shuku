@@ -31,6 +31,10 @@
 	let scroller = $state<HTMLElement>();
 	let pagedView = $state<HTMLElement>();
 	let fitWidth = $derived(prefs.fit === 'width');
+	// 条漫总是上下连续滚动，不管全局的阅读方式。
+	const detectedWebtoon = untrack(() => data.webtoon);
+	let webtoon = $derived(prefs.webtoon[book.id] ?? detectedWebtoon);
+	let mode = $derived(webtoon ? 'scroll' : prefs.mode);
 
 	// 双页只在横屏时生效，竖屏手机上一屏放两页太小。
 	let spreads = $derived(
@@ -105,7 +109,7 @@
 
 	// 预取前后的几屏，翻页时直接从 HTTP 缓存取图。
 	$effect(() => {
-		if (prefs.mode !== 'paged') return;
+		if (mode !== 'paged') return;
 		for (const offset of [1, 2, -1]) {
 			const spread = spreads[spreadIndex + offset];
 			for (const index of spread ?? []) new Image().src = pagedSrc(index, spread.length);
@@ -140,7 +144,7 @@
 			panel = false;
 			return;
 		}
-		if (prefs.mode !== 'paged' || panel) return;
+		if (mode !== 'paged' || panel) return;
 		const rtl = prefs.direction === 'rtl';
 		switch (event.key) {
 			case 'ArrowLeft':
@@ -188,13 +192,21 @@
 	}
 
 	function jump(page: number) {
-		if (prefs.mode === 'scroll') scroller?.children[page]?.scrollIntoView();
+		if (mode === 'scroll') scroller?.children[page]?.scrollIntoView();
 		else go(spreads.find((spread) => spread.includes(page))?.[0] ?? page);
 	}
 
 	function update(change: () => void) {
 		change();
 		prefs.save();
+	}
+
+	/** `undefined` 表示回到按宽高比自动判断。 */
+	function setWebtoon(value: boolean | undefined) {
+		update(() => {
+			const { [book.id]: _, ...others } = prefs.webtoon;
+			prefs.webtoon = value === undefined ? others : { ...others, [book.id]: value };
+		});
 	}
 </script>
 
@@ -207,7 +219,7 @@
 <div class="reader">
 	{#if pages.length === 0}
 		<p class="empty">这本书没有可显示的页面。</p>
-	{:else if prefs.mode === 'paged'}
+	{:else if mode === 'paged'}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 		<div
 			class="paged"
@@ -252,7 +264,7 @@
 				min="0"
 				max={Math.max(pages.length - 1, 0)}
 				value={current}
-				dir={prefs.mode === 'paged' && prefs.direction === 'rtl' ? 'rtl' : 'ltr'}
+				dir={mode === 'paged' && prefs.direction === 'rtl' ? 'rtl' : 'ltr'}
 				onchange={(event) => jump(Number(event.currentTarget.value))}
 				aria-label="跳到页"
 			/>
@@ -276,16 +288,26 @@
 				</button>
 			</div>
 			<div class="settings">
-				<span>阅读方式</span>
+				<span>条漫</span>
 				<div class="segmented">
-					<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
-						>翻页</button
+					<button class:on={prefs.webtoon[book.id] === undefined} onclick={() => setWebtoon(undefined)}
+						>自动（{detectedWebtoon ? '是' : '否'}）</button
 					>
-					<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
-						>滚动</button
-					>
+					<button class:on={prefs.webtoon[book.id] === true} onclick={() => setWebtoon(true)}>开</button>
+					<button class:on={prefs.webtoon[book.id] === false} onclick={() => setWebtoon(false)}>关</button>
 				</div>
-				{#if prefs.mode === 'paged'}
+				{#if !webtoon}
+					<span>阅读方式</span>
+					<div class="segmented">
+						<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
+							>翻页</button
+						>
+						<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
+							>滚动</button
+						>
+					</div>
+				{/if}
+				{#if mode === 'paged'}
 					<span>方向</span>
 					<div class="segmented">
 						<button

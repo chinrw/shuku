@@ -44,6 +44,13 @@ struct Cli {
         help = "也扫描以 . 开头的隐藏目录和文件（默认跳过）"
     )]
     scan_hidden: bool,
+    #[arg(
+        long,
+        env = "SHUKU_NO_WEBTOON_DETECTION",
+        global = true,
+        help = "不按页面宽高比自动判断条漫（默认判断）"
+    )]
+    no_webtoon_detection: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -78,6 +85,7 @@ async fn main() -> Result<()> {
         web_dir: cli.web_dir,
         listen: cli.listen,
         scan_hidden: cli.scan_hidden,
+        detect_webtoons: !cli.no_webtoon_detection,
     };
     let app = App::open(config).await?;
     if matches!(cli.command, Some(Command::Scan)) {

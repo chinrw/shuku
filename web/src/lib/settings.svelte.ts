@@ -13,6 +13,8 @@ class Settings {
 	/** 横屏时把相邻两页并排显示。 */
 	spread = $state(true);
 	view = $state<LibraryView>('grid');
+	/** 手动指定的条漫开关，按归档 ID 记。没有记录的书按页面宽高比自动判断。 */
+	webtoon = $state<Record<number, boolean>>({});
 
 	constructor() {
 		const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
@@ -21,11 +23,16 @@ class Settings {
 		if (saved.fit === 'screen' || saved.fit === 'width') this.fit = saved.fit;
 		if (typeof saved.spread === 'boolean') this.spread = saved.spread;
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
+		if (saved.webtoon && typeof saved.webtoon === 'object') {
+			for (const [id, value] of Object.entries(saved.webtoon)) {
+				if (typeof value === 'boolean') this.webtoon[Number(id)] = value;
+			}
+		}
 	}
 
 	save() {
-		const { mode, direction, fit, spread, view } = this;
-		localStorage.setItem(KEY, JSON.stringify({ mode, direction, fit, spread, view }));
+		const { mode, direction, fit, spread, view, webtoon } = this;
+		localStorage.setItem(KEY, JSON.stringify({ mode, direction, fit, spread, view, webtoon }));
 	}
 }
 

@@ -45,6 +45,12 @@
 				<dd class="adm-mono">{server.listen}</dd>
 				<dt>隐藏目录</dt>
 				<dd>{server.scan_hidden ? '扫描' : '跳过以 . 开头的目录和文件'}（<code>--scan-hidden</code>）</dd>
+				<dt>条漫判断</dt>
+				<dd>
+					{server.detect_webtoons ? '按页面宽高比自动判断' : '关闭，只认阅读器里的手动开关'}（<code
+						>--no-webtoon-detection</code
+					>）
+				</dd>
 				<dt>版本</dt>
 				<dd>Shuku {server.version}</dd>
 			</dl>

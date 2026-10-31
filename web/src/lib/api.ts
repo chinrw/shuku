@@ -176,8 +176,14 @@ export function archive(fetch: Fetch, id: number): Promise<ArchiveDetail> {
 	return request(fetch, `/api/archives/${id}`);
 }
 
-export async function pages(fetch: Fetch, id: number): Promise<PageInfo[]> {
-	return (await request<{ pages: PageInfo[] }>(fetch, `/api/archives/${id}/pages`)).pages;
+export interface PageList {
+	pages: PageInfo[];
+	/** 服务端按页面宽高比判断这本是条漫；服务端关掉判断时总是 false。 */
+	webtoon: boolean;
+}
+
+export function pages(fetch: Fetch, id: number): Promise<PageList> {
+	return request(fetch, `/api/archives/${id}/pages`);
 }
 
 /** 原始归档文件，响应带 `Content-Disposition: attachment`。 */

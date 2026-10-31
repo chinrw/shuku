@@ -500,6 +500,10 @@ async fn pages(
             .archive_with_pages(id)?
             .ok_or_else(Error::not_found)?;
         let hash = &archive.metadata.quick_hash;
+        let webtoon = app.0.config.detect_webtoons
+            && crate::webtoon::looks_like_webtoon(
+                pages.iter().map(|page| (page.width, page.height)),
+            );
         let pages: Vec<_> = pages
             .into_iter()
             .enumerate()
@@ -511,7 +515,7 @@ async fn pages(
                 })
             })
             .collect();
-        Ok(Json(json!({"pages": pages})))
+        Ok(Json(json!({"pages": pages, "webtoon": webtoon})))
     })
     .await
 }

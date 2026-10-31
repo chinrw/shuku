@@ -342,6 +342,7 @@ mod tests {
             web_dir: root.path().join("web"),
             listen: "127.0.0.1:0".parse().unwrap(),
             scan_hidden: false,
+            detect_webtoons: true,
         };
         std::fs::create_dir(&config.content_dir).unwrap();
         // 每批 64 个文件，65 个文件分成两批。

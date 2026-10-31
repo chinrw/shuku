@@ -593,3 +593,35 @@ async fn categories_are_listed_pinned_first_and_filter_search() {
         );
     }
 }
+
+#[tokio::test]
+async fn page_list_flags_webtoons_unless_detection_is_off() {
+    let mut fixture = Fixture::new();
+    fixture.archive("strip.cbz", 80, 400);
+    fixture.archive("manga.cbz", 80, 120);
+    for (detect, expected) in [(true, [true, false]), (false, [false, false])] {
+        fixture.config.detect_webtoons = detect;
+        let app = fixture.app().await;
+        app.scan().await.unwrap();
+        let router = app.router();
+        let items = json(&router, "/api/search").await["items"].clone();
+        let flags: Vec<_> = webtoon_flags(&router, &items).await;
+        assert_eq!(flags, expected, "detect_webtoons = {detect}");
+    }
+}
+
+/// 按 strip、manga 的顺序取两本书页面清单里的 `webtoon`。
+async fn webtoon_flags(router: &axum::Router, items: &Value) -> Vec<bool> {
+    let mut flags = Vec::new();
+    for title in ["strip", "manga"] {
+        let item = items
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["title"] == title)
+            .unwrap();
+        let list = json(router, &format!("/api/archives/{}/pages", item["id"])).await;
+        flags.push(list["webtoon"].as_bool().unwrap());
+    }
+    flags
+}

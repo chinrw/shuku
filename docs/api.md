@@ -149,6 +149,8 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 `thumbnail_url` 是这一页的缩略图，详情页的页面总览用。
 
+响应另有 `"webtoon": true/false`：页面高宽比的中位数达到 2 时为 `true`，网页端据此把这本当条漫，用上下连续滚动阅读。服务端用 `--no-webtoon-detection` 启动时总是 `false`。阅读器里的手动开关存在浏览器里，优先于这个值。
+
 ## 图片
 
 `GET /api/archives/{id}/pages/{n}?v=<quick_hash>[&w=<宽度>]`

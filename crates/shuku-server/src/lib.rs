@@ -11,6 +11,7 @@ mod images;
 mod logs;
 mod scan;
 mod snapshot;
+mod webtoon;
 
 use arc_swap::ArcSwap;
 use shuku_index::Index;
@@ -39,6 +40,9 @@ pub struct Config {
     /// 也扫描以 `.` 开头的目录和文件。默认跳过：它们通常是下载工具的临时目录，
     /// 往往只有那个程序自己能读。
     pub scan_hidden: bool,
+    /// 按页面宽高比判断条漫，让网页端自动改用上下连续滚动。判断错得多时可以关掉，
+    /// 关掉后只认阅读器里手动打开的条漫开关。
+    pub detect_webtoons: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

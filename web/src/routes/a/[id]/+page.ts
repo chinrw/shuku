@@ -7,5 +7,5 @@ export const load: PageLoad = async ({ fetch, params }) => {
 	const [book, list, categoryList] = await orNotFound(
 		Promise.all([archive(fetch, id), pages(fetch, id), categories(fetch)])
 	);
-	return { archive: book, pages: list, categories: categoryList };
+	return { archive: book, pages: list.pages, categories: categoryList };
 };

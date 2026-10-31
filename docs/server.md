@@ -33,6 +33,7 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
 | `--web-dir` | `SHUKU_WEB_DIR` | `web/build` |
 | `--listen` | `SHUKU_LISTEN` | `0.0.0.0:3002` |
 | `--scan-hidden` | `SHUKU_SCAN_HIDDEN` | 关闭：跳过以 `.` 开头的目录和文件 |
+| `--no-webtoon-detection` | `SHUKU_NO_WEBTOON_DETECTION` | 关闭：按页面宽高比自动判断条漫 |
 
 相对路径以进程的工作目录为准。参数可以放在 `scan` 前后。按 Ctrl-C 停止 HTTP 服务。
 

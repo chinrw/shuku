@@ -44,6 +44,7 @@ export interface Status {
 		web_dir: string;
 		listen: string;
 		scan_hidden: boolean;
+		detect_webtoons: boolean;
 	};
 	library: {
 		archives: number;
