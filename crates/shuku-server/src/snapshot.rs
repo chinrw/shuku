@@ -11,7 +11,11 @@ use std::{
 };
 
 /// 数据变化后等这么久再刷新快照，期间的变化合并成一次刷新。读可以滞后 10 到 20 秒。
+#[cfg(not(test))]
 const REFRESH_DELAY: Duration = Duration::from_secs(10);
+/// 单元测试里扫描在阻塞线程上停住时 tokio 的暂停时钟不会快进，只能用真实时间，所以缩短。
+#[cfg(test)]
+const REFRESH_DELAY: Duration = Duration::from_millis(100);
 
 pub(crate) struct Snapshot {
     pub(crate) index: Arc<Index>,

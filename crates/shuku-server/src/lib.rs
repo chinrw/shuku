@@ -99,6 +99,9 @@ struct Inner {
     /// 置位表示列表元数据或标签变了，下次刷新要重建整个快照；否则只刷新进度。
     listing_changed: AtomicBool,
     scan_lock: Mutex<()>,
+    /// 单元测试用：扫描每提交一批后调用，让扫描停在中途。
+    #[cfg(test)]
+    scan_batch_hook: Mutex<Option<Box<dyn FnMut() + Send>>>,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
     stopping: AtomicBool,
 }
@@ -135,6 +138,8 @@ impl App {
                 changed,
                 listing_changed: AtomicBool::new(false),
                 scan_lock: Mutex::new(()),
+                #[cfg(test)]
+                scan_batch_hook: Mutex::new(None),
                 stopping: AtomicBool::new(false),
             })))
         })

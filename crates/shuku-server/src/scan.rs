@@ -151,6 +151,16 @@ impl App {
                 Ok(())
             })?;
             self.listing_changed();
+            #[cfg(test)]
+            if let Some(hook) = self
+                .0
+                .scan_batch_hook
+                .lock()
+                .map_err(|_| Error::Lock)?
+                .as_mut()
+            {
+                hook();
+            }
         }
         // 从只读连接构建，期间进度上报照常写入。
         self.refresh_blocking()?;
@@ -223,4 +233,76 @@ pub(crate) fn unix_seconds(time: std::time::SystemTime) -> Result<i64> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| Error::File(error.to_string()))?;
     i64::try_from(duration.as_secs()).map_err(|error| Error::File(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{App, Config};
+    use shuku_index::Query;
+    use std::{
+        io::{Cursor, Write},
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+
+    fn write_archive(path: &std::path::Path) {
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 6))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        zip.start_file("1.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(png.get_ref()).unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn search_shows_committed_batches_while_the_scan_is_still_running() {
+        let root = tempfile::tempdir().unwrap();
+        let config = Config {
+            content_dir: root.path().join("content"),
+            data_dir: root.path().join("data"),
+            web_dir: root.path().join("web"),
+            listen: "127.0.0.1:0".parse().unwrap(),
+        };
+        std::fs::create_dir(&config.content_dir).unwrap();
+        // 每批 64 个文件，65 个文件分成两批。
+        for number in 0..65 {
+            write_archive(&config.content_dir.join(format!("{number:03}.cbz")));
+        }
+        let app = App::open(config).await.unwrap();
+        let (reached, first_batch) = mpsc::channel();
+        let (release, resume) = mpsc::channel::<()>();
+        let mut batches = 0;
+        *app.0.scan_batch_hook.lock().unwrap() = Some(Box::new(move || {
+            batches += 1;
+            if batches == 1 {
+                reached.send(()).unwrap();
+                resume.recv().unwrap();
+            }
+        }));
+        let scanning = tokio::spawn({
+            let app = app.clone();
+            async move { app.scan().await }
+        });
+        tokio::task::spawn_blocking(move || first_batch.recv().unwrap())
+            .await
+            .unwrap();
+
+        // 扫描停在第一批之后，还没有走到结束时的重建；后台的延迟刷新应该已经把第一批发布出去。
+        let started = Instant::now();
+        while app.index().search(&Query::default()).unwrap().total != 64 {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "扫描中途没有刷新"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!scanning.is_finished());
+
+        release.send(()).unwrap();
+        assert_eq!(scanning.await.unwrap().unwrap().added, 65);
+        assert_eq!(app.index().search(&Query::default()).unwrap().total, 65);
+    }
 }
