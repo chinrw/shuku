@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+use shuku_index::ArchiveRecord;
 
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 
@@ -72,21 +75,52 @@ pub struct Archive {
     pub progress: Option<Progress>,
 }
 
-/// 列表项携带内容指纹，由服务端据此生成封面 URL。
+/// 搜索快照的原料，见 [`crate::Reader::library`]。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArchiveListItem {
+pub struct Library {
+    /// 按小写完整名排序，[`LibraryArchive::tags`] 是这里的下标。
+    pub tags: Vec<LibraryTag>,
+    /// 按 ID 升序。
+    pub archives: Vec<LibraryArchive>,
+    pub progress: HashMap<i64, Progress>,
+}
+
+impl Library {
+    /// 构建 [`shuku_index::Index`] 用的记录，标签用小写完整名。
+    pub fn index_records(&self) -> impl Iterator<Item = ArchiveRecord> + '_ {
+        self.archives.iter().map(|archive| ArchiveRecord {
+            id: archive.id,
+            title: archive.title.clone(),
+            date_added: archive.date_added,
+            tags: archive
+                .tags
+                .iter()
+                .map(|&position| self.tags[position as usize].full.clone())
+                .collect(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryTag {
+    pub tag: Tag,
+    /// 小写完整名，`namespace:value` 或没有命名空间时的 `value`。
+    pub full: String,
+}
+
+/// 列表页需要的元数据。内容指纹由服务端用来生成封面 URL。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryArchive {
     pub id: i64,
     pub title: String,
     pub page_count: u32,
-    pub progress: Option<Progress>,
     pub quick_hash: String,
-    pub content_hash: Option<String>,
     pub is_new: bool,
     /// Unix 秒。
     pub date_added: i64,
     pub source_url: Option<String>,
-    /// 按小写完整名排序，与 [`Archive::tags`] 一致。
-    pub tags: Vec<Tag>,
+    /// [`Library::tags`] 的下标，升序，也就是按小写完整名排序，与 [`Archive::tags`] 一致。
+    pub tags: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -41,7 +41,7 @@ fn scan_accepts_environment_and_cli_overrides_and_reports_failures() {
         String::from_utf8_lossy(&output.stderr)
     );
     let logs = String::from_utf8(output.stdout).unwrap();
-    assert!(logs.contains("索引构建完成"));
+    assert!(logs.contains("快照构建完成"));
     assert!(logs.contains("elapsed_ms="));
     assert!(logs.contains("count=1"));
     assert!(

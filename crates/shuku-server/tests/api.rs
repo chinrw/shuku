@@ -78,6 +78,12 @@ async fn progress_rejects_stale_equal_and_out_of_range_reports() {
         json(&router, &format!("/api/archives/{id}")).await["progress"],
         current
     );
+    // 搜索读内存快照，进度要等快照刷新后才出现。
+    assert_eq!(
+        json(&router, "/api/search").await["items"][0]["progress"],
+        Value::Null
+    );
+    app.refresh().await.unwrap();
     assert_eq!(
         json(&router, "/api/search").await["items"][0]["progress"],
         current
@@ -94,6 +100,39 @@ async fn progress_rejects_stale_equal_and_out_of_range_reports() {
         .0,
         StatusCode::NOT_FOUND
     );
+}
+
+// 暂停的时钟在运行时空闲时自动快进，10 秒的刷新延迟不用真的等。
+#[tokio::test(start_paused = true)]
+async fn search_shows_new_progress_once_the_delayed_refresh_runs() {
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 10, 20);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let id = json(&router, "/api/search").await["items"][0]["id"]
+        .as_i64()
+        .unwrap();
+    let started = tokio::time::Instant::now();
+    let (status, _, _) = request(
+        &router,
+        "PUT",
+        &format!("/api/archives/{id}/progress"),
+        Some(value!({"page": 1, "client_time": 1000})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    loop {
+        let progress = json(&router, "/api/search").await["items"][0]["progress"].clone();
+        if progress != Value::Null {
+            assert_eq!(progress, value!({"page": 1, "client_time": 1000}));
+            break;
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(60));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(started.elapsed() >= std::time::Duration::from_secs(10));
 }
 
 #[tokio::test]

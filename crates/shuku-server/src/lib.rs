@@ -6,10 +6,11 @@ mod decode;
 mod hash;
 mod images;
 mod scan;
+mod snapshot;
 
 use arc_swap::ArcSwap;
 use shuku_index::Index;
-use shuku_store::{PooledReader, Reader, Writer};
+use shuku_store::{PooledReader, Writer};
 use std::{
     net::SocketAddr,
     path::PathBuf,
@@ -18,8 +19,8 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc::SyncSender,
     },
-    time::Instant,
 };
+use tokio::sync::Notify;
 
 pub use hash::HashReport;
 pub use scan::ScanReport;
@@ -90,7 +91,11 @@ struct Inner {
     database: Arc<db::Database>,
     /// 进度上报和指纹补算经这里合并提交；扫描直接调用 [`db::Database::write`]。
     writes: SyncSender<db::Request>,
-    index: ArcSwap<Index>,
+    snapshot: ArcSwap<snapshot::Snapshot>,
+    /// 让快照的刷新一个接一个进行。
+    refresh_lock: Mutex<()>,
+    /// 写队列提交了被接受的进度时通知，由后台任务延迟刷新快照里的进度。
+    progress_changed: Arc<Notify>,
     scan_lock: Mutex<()>,
     /// 置位后后台的长任务在下一个检查点返回，进程退出时不用等它们跑完。
     stopping: AtomicBool,
@@ -101,7 +106,7 @@ pub struct App(Arc<Inner>);
 
 impl App {
     pub async fn open(mut config: Config) -> Result<Self> {
-        tokio::task::spawn_blocking(move || {
+        let app = tokio::task::spawn_blocking(move || {
             config.content_dir = config.content_dir.canonicalize()?;
             if !config.content_dir.is_dir() {
                 return Err(Error::Config("内容路径必须是目录".into()));
@@ -116,18 +121,23 @@ impl App {
             }
             std::fs::create_dir_all(&config.data_dir)?;
             let database = Arc::new(db::Database::open(&config.data_dir.join("shuku.sqlite"))?);
-            let index = build_index(&*database.reader()?)?;
-            let writes = db::spawn_writer(database.clone())?;
+            let snapshot = snapshot::Snapshot::load(&*database.reader()?)?;
+            let progress_changed = Arc::new(Notify::new());
+            let writes = db::spawn_writer(database.clone(), progress_changed.clone())?;
             Ok(Self(Arc::new(Inner {
                 config,
                 database,
                 writes,
-                index: ArcSwap::from_pointee(index),
+                snapshot: ArcSwap::from_pointee(snapshot),
+                refresh_lock: Mutex::new(()),
+                progress_changed,
                 scan_lock: Mutex::new(()),
                 stopping: AtomicBool::new(false),
             })))
         })
-        .await?
+        .await??;
+        app.spawn_progress_refresher();
+        Ok(app)
     }
 
     /// 让后台的长任务尽快停下。tokio 退出时会等 spawn_blocking 的任务结束，
@@ -137,7 +147,7 @@ impl App {
     }
 
     pub fn index(&self) -> Arc<Index> {
-        self.0.index.load_full()
+        self.snapshot().index.clone()
     }
 
     fn reader(&self) -> Result<PooledReader<'_>> {
@@ -176,21 +186,4 @@ fn destination(path: &std::path::Path) -> Result<PathBuf> {
         }
         Err(error) => Err(error.into()),
     }
-}
-
-fn build_index(reader: &Reader) -> Result<Index> {
-    let start = Instant::now();
-    let mut records = Vec::new();
-    reader.for_each_archive_record(|record| {
-        records.push(record);
-        Ok(())
-    })?;
-    let count = records.len();
-    let index = Index::build(records)?;
-    tracing::info!(
-        count,
-        elapsed_ms = start.elapsed().as_millis(),
-        "索引构建完成"
-    );
-    Ok(index)
 }

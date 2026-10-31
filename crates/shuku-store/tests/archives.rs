@@ -29,7 +29,7 @@ fn lists_file_identity_for_scanning_without_loading_pages_or_tags() {
 }
 
 #[test]
-fn reads_list_metadata_in_requested_order() {
+fn reads_library_listing_with_sorted_tag_positions_and_progress() {
     let mut store = Store::open(":memory:").unwrap();
     let first = store
         .save_archive(None, &metadata("one.cbz"), &pages())
@@ -37,41 +37,51 @@ fn reads_list_metadata_in_requested_order() {
     let mut second_metadata = metadata("two.cbz");
     second_metadata.title = "第二本".into();
     second_metadata.is_new = false;
-    second_metadata.content_hash = Some("full".into());
+    second_metadata.source_url = Some("https://example.org/2".into());
     let second = store.save_archive(None, &second_metadata, &[]).unwrap();
     store.write_progress(first, 1, 1234).unwrap();
     store
-        .replace_tags(first, &[tag("language", "中文"), tag("artist", "Alpha")])
+        .replace_tags(first, &[tag("language", "中文"), tag("Artist", "Alpha")])
         .unwrap();
-    let list = store.list_metadata(&[second, second + 1, first]).unwrap();
+    store
+        .replace_tags(second, &[tag("artist", "beta")])
+        .unwrap();
+
+    let library = store.library().unwrap();
     assert_eq!(
-        list.iter().map(|item| item.id).collect::<Vec<_>>(),
-        [second, first]
+        library
+            .tags
+            .iter()
+            .map(|entry| (entry.tag.clone(), entry.full.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (tag("Artist", "Alpha"), "artist:alpha"),
+            (tag("artist", "beta"), "artist:beta"),
+            (tag("language", "中文"), "language:中文"),
+        ]
     );
-    assert_eq!(list[0].title, "第二本");
-    assert_eq!(list[0].page_count, 0);
-    assert!(!list[0].is_new);
-    assert!(list[0].progress.is_none());
-    assert_eq!(list[0].quick_hash, "quick");
-    assert_eq!(list[0].content_hash.as_deref(), Some("full"));
-    assert_eq!(list[1].title, "漫画 10");
-    assert_eq!(list[1].page_count, 2);
-    assert!(list[1].is_new);
-    assert_eq!(
-        list[1].progress,
-        store.archive(first).unwrap().unwrap().progress
-    );
-    assert!(list[1].content_hash.is_none());
-    assert!(list[0].tags.is_empty());
-    assert_eq!(list[1].date_added, 1_700_000_000);
-    assert_eq!(list[1].source_url, None);
+    let ids: Vec<_> = library.archives.iter().map(|archive| archive.id).collect();
+    assert_eq!(ids, [first, second]);
+    let (one, two) = (&library.archives[0], &library.archives[1]);
+    assert_eq!(one.title, "漫画 10");
+    assert_eq!(one.page_count, 2);
+    assert!(one.is_new);
+    assert_eq!(one.quick_hash, "quick");
+    assert_eq!(one.date_added, 1_700_000_000);
+    assert_eq!(one.source_url, None);
     // 与详情一致，按小写完整名排序。
+    assert_eq!(one.tags, [0, 2]);
+    assert_eq!(two.title, "第二本");
+    assert_eq!(two.page_count, 0);
+    assert!(!two.is_new);
+    assert_eq!(two.source_url.as_deref(), Some("https://example.org/2"));
+    assert_eq!(two.tags, [1]);
     assert_eq!(
-        list[1].tags,
-        [tag("artist", "Alpha"), tag("language", "中文")]
+        library.progress.get(&first),
+        store.archive(first).unwrap().unwrap().progress.as_ref()
     );
-    assert!(store.list_metadata(&[]).unwrap().is_empty());
-    assert!(store.list_metadata(&[second + 1]).unwrap().is_empty());
+    assert_eq!(library.progress.len(), 1);
+    assert_eq!(store.progress().unwrap(), library.progress);
 }
 
 #[test]

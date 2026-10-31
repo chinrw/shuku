@@ -1,11 +1,10 @@
-use crate::{App, Error, Result, build_index};
+use crate::{App, Error, Result};
 use rayon::prelude::*;
 use shuku_store::{ArchiveMetadata, CompressionMethod, Page, ScanEntry};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
     path::Path,
-    sync::Arc,
     time::UNIX_EPOCH,
 };
 
@@ -130,9 +129,8 @@ impl App {
                 Ok(())
             })?;
         }
-        // 在写锁外构建，期间进度上报照常写入。
-        let index = build_index(&*self.reader()?)?;
-        self.0.index.store(Arc::new(index));
+        // 从只读连接构建，期间进度上报照常写入。
+        self.refresh_blocking()?;
         tracing::info!(?report, "扫描完成");
         Ok(report)
     }

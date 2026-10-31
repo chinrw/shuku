@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
-use shuku_index::ArchiveRecord;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::{
-    Archive, ArchiveListItem, ArchiveMetadata, Error, MIGRATIONS, Page, Progress, Result,
-    ScanEntry, Tag, configure,
+    Archive, ArchiveMetadata, Error, Library, LibraryArchive, LibraryTag, MIGRATIONS, Page,
+    Progress, Result, ScanEntry, Tag, configure,
 };
 
 /// 只读连接。WAL 模式下读不挡写，写也不挡读；每个读取方法看到的是调用开始时已提交的数据。
@@ -99,94 +98,96 @@ impl Reader {
             .optional()?)
     }
 
-    /// 按输入 ID 的顺序返回列表项，跳过已不存在的归档。
-    /// 调用方传入一页搜索结果，ID 数量受 API 的分页上限约束。
-    /// 元数据和标签从同一个读取快照中取得。
-    pub fn list_metadata(&self, ids: &[i64]) -> Result<Vec<ArchiveListItem>> {
-        let placeholders = vec!["?"; ids.len()].join(",");
+    /// 一次读出搜索快照需要的全部数据：标签字典、每本的列表元数据和全部进度，
+    /// 都来自同一个读取快照。
+    pub fn library(&self) -> Result<Library> {
         let transaction = self.connection.unchecked_transaction()?;
-        let mut statement = transaction.prepare(&format!(
-            "SELECT a.id, a.title, a.page_count, a.quick_hash, a.content_hash, a.is_new,
-                a.date_added, a.source_url, p.page, p.client_time, p.updated_at
-             FROM archive a LEFT JOIN progress p ON p.archive_id = a.id
-             WHERE a.id IN ({placeholders})"
-        ))?;
-        let mut items = statement
-            .query_map(params_from_iter(ids), |row| {
-                Ok(ArchiveListItem {
-                    id: row.get("id")?,
-                    title: row.get("title")?,
-                    page_count: row.get("page_count")?,
-                    quick_hash: row.get("quick_hash")?,
-                    content_hash: row.get("content_hash")?,
-                    is_new: row.get("is_new")?,
-                    date_added: row.get("date_added")?,
-                    source_url: row.get("source_url")?,
-                    tags: Vec::new(),
-                    progress: if row.get::<_, Option<u32>>("page")?.is_some() {
-                        Some(read_progress(row)?)
-                    } else {
-                        None
+        let mut positions = HashMap::new();
+        let tags = transaction
+            .prepare("SELECT id, namespace, value, full FROM tag ORDER BY full")?
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    LibraryTag {
+                        tag: Tag {
+                            namespace: row.get(1)?,
+                            value: row.get(2)?,
+                        },
+                        full: row.get(3)?,
                     },
+                ))
+            })?
+            .enumerate()
+            .map(|(position, row)| {
+                let (id, tag) = row?;
+                positions.insert(id, position as u32);
+                Ok(tag)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut archives = transaction
+            .prepare(
+                "SELECT id, title, page_count, quick_hash, is_new, date_added, source_url
+                 FROM archive ORDER BY id",
+            )?
+            .query_map([], |row| {
+                Ok(LibraryArchive {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    page_count: row.get(2)?,
+                    quick_hash: row.get(3)?,
+                    is_new: row.get(4)?,
+                    date_added: row.get(5)?,
+                    source_url: row.get(6)?,
+                    tags: Vec::new(),
                 })
             })?
-            .map(|row| row.map(|item| (item.id, item)))
-            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
-        let mut tags = transaction.prepare(&format!(
-            "SELECT archive_tag.archive_id, tag.namespace, tag.value
-             FROM archive_tag JOIN tag ON tag.id = archive_tag.tag_id
-             WHERE archive_tag.archive_id IN ({placeholders})
-             ORDER BY tag.full"
-        ))?;
-        let mut rows = tags.query(params_from_iter(ids))?;
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        // 两边都按归档 ID 升序，归并时不必为每本查一次。
+        let mut associations = transaction
+            .prepare("SELECT archive_id, tag_id FROM archive_tag ORDER BY archive_id")?;
+        let mut rows = associations.query([])?;
+        let mut current = archives.iter_mut().peekable();
         while let Some(row) = rows.next()? {
-            if let Some(item) = items.get_mut(&row.get::<_, i64>(0)?) {
-                item.tags.push(Tag {
-                    namespace: row.get(1)?,
-                    value: row.get(2)?,
-                });
+            let archive_id: i64 = row.get(0)?;
+            while current
+                .peek()
+                .is_some_and(|archive| archive.id < archive_id)
+            {
+                current.next();
+            }
+            if let Some(archive) = current
+                .peek_mut()
+                .filter(|archive| archive.id == archive_id)
+                && let Some(position) = positions.get(&row.get::<_, i64>(1)?)
+            {
+                archive.tags.push(*position);
             }
         }
-        Ok(ids.iter().filter_map(|id| items.remove(id)).collect())
+        drop(rows);
+        drop(associations);
+        for archive in &mut archives {
+            archive.tags.sort_unstable();
+        }
+        let progress = read_all_progress(&transaction)?;
+        transaction.commit()?;
+        Ok(Library {
+            tags,
+            archives,
+            progress,
+        })
     }
 
-    /// 在同一读取快照中按 ID 流式导出，每次仅组装一本归档及其标签。
-    /// 读取或回调出错时立即停止；调用方应丢弃已收到的部分结果。
-    pub fn for_each_archive_record(
-        &self,
-        mut visit: impl FnMut(ArchiveRecord) -> Result<()>,
-    ) -> Result<()> {
-        let mut statement = self.connection.prepare(
-            "SELECT a.id, a.title, a.date_added, t.full
-             FROM archive a
-             LEFT JOIN archive_tag at ON at.archive_id = a.id
-             LEFT JOIN tag t ON t.id = at.tag_id
-             ORDER BY a.id, at.tag_id",
-        )?;
-        let mut rows = statement.query([])?;
-        let mut current: Option<ArchiveRecord> = None;
-        while let Some(row) = rows.next()? {
-            let id = row.get(0)?;
-            if current.as_ref().map(|record| record.id) != Some(id) {
-                if let Some(record) = current.take() {
-                    visit(record)?;
-                }
-                current = Some(ArchiveRecord {
-                    id,
-                    title: row.get(1)?,
-                    date_added: row.get(2)?,
-                    tags: Vec::new(),
-                });
-            }
-            if let (Some(record), Some(tag)) = (&mut current, row.get::<_, Option<String>>(3)?) {
-                record.tags.push(tag);
-            }
-        }
-        if let Some(record) = current {
-            visit(record)?;
-        }
-        Ok(())
+    /// 全部归档的阅读进度。
+    pub fn progress(&self) -> Result<HashMap<i64, Progress>> {
+        read_all_progress(&self.connection)
     }
+}
+
+fn read_all_progress(connection: &Connection) -> Result<HashMap<i64, Progress>> {
+    Ok(connection
+        .prepare("SELECT archive_id, page, client_time, updated_at FROM progress")?
+        .query_map([], |row| Ok((row.get(0)?, read_progress(row)?)))?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 fn read_progress(row: &rusqlite::Row<'_>) -> rusqlite::Result<Progress> {

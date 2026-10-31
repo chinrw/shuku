@@ -118,12 +118,15 @@ async fn search(
         parsed.query.sort = sort;
         parsed.query.after = params.after;
         parsed.query.limit = limit;
-        let result = app.index().search(&parsed.query).map_err(Error::bad_request)?;
-        let items: Vec<_> = app.reader()?.list_metadata(&result.ids)?.into_iter().map(|item| json!({
-            "id": item.id, "title": item.title, "page_count": item.page_count,
-            "is_new": item.is_new, "progress": progress(item.progress.as_ref()),
-            "cover_url": cover_url(item.id, &item.quick_hash), "tags": tag_groups(item.tags),
-            "date_added": item.date_added, "source_url": item.source_url,
+        let snapshot = app.snapshot();
+        let result = snapshot.index.search(&parsed.query).map_err(Error::bad_request)?;
+        // 结果和列表元数据来自同一个快照，结果里的每本都查得到。
+        let items: Vec<_> = result.ids.iter().filter_map(|id| snapshot.item(*id)).map(|item| json!({
+            "id": item.archive.id, "title": item.archive.title,
+            "page_count": item.archive.page_count, "is_new": item.archive.is_new,
+            "progress": progress(item.progress), "tags": tag_groups(item.tags()),
+            "cover_url": cover_url(item.archive.id, &item.archive.quick_hash),
+            "date_added": item.archive.date_added, "source_url": item.archive.source_url,
         })).collect();
         Ok(Json(json!({"total": result.total, "next_after": result.next_after, "degraded": parsed.degraded, "items": items})))
     }).await
@@ -144,7 +147,9 @@ async fn facets(
     let limit = tag_limit(params.limit, 20)?;
     app.blocking(move |app| {
         let parsed = shuku_index::parse_query(&params.q).map_err(Error::bad_request)?;
-        Ok(Json(tag_counts(app.index().facets(&parsed.query, limit))))
+        Ok(Json(tag_counts(
+            app.snapshot().index.facets(&parsed.query, limit),
+        )))
     })
     .await
 }
@@ -163,7 +168,7 @@ async fn suggest_tags(
     let limit = tag_limit(params.limit, 10)?;
     app.blocking(move |app| {
         Ok(Json(tag_counts(
-            app.index().suggest_tags(&params.prefix, limit),
+            app.snapshot().index.suggest_tags(&params.prefix, limit),
         )))
     })
     .await
@@ -192,7 +197,7 @@ async fn detail(
     let Path(id) = id.map_err(Error::bad_request)?;
     app.blocking(move |app| {
         let archive = require_archive(&*app.reader()?, id)?;
-        let tags = tag_groups(archive.tags);
+        let tags = tag_groups(&archive.tags);
         Ok(Json(json!({
             "id": archive.id, "title": archive.metadata.title,
             "summary": archive.metadata.summary, "page_count": archive.page_count,
@@ -227,10 +232,10 @@ pub(crate) fn require_archive(reader: &shuku_store::Reader, id: i64) -> Result<A
 }
 
 /// 按命名空间分组，组按命名空间名排序，组内保持存储层给出的顺序。
-fn tag_groups(tags: Vec<Tag>) -> Vec<Value> {
-    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+fn tag_groups<'a>(tags: impl IntoIterator<Item = &'a Tag>) -> Vec<Value> {
+    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for tag in tags {
-        groups.entry(tag.namespace).or_default().push(tag.value);
+        groups.entry(&tag.namespace).or_default().push(&tag.value);
     }
     groups
         .into_iter()

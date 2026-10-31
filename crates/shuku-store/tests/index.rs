@@ -2,18 +2,13 @@ mod common;
 
 use common::{metadata, pages};
 use shuku_index::{ArchiveRecord, Index, Query, Sort, Term};
-use shuku_store::{Error, Store, Tag};
+use shuku_store::{Store, Tag};
 
 #[test]
-fn streams_records_with_and_without_tags_and_propagates_callback_errors() {
+fn exports_index_records_with_and_without_tags() {
     let mut store = Store::open(":memory:").unwrap();
     let mut records = Vec::new();
-    store
-        .for_each_archive_record(|record| {
-            records.push(record);
-            Ok(())
-        })
-        .unwrap();
+    records.extend(store.library().unwrap().index_records());
     assert!(records.is_empty());
     let first = store
         .save_archive(None, &metadata("first.cbz"), &pages())
@@ -36,12 +31,7 @@ fn streams_records_with_and_without_tags_and_propagates_callback_errors() {
             ],
         )
         .unwrap();
-    store
-        .for_each_archive_record(|record| {
-            records.push(record);
-            Ok(())
-        })
-        .unwrap();
+    records.extend(store.library().unwrap().index_records());
     assert_eq!(
         records,
         vec![
@@ -59,16 +49,6 @@ fn streams_records_with_and_without_tags_and_propagates_callback_errors() {
             },
         ]
     );
-    let mut calls = 0;
-    let result = store.for_each_archive_record(|_| {
-        calls += 1;
-        Err(Error::Sqlite(rusqlite::Error::InvalidQuery))
-    });
-    assert!(matches!(
-        result,
-        Err(Error::Sqlite(rusqlite::Error::InvalidQuery))
-    ));
-    assert_eq!(calls, 1);
 }
 
 #[test]
@@ -125,12 +105,7 @@ fn ten_thousand_archives_with_ten_tags_build_the_same_index() {
     }
 
     let mut exported = Vec::new();
-    store
-        .for_each_archive_record(|record| {
-            exported.push(record);
-            Ok(())
-        })
-        .unwrap();
+    exported.extend(store.library().unwrap().index_records());
     assert_eq!(exported.len(), 10_000);
     for (actual, expected) in exported.iter().zip(&direct_records) {
         assert_eq!(actual.id, expected.id);

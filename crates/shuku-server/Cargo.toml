@@ -27,13 +27,14 @@ shuku-index = { path = "../shuku-index" }
 shuku-store = { path = "../shuku-store" }
 tempfile = "3"
 thiserror.workspace = true
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 walkdir = "2"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 image = { version = "0.25", default-features = false, features = ["avif"] }
 tower = { version = "0.5", features = ["util"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
