@@ -16,6 +16,19 @@ describe('relatedQueries', () => {
 		]);
 	});
 
+	it('lists series first and uses publishers for volume-based manga', () => {
+		const groups = [
+			{ namespace: 'publisher', values: ['集英社'] },
+			{ namespace: 'artist', values: ['尾田栄一郎'] },
+			{ namespace: 'series', values: ['ONE PIECE'] }
+		];
+		expect(relatedQueries(groups)).toEqual([
+			{ label: '系列：ONE PIECE', term: '"series:ONE PIECE"' },
+			{ label: '作者：尾田栄一郎', term: '"artist:尾田栄一郎"' },
+			{ label: '出版社：集英社', term: '"publisher:集英社"' }
+		]);
+	});
+
 	it('stops at four rows', () => {
 		const groups = [{ namespace: 'artist', values: ['a', 'b', 'c', 'd', 'e'] }];
 		expect(relatedQueries(groups)).toHaveLength(4);
