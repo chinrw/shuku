@@ -12,6 +12,7 @@ mod edit;
 mod hash;
 mod hosts;
 mod images;
+mod info;
 mod logs;
 mod mcp;
 mod metadata;

@@ -1,5 +1,5 @@
 //! 在控制台里改的设置，存在 SQLite 的 setting 表里。表由各功能共用，每个功能一个键、
-//! 值是那组设置的 JSON；这里有 `scan`（扫描）和 `server`（条漫判断、允许的主机名）两组。
+//! 值是那组设置的 JSON；这里有 `scan`（扫描）和 `server`（书库名、条漫判断、允许的主机名）两组。
 //! 只有书库目录、数据目录、网页目录和监听地址是启动参数。
 
 use crate::{App, Error, Result};
@@ -16,6 +16,8 @@ const BUSY_RECHECK: Duration = Duration::from_secs(60);
 /// 列表类设置最多这么多项、每项最长这么多字节，免得一次 PUT 塞进巨大的值。
 const MAX_LIST_ITEMS: usize = 100;
 const MAX_ITEM_LEN: usize = 255;
+/// 书库名最多这么多个字符。
+const MAX_NAME_CHARS: usize = 100;
 
 /// 一组设置：在 setting 表里的键，以及 PUT 时怎样把补丁合进去。
 pub(crate) trait Group: Clone + Default + Serialize + DeserializeOwned {
@@ -126,6 +128,8 @@ impl ScanSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct ServerSettings {
+    /// 书库名，显示在书库页左上角，客户端的服务器列表也用它区分几个实例。空的时候用“书库”。
+    pub(crate) name: String,
     /// 按页面宽高比判断条漫，让网页端自动改用上下连续滚动。判断错得多时可以关掉，
     /// 关掉后只认阅读器里手动打开的条漫开关。
     pub(crate) detect_webtoons: bool,
@@ -137,6 +141,7 @@ pub(crate) struct ServerSettings {
 impl Default for ServerSettings {
     fn default() -> Self {
         Self {
+            name: String::new(),
             detect_webtoons: true,
             allowed_hosts: Vec::new(),
         }
@@ -146,6 +151,7 @@ impl Default for ServerSettings {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ServerPatch {
+    name: Option<String>,
     detect_webtoons: Option<bool>,
     allowed_hosts: Option<Vec<String>>,
 }
@@ -156,6 +162,15 @@ impl Group for ServerSettings {
 
     fn apply(&self, patch: ServerPatch) -> Result<Self> {
         let mut updated = self.clone();
+        if let Some(name) = patch.name {
+            let name = name.trim();
+            if name.chars().count() > MAX_NAME_CHARS || name.contains(char::is_control) {
+                return Err(Error::bad_request(format!(
+                    "书库名最多 {MAX_NAME_CHARS} 个字，不能有换行"
+                )));
+            }
+            updated.name = name.to_owned();
+        }
         if let Some(detect) = patch.detect_webtoons {
             updated.detect_webtoons = detect;
         }

@@ -9,10 +9,18 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 每台设备（浏览器、阅读程序、agent）一个令牌，可以单独吊销。令牌形如 `shuku_` 加 64 个十六进制字符，只在新建时显示一次，服务端只存它的摘要。
 
 - `/mcp` 总是要令牌。
-- `/api` 默认不要，和以前一样只在局域网里用。控制台打开“网页端也需要令牌”（`require_token`）以后，除了 `GET /api/auth` 和 `/api/auth/session`，都要令牌。
+- `/api` 默认不要，和以前一样只在局域网里用。控制台打开“网页端也需要令牌”（`require_token`）以后，除了 `GET /api/auth`、`GET /api/info` 和 `/api/auth/session`，都要令牌。
 - 网页、网页端的静态文件不要令牌；网页端收到 401 时转到 `/login`。
 
 令牌放在 `Authorization: Bearer <令牌>` 头里，`Bearer` 不分大小写；网页端登录后由服务端放进 HttpOnly、`SameSite=Strict` 的 cookie，名字是 `shuku_token_<监听端口>`，同一台机器上的几个实例互不覆盖。请求带了 `Authorization` 头而令牌无效、已吊销或者头的格式不对时，即使这个接口不需要令牌也返回 401，好让程序发现令牌失效。401 带 `WWW-Authenticate: Bearer`。需要令牌时，图片接口的 `Cache-Control` 从 `public` 改成 `private`，共享缓存不会把一台设备取到的图片转给别的设备。
+
+`GET /api/info`：服务器信息，总是不需要令牌，带 `Access-Control-Allow-Origin: *`，桌面和 Android 客户端添加服务器时用它确认地址并看要不要令牌。
+
+```json
+{ "name": "本子", "version": "0.1.0", "archives": 12804, "require_token": true }
+```
+
+`name` 是控制台设置的书库名，没设置时是“书库”；`archives` 是书库里的本数。
 
 `GET /api/auth`：`{"require_token": false, "device": {"id": 3, "name": "客厅 iPad"}}`，没登录时 `device` 为 `null`。
 
@@ -537,11 +545,11 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 
 ```json
 { "scan_hidden": false, "scan_interval_hours": 0, "extra_skip": ["@eaDir", "*.part"] }
-{ "detect_webtoons": true, "allowed_hosts": ["nas.example.ts.net"] }
+{ "name": "本子", "detect_webtoons": true, "allowed_hosts": ["nas.example.ts.net"] }
 ```
 
 - `scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0（默认）表示不定时，最大 720。`extra_skip` 是额外跳过的目录或文件名，`*` 通配、不分大小写，不能带路径分隔符；它不作用于文件夹书里的单张图片，要跳过整本就写文件夹的名字。
-- `detect_webtoons` 见页面清单的 `webtoon`。`allowed_hosts` 是除 IP、`localhost`、不带点的主机名以外允许的 Host，不带端口和通配。
+- `name` 是书库名，最多 100 个字、不能有换行，空字符串表示用默认的“书库”；它显示在书库页左上角和 `/api/info` 里。`detect_webtoons` 见页面清单的 `webtoon`。`allowed_hosts` 是除 IP、`localhost`、不带点的主机名以外允许的 Host，不带端口和通配。
 - PUT 只需带要改的项，列表整体替换（去掉空白和重复项，最多 100 项）；未知字段或无效值返回 400，响应是改后的这一组设置。
 
 `POST /api/admin/scan`、`POST /api/admin/hash`

@@ -713,7 +713,11 @@ async fn requests_for_unknown_domain_names_are_rejected() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         serde_json::from_slice::<Value>(&body).unwrap(),
-        value!({ "detect_webtoons": true, "allowed_hosts": ["books.example.ts.net"] })
+        value!({
+            "name": "",
+            "detect_webtoons": true,
+            "allowed_hosts": ["books.example.ts.net"]
+        })
     );
     for host in ["evil.example", "evil.example:3002"] {
         for uri in ["/api/search", "/", "/api/admin/status"] {

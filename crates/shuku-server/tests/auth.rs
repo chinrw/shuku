@@ -214,10 +214,13 @@ async fn requiring_tokens_locks_the_api_but_not_login_or_the_web_app() {
         .0,
         StatusCode::UNAUTHORIZED
     );
-    // 登录状态、登录本身和网页不需要令牌。
+    // 登录状态、服务器信息、登录本身和网页不需要令牌。
     let (status, body, _) = call(&router, "GET", "/api/auth", None, &[]).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, value!({"require_token": true, "device": null}));
+    let (status, body, _) = call(&router, "GET", "/api/info", None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["require_token"], true);
     assert_eq!(call(&router, "GET", "/", None, &[]).await.0, StatusCode::OK);
     assert_eq!(
         call(&router, "GET", "/api/admin/tokens", None, &[]).await.0,
@@ -273,4 +276,49 @@ async fn the_setting_survives_a_restart() {
         call(&router, "GET", "/api/search", None, &[]).await.0,
         StatusCode::UNAUTHORIZED
     );
+}
+
+#[tokio::test]
+async fn server_info_reports_name_count_and_allows_any_origin() {
+    let fixture = Fixture::new();
+    fixture.archive("one.cbz", 80, 120);
+    fixture.archive("two.cbz", 80, 120);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+
+    let (status, body, headers) = call(&router, "GET", "/api/info", None, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["name"], "书库");
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["archives"], 2);
+    assert_eq!(body["require_token"], false);
+    assert_eq!(headers["access-control-allow-origin"], "*");
+
+    let rename = |name: &str| value!({ "name": name });
+    let (status, body, _) = call(
+        &router,
+        "PUT",
+        "/api/admin/settings/server",
+        Some(rename("  本子 ")),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["name"], "本子");
+    assert_eq!(
+        call(&router, "GET", "/api/info", None, &[]).await.1["name"],
+        "本子"
+    );
+    for bad in ["一\n二".to_owned(), "长".repeat(101)] {
+        let (status, _, _) = call(
+            &router,
+            "PUT",
+            "/api/admin/settings/server",
+            Some(rename(&bad)),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    }
 }

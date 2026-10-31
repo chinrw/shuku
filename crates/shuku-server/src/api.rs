@@ -55,6 +55,7 @@ fn metadata_status(error: &shuku_metadata::Error) -> StatusCode {
 impl App {
     pub fn router(&self) -> Router {
         Router::new()
+            .route("/api/info", get(crate::info::info))
             .route("/api/search", get(search))
             .route("/api/facets", get(facets))
             .route("/api/tags", get(suggest_tags))

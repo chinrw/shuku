@@ -198,6 +198,10 @@ impl Snapshot {
         })
     }
 
+    pub(crate) fn archive_count(&self) -> usize {
+        self.listing.archives.len()
+    }
+
     pub(crate) fn series(&self, id: i64) -> Option<&Series> {
         let series = &self.listing.series;
         let position = series.binary_search_by_key(&id, |series| series.id).ok()?;

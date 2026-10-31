@@ -254,8 +254,9 @@ pub(crate) async fn authenticate(
     let path = request.uri().path();
     let mcp = path == "/mcp" || path.starts_with("/mcp/");
     let api = path == "/api" || path.starts_with("/api/");
-    // 登录和查询登录状态不能要求先登录。
-    let open = path == "/api/auth" && request.method() == axum::http::Method::GET
+    // 登录、查询登录状态和服务器信息不能要求先登录。
+    let open = (path == "/api/auth" || path == "/api/info")
+        && request.method() == axum::http::Method::GET
         || path == "/api/auth/session";
     let required = mcp || (api && !open && app.auth_settings().require_token);
     let presented = presented(request.headers(), &app.cookie_name());
