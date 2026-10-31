@@ -112,7 +112,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem 0.75rem;
-		max-width: 1600px;
+		max-width: 1200px;
 		width: 100%;
 		margin: 0 auto;
 	}

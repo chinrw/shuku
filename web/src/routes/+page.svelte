@@ -9,8 +9,9 @@
 		type Sort,
 		type TagCount
 	} from '#lib/api.ts';
-	import { invalidateAll } from '$app/navigation';
+	import { afterNavigate, invalidateAll } from '$app/navigation';
 	import BatchBar from '#lib/BatchBar.svelte';
+	import BookDrawer from '#lib/BookDrawer.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
@@ -232,7 +233,11 @@
 
 	let currentFilter = $derived(FILTERS.find(([filter]) => filter === data.filter)?.[1]);
 
-	let currentCategory = $derived(data.categories.find((category) => category.id === data.category));
+	// 分类按钮和抽屉共用。抽屉里新建分类或改了成员后重新取一次带本数的列表，
+	// 按钮跟着变；换一次搜索又回到这一页加载的数据。
+	let categoryList = $derived(data.categories);
+
+	let currentCategory = $derived(categoryList.find((category) => category.id === data.category));
 
 	function splitTag(tag: string) {
 		const colon = tag.indexOf(':');
@@ -319,10 +324,16 @@
 		hoverTimer = setTimeout(() => (tagView = null), HOVER_DELAY);
 	}
 
-	function tapTags(event: MouseEvent, item: ArchiveItem) {
-		const target = event.currentTarget as HTMLElement;
-		if (tagView?.item.id === item.id && !tagView.sheet) closeTags();
-		else openTags(item, target);
+	// 点标题或标签行打开详情抽屉；鼠标悬停在标签行上仍然弹出标签浮层。
+	let drawer = $state.raw<ArchiveItem | null>(null);
+	// 抽屉里的标签链接会换一个搜索，留在原页面上的抽屉会挡住新结果。
+	afterNavigate(() => {
+		drawer = null;
+	});
+
+	function openDrawer(item: ArchiveItem) {
+		closeTags();
+		drawer = item;
 	}
 
 	function progressText(item: ArchiveItem) {
@@ -431,6 +442,8 @@
 	</div>
 </header>
 
+<div class="page">
+
 {#if data.queryError}
 	<p class="status error">{data.queryError}</p>
 {:else if data.result}
@@ -453,9 +466,9 @@
 		<a href={filterHref(filter)} aria-current={data.filter === filter ? 'true' : undefined}>{label}</a>
 	{/each}
 </nav>
-{#if data.categories.length > 0}
+{#if categoryList.length > 0}
 	<nav class="facets" aria-label="分类">
-		{#each data.categories as category (category.id)}
+		{#each categoryList as category (category.id)}
 			<a
 				href={categoryHref(category.id)}
 				aria-current={data.category === category.id ? 'true' : undefined}
@@ -484,9 +497,13 @@
 				{#if series}
 					<a class="title" href="/s/{series.id}" title={series.name}>{series.name}</a>
 				{:else}
-					<a class="title" href="/a/{item.id}/read" title={item.title}>{item.title}</a>
+					<button class="title" onclick={() => openDrawer(item)} title={item.title}>{item.title}</button>
 				{/if}
-				<a class="cover" class:stack={series} href={series ? `/s/${series.id}` : `/a/${item.id}/read`}>
+				<a
+					class="cover"
+					class:stack={series}
+					class:selected={drawer?.id === item.id}
+					href={series ? `/s/${series.id}` : `/a/${item.id}/read`}>
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
 					<span class="badge pages">{series ? `${series.volumes} 卷` : `${item.page_count}P`}</span>
@@ -502,7 +519,7 @@
 						class="tags"
 						aria-label="查看全部标签"
 						aria-expanded={tagView?.item.id === item.id}
-						onclick={(event) => tapTags(event, item)}
+						onclick={() => openDrawer(item)}
 						onpointerenter={(event) => hoverIn(event, item)}
 						onpointerleave={hoverOut}
 					>
@@ -522,7 +539,11 @@
 					<img src={item.cover_url} alt="" loading="lazy" />
 				</a>
 				<div class="body">
-					<a class="title" {href}>{series?.name ?? item.title}</a>
+					{#if series}
+						<a class="title" {href}>{series.name}</a>
+					{:else}
+						<button class="title" onclick={() => openDrawer(item)}>{item.title}</button>
+					{/if}
 					<div class="meta">
 						{#if series}
 							共 {series.volumes} 卷
@@ -543,6 +564,11 @@
 		{/each}
 	</main>
 {/if}
+</div>
+
+{#if drawer}
+	<BookDrawer item={drawer} bind:categories={categoryList} onclose={() => (drawer = null)} />
+{/if}
 
 {#if tagView}
 	<TagPopover
@@ -556,7 +582,11 @@
 {/if}
 
 <svelte:window
-	onkeydown={(event) => event.key === 'Escape' && closeTags()}
+	onkeydown={(event) => {
+		if (event.key !== 'Escape') return;
+		closeTags();
+		drawer = null;
+	}}
 	onscroll={() => tagView && !tagView.sheet && closeTags()}
 	onpointerdown={(event) => {
 		// 点在浮层和标签行以外的地方时关闭；底部面板由遮罩处理。
@@ -586,7 +616,7 @@
 		count={selectAll ? (data.result?.total ?? 0) : selected.size}
 		total={data.result?.total ?? 0}
 		bind:all={selectAll}
-		categories={data.categories}
+		categories={categoryList}
 		ondone={endBatch}
 		oncancel={() => endBatch(null)}
 	/>
@@ -607,6 +637,18 @@
 		backdrop-filter: blur(8px);
 		-webkit-backdrop-filter: blur(8px);
 		border-bottom: 1px solid var(--border);
+	}
+
+	/* 电脑上书库内容居中，宽度上限 1200px；顶栏的背景占满宽，里面的内容和下面对齐。 */
+	@media (min-width: 1024px) {
+		.page {
+			max-width: 1200px;
+			margin: 0 auto;
+		}
+
+		header {
+			padding-inline: max(1.25rem, calc((100% - 1200px) / 2 + 1.25rem));
+		}
 	}
 
 	.brand {
@@ -744,8 +786,7 @@
 
 	@media (min-width: 1024px) {
 		.facets {
-			max-width: 1600px;
-			margin: 0.5rem auto 0;
+			margin: 0.5rem 0 0;
 			padding: 0 1.25rem 0.2rem;
 		}
 	}
@@ -772,13 +813,11 @@
 		padding: 0.75rem;
 	}
 
-	/* 宽屏上限 1600px，常见的 1440 到 1920 宽屏都是一排五本。 */
+	/* 内容宽度上限 1200px（见 .page），和 LRR 一样一排五本。 */
 	@media (min-width: 1024px) {
 		.grid {
-			grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+			grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 			gap: 1rem;
-			max-width: 1600px;
-			margin: 0 auto;
 			padding: 1.25rem;
 		}
 	}
@@ -792,6 +831,20 @@
 		border-radius: 9px;
 		background: var(--surface);
 		text-decoration: none;
+	}
+
+	/* 标题是按钮（打开详情抽屉），去掉按钮自带的样式，看起来和原来的链接一样。 */
+	button.title {
+		padding: 0;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	button.title:hover {
+		color: var(--link);
 	}
 
 	.card .title {
@@ -815,6 +868,14 @@
 		overflow: hidden;
 		border-radius: 6px;
 		background: var(--chip);
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		transition: outline-color 200ms ease;
+	}
+
+	/* 详情抽屉里正在看的那本。 */
+	.cover.selected {
+		outline-color: var(--accent);
 	}
 
 	.tags {
@@ -938,6 +999,7 @@
 	}
 
 	.body .title {
+		text-align: left;
 		font-weight: 600;
 		line-height: 1.3;
 		text-decoration: none;
