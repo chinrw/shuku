@@ -426,13 +426,13 @@
 				{#if pageInfo}<span class="page-info">{pageInfo}</span>{/if}
 			</div>
 			{#if pages.length > 0}
-				<button class="bar-button" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
+				<button class="bar-button arrow" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
 					<Icon name="chevron-left" />
 				</button>
 				<button class="counter" onclick={() => (panel = 'detail')} aria-label="详情和页面">
 					{pageLabel} / {pages.length}
 				</button>
-				<button class="bar-button" onclick={stepRight} aria-label={rtlPaged ? '上一页' : '下一页'}>
+				<button class="bar-button arrow" onclick={stepRight} aria-label={rtlPaged ? '上一页' : '下一页'}>
 					<Icon name="chevron-right" />
 				</button>
 			{/if}
@@ -448,7 +448,7 @@
 				</button>
 			{/if}
 			<BookmarkButton archive={book.id} {members} bind:categories={categoryList} bar />
-			<button class="bar-button detail" onclick={() => (panel = 'detail')} aria-label="详情">
+			<button class="bar-button" onclick={() => (panel = 'detail')} aria-label="详情">
 				<Icon name="overview" />
 			</button>
 			<button class="bar-button" onclick={() => (panel = 'settings')} aria-label="阅读设置">
@@ -756,9 +756,10 @@
 		}
 	}
 
-	/* 手机上多了旋转按钮，详情按钮让位：点页码同样打开详情面板。 */
+	/* 窄屏手机上放不下全部按钮。左右翻页按钮让位：手机上点两侧或左右滑动就能翻页，
+	   详情按钮要留着（藏起来后只能点页码打开，用户找不到）。 */
 	@media (max-width: 400px) and (pointer: coarse) {
-		.top .detail {
+		.top .arrow {
 			display: none;
 		}
 	}
