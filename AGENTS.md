@@ -31,6 +31,7 @@ nix develop -c cargo fmt --all
 - 设置分两类：目录、监听地址和允许的主机名是启动参数；扫描隐藏条目、定时扫描间隔在控制台改。`setting` 表由各功能共用：每个功能一个键（扫描是 `scan`），值是那组设置的 JSON，读写用带 `#[serde(default)]` 的结构，加字段不用迁移；扫描设置的结构和范围在 `shuku-server` 的 `settings.rs`。定时扫描只在 HTTP 服务里运行。
 - 和 LRR 一样，个别页读不出尺寸的书照样入库：坏页留在页面清单里，宽和高记为 0，`archive.broken_pages`（迁移 006）记坏页数，控制台问题页列出它们；ZIP 结构损坏仍然整本失败。
 - JPEG 头部的标记段之间夹着多余字节时 imagesize 读不出尺寸，`shuku-archive` 会像 libjpeg 一样跳过这些字节再读一遍。
+- 书库页的“批量操作”按钮进入选择模式，选中的书或整个搜索结果可以一次加减标签、加进或移出分类（`POST /api/batch`，一个事务，最多 10000 本）。
 - 服务运行时用 notify 监视内容目录，有变化时等安静 10 秒（最多 2 分钟）整体扫描一次，`--no-watch` 关闭，细节见 `docs/server.md`。监视只调用 `App::scan` 和 `App::hash_contents`，不改扫描本身。
 - 服务启动扫描后，在后台逐本补算整文件 BLAKE3（`content_hash`），目前只记录，还没用于去重或认出移动的文件。
 - 还没做的：

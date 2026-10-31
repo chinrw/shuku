@@ -460,6 +460,14 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// 确认分类存在而且是静态分类，批量操作在改任何一本之前先查一次。
+    pub fn require_static_category(&self, id: i64) -> Result<()> {
+        if category_is_dynamic(self.connection, id)? {
+            return Err(Error::DynamicCategory(id));
+        }
+        Ok(())
+    }
+
     /// 把归档加进静态分类（`member` 为真）或移出，返回成员关系是否有变化。
     pub fn set_category_member(
         &mut self,

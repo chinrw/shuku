@@ -2,6 +2,7 @@
 
 mod admin;
 mod api;
+mod batch;
 mod categories;
 mod db;
 mod decode;

@@ -23,7 +23,8 @@
 		log: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
 		'arrow-up': 'M12 19V5M5 12l7-7 7 7',
 		'arrow-down': 'M12 5v14M19 12l-7 7-7-7',
-		shuffle: 'M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5'
+		shuffle: 'M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5',
+		'check-square': 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'
 	};
 
 	let { name, size = 20 }: { name: keyof typeof paths; size?: number } = $props();

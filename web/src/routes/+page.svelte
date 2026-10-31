@@ -9,6 +9,8 @@
 		type Sort,
 		type TagCount
 	} from '#lib/api.ts';
+	import { invalidateAll } from '$app/navigation';
+	import BatchBar from '#lib/BatchBar.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
@@ -16,6 +18,8 @@
 	import TagPopover from '#lib/TagPopover.svelte';
 	import TagTable from '#lib/TagTable.svelte';
 	import { defaultOrder, FILTERS, libraryHref, SORTS } from '#lib/libraryUrl.ts';
+	import { SvelteSet } from 'svelte/reactivity';
+	import { onDestroy, untrack } from 'svelte';
 	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
 	import { namespaceClass, tagRows } from '#lib/tags.ts';
 	import type { Snapshot } from './$types';
@@ -48,6 +52,53 @@
 
 	function flipOrder() {
 		navigate(data.q, data.sort, order === 'asc' ? 'desc' : 'asc');
+	}
+
+	// 批量模式下点卡片是选中它，不打开书；“全部搜索结果”勾上时改整个搜索结果。
+	let selecting = $state(false);
+	let selectAll = $state(false);
+	const selected = new SvelteSet<number>();
+	let batchMessage = $state<string | null>(null);
+
+	// 换了搜索条件才清空选择；同一个条件重新加载（例如批量改完后的刷新）时保留。
+	let listKey = $derived(JSON.stringify([data.q, data.sort, data.order, data.category, data.filter]));
+	$effect(() => {
+		void listKey;
+		untrack(() => {
+			selected.clear();
+			selectAll = false;
+		});
+	});
+
+	function pickCard(event: MouseEvent) {
+		if (!selecting) return;
+		const card = (event.target as Element).closest<HTMLElement>('[data-id]');
+		if (!card) return;
+		event.preventDefault();
+		event.stopPropagation();
+		const id = Number(card.dataset.id);
+		selectAll = false;
+		if (selected.has(id)) selected.delete(id);
+		else selected.add(id);
+	}
+
+	// 服务端改完标签约 10 秒后才重建快照，那时再取一次列表，筛选结果才对得上。
+	const SNAPSHOT_DELAY = 11_000;
+	let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+	onDestroy(() => clearTimeout(reloadTimer));
+
+	function endBatch(message: string | null, tags = false) {
+		selecting = false;
+		selected.clear();
+		selectAll = false;
+		batchMessage = message;
+		if (!message) return;
+		invalidateAll();
+		// 只改了分类时不动已经排着的刷新，它可能是上一批改标签留下的。
+		if (tags) {
+			clearTimeout(reloadTimer);
+			reloadTimer = setTimeout(invalidateAll, SNAPSHOT_DELAY);
+		}
 	}
 
 	// 在当前的搜索、分类和筛选里随机打开一本。
@@ -320,6 +371,16 @@
 		</button>
 		<button
 			class="icon-button"
+			class:on={selecting}
+			onclick={() => (selecting ? endBatch(null) : (selecting = true))}
+			aria-pressed={selecting}
+			aria-label="批量操作"
+			title="批量操作"
+		>
+			<Icon name="check-square" size={18} />
+		</button>
+		<button
+			class="icon-button"
 			onclick={toggleView}
 			aria-label={prefs.view === 'grid' ? '列表视图' : '封面视图'}
 		>
@@ -366,10 +427,14 @@
 	<RecentRow items={data.recent} />
 {/if}
 
+{#if batchMessage}
+	<p class="status" role="status">{batchMessage}</p>
+{/if}
+
 {#if prefs.view === 'grid'}
-	<main class="grid">
+	<main class="grid" onclickcapture={pickCard}>
 		{#each items as item (item.id)}
-			<div class="card">
+			<div class="card" data-id={item.id} class:picked={selecting && (selectAll || selected.has(item.id))}>
 				<a class="title" href="/a/{item.id}/read" title={item.title}>{item.title}</a>
 				<a class="cover" href="/a/{item.id}/read">
 					<img src={item.cover_url} alt="" loading="lazy" />
@@ -398,9 +463,9 @@
 		{/each}
 	</main>
 {:else}
-	<main class="list">
+	<main class="list" onclickcapture={pickCard}>
 		{#each items as item (item.id)}
-			<article class="row">
+			<article class="row" data-id={item.id} class:picked={selecting && (selectAll || selected.has(item.id))}>
 				<a class="thumb" href="/a/{item.id}/read">
 					<img src={item.cover_url} alt="" loading="lazy" />
 				</a>
@@ -453,6 +518,22 @@
 	<div class="footer" {@attach sentinel}>{loading ? '加载中…' : ''}</div>
 {:else if items.length > 0}
 	<div class="footer">没有更多了</div>
+{/if}
+
+{#if selecting}
+	<!-- 底部操作栏盖住的高度，让最后一排书也能点到。 -->
+	<div class="bar-space"></div>
+	<BatchBar
+		selection={selectAll
+			? { search: { q: data.q, category: data.category, filter: data.filter } }
+			: { ids: [...selected] }}
+		count={selectAll ? (data.result?.total ?? 0) : selected.size}
+		total={data.result?.total ?? 0}
+		bind:all={selectAll}
+		categories={data.categories}
+		ondone={endBatch}
+		oncancel={() => endBatch(null)}
+	/>
 {/if}
 
 <style>
@@ -735,6 +816,15 @@
 			grid-template-columns: 1fr 1fr;
 			max-width: none;
 		}
+	}
+
+	.bar-space {
+		height: 8rem;
+	}
+
+	.picked {
+		outline: 2px solid var(--accent);
+		outline-offset: -2px;
 	}
 
 	.row {

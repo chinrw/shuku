@@ -31,7 +31,7 @@ impl App {
 
     /// 在写连接上提交 `work`，再刷新快照里的分类。刷新失败时写入已经提交，
     /// 照常返回，改由后台的延迟刷新补上。
-    fn write_categories<T>(
+    pub(crate) fn write_categories<T>(
         &self,
         work: impl FnOnce(&mut shuku_store::Writer<'_>) -> Result<T>,
     ) -> Result<T> {

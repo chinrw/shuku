@@ -73,6 +73,7 @@ impl App {
             .merge(self.edit_router())
             .merge(self.categories_router())
             .merge(self.metadata_router())
+            .merge(self.batch_router())
             .merge(self.admin_router())
             .route("/api", any(|| async { Error::not_found() }))
             .route("/api/", any(|| async { Error::not_found() }))
@@ -283,7 +284,7 @@ fn restrict_to_category(
 
 /// 书库页的快捷筛选，搜索和标签统计的 `filter` 参数，逗号分隔，同时生效。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Filter {
+pub(crate) enum Filter {
     /// 新入库、还没读过。
     New,
     Untagged,
@@ -294,7 +295,7 @@ enum Filter {
     Finished,
 }
 
-fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
+pub(crate) fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
     raw.split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
@@ -312,7 +313,7 @@ fn parse_filters(raw: &str) -> Result<Vec<Filter>> {
 }
 
 /// 把搜索语句、分类和快捷筛选合成一个查询，返回查询和语句是否被降级。
-fn build_query(
+pub(crate) fn build_query(
     snapshot: &crate::snapshot::Snapshot,
     q: &str,
     category: Option<i64>,

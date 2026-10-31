@@ -177,6 +177,38 @@ export function fetchMetadata(
 	});
 }
 
+/** 批量操作要改的书：一串 ID，或者和搜索相同的条件选出的全部结果。 */
+export type BatchSelection =
+	| { ids: number[] }
+	| { search: { q: string; category: number | null; filter: Filter | null } };
+
+export interface BatchChange {
+	add_tags?: string[];
+	remove_tags?: string[];
+	add_to_category?: number;
+	remove_from_category?: number;
+}
+
+/** 一批在一个事务里改完，返回改了几本。 */
+export async function batch(selection: BatchSelection, change: BatchChange): Promise<number> {
+	const target =
+		'ids' in selection
+			? selection
+			: {
+					search: {
+						q: selection.search.q,
+						category: selection.search.category ?? undefined,
+						filter: selection.search.filter ?? ''
+					}
+				};
+	const result = await request<{ archives: number }>(fetch, '/api/batch', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ ...target, ...change })
+	});
+	return result.archives;
+}
+
 /** 最近读过的归档，按翻页时间从新到旧。 */
 export async function recent(fetch: Fetch, limit?: number): Promise<ArchiveItem[]> {
 	const query = limit === undefined ? '' : `?${new URLSearchParams({ limit: String(limit) })}`;
