@@ -286,9 +286,11 @@ mod tests {
             let app = app.clone();
             async move { app.scan().await }
         });
-        tokio::task::spawn_blocking(move || first_batch.recv().unwrap())
+        // 扫描在第一批之前就失败时钩子不会被调用，限时等待，不让测试挂住。
+        tokio::task::spawn_blocking(move || first_batch.recv_timeout(Duration::from_secs(10)))
             .await
-            .unwrap();
+            .unwrap()
+            .expect("扫描没有提交第一批");
 
         // 扫描停在第一批之后，还没有走到结束时的重建；后台的延迟刷新应该已经把第一批发布出去。
         let started = Instant::now();

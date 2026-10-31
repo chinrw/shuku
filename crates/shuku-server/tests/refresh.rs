@@ -43,6 +43,9 @@ async fn progress_refresh_retries_after_a_failed_read() {
     // 扫描提交批次时也通知了刷新器。等它那次刷新跑完，下面就只剩进度上报这一次通知，
     // 失败后能不能再刷新只取决于刷新器自己有没有重新排上。
     tokio::time::sleep(Duration::from_secs(15)).await;
+    // 写队列线程先通知刷新器再回复请求，等回复期间暂停的时钟可能快进 10 秒，
+    // 刷新就会在改表名之前成功。上报和改表名这一段用真实时间，几毫秒内做完。
+    tokio::time::resume();
     let started = Instant::now();
     let (status, _, _) = request(
         &router,
@@ -54,6 +57,7 @@ async fn progress_refresh_retries_after_a_failed_read() {
     .await;
     assert_eq!(status, StatusCode::OK);
     rename(&fixture, "progress", "progress_hidden");
+    tokio::time::pause();
 
     // 第 10 秒的刷新读不到进度表，失败后自己再排一次。
     tokio::time::sleep(Duration::from_secs(15)).await;
