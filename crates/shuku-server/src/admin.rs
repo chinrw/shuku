@@ -118,6 +118,12 @@ pub(crate) struct CacheUsage {
 }
 
 impl ScanTask {
+    /// 没有扫描在跑时先占住，返回是否占到。占住以后再在后台开始扫描，
+    /// 两个来源（控制台、文件监视）同时要扫时只有一个能开始。
+    pub(crate) fn claim(&mut self) -> bool {
+        !std::mem::replace(&mut self.running, true)
+    }
+
     /// 是否在运行，以及上一次结束的时间（Unix 毫秒）。
     pub(crate) fn timing(&self) -> (bool, Option<i64>) {
         (self.running, self.finished_at)

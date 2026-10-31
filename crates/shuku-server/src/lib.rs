@@ -14,6 +14,7 @@ mod logs;
 mod scan;
 mod settings;
 mod snapshot;
+mod watch;
 mod webtoon;
 
 use arc_swap::ArcSwap;
@@ -33,6 +34,7 @@ use tokio::sync::Notify;
 pub use hash::HashReport;
 pub use logs::{LogLayer, log_layer};
 pub use scan::ScanReport;
+pub use watch::{ContentWatcher, MAX_DELAY as WATCH_MAX_DELAY, QUIET as WATCH_QUIET};
 
 #[derive(Debug, Clone)]
 pub struct Config {
