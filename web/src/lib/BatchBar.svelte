@@ -138,9 +138,15 @@
 		cursor: pointer;
 	}
 
+	/* 宽屏上输入框停在 22rem，“执行”靠右，和上一行的“取消”对齐。 */
 	.fields input {
 		flex: 1 1 10rem;
 		min-width: 0;
+		max-width: 22rem;
+	}
+
+	.fields .primary {
+		margin-left: auto;
 	}
 
 	.fields input,
