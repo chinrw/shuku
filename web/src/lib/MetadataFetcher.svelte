@@ -1,7 +1,7 @@
 <script lang="ts">
 	// 详情页里对这本书手动运行一个元数据功能。和 LRR 的插件一样只加标签，标题按控制台的设置决定
 	// 换不换。写入后重新载入这一页，标签表和标题马上是新的。
-	import { invalidateAll } from '$app/navigation';
+	import { refreshAll } from '$app/navigation';
 	import { ApiError, fetchMetadata, type FoundMetadata, type MetadataProvider } from '#lib/api.ts';
 
 	let { archive }: { archive: number } = $props();
@@ -39,7 +39,7 @@
 			const found = await fetchMetadata(target, provider, online.includes(provider) ? url.trim() : undefined);
 			if (target !== archive) return;
 			result = describe(found);
-			await invalidateAll();
+			await refreshAll();
 		} catch (cause) {
 			if (target === archive) error = cause instanceof ApiError ? cause.message : '网络错误';
 		} finally {

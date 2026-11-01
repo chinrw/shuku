@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-	import { afterNavigate, goto, invalidateAll } from '$app/navigation';
+	import { afterNavigate, goto, refreshAll } from '$app/navigation';
 	import { onDestroy } from 'svelte';
 	import { ApiError, deleteArchive, downloadUrl } from '#lib/api.ts';
 	import ArchiveEditor from '#lib/ArchiveEditor.svelte';
@@ -40,7 +40,7 @@
 	onDestroy(() => (mounted = false));
 
 	async function saved(session: { id: number }) {
-		await invalidateAll();
+		await refreshAll();
 		if (editing === session) editing = null;
 	}
 

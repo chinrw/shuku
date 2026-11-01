@@ -12,7 +12,7 @@
 		type Sort,
 		type TagCount
 	} from '#lib/api.ts';
-	import { afterNavigate, invalidateAll, pushState, replaceState } from '$app/navigation';
+	import { afterNavigate, beforeNavigate, pushState, refreshAll, replaceState } from '$app/navigation';
 	import { page as route } from '$app/state';
 	import { serverListHref } from '#lib/nativeApp.ts';
 	import BatchBar from '#lib/BatchBar.svelte';
@@ -120,7 +120,7 @@
 			startingBatch = true;
 			prefs.ungroupForBatch = true;
 			try {
-				await invalidateAll();
+				await refreshAll();
 			} finally {
 				startingBatch = false;
 			}
@@ -140,16 +140,16 @@
 		const regroup = prefs.ungroupForBatch;
 		prefs.ungroupForBatch = false;
 		if (!message) {
-			if (regroup) invalidateAll();
+			if (regroup) refreshAll();
 			return;
 		}
 		// 批量改过的书，书签和分类勾选以重新加载的数据为准。
 		forgetMembers();
-		invalidateAll();
+		refreshAll();
 		// 只改了分类时不动已经排着的刷新，它可能是上一批改标签留下的。
 		if (tags) {
 			clearTimeout(reloadTimer);
-			reloadTimer = setTimeout(invalidateAll, SNAPSHOT_DELAY);
+			reloadTimer = setTimeout(refreshAll, SNAPSHOT_DELAY);
 		}
 	}
 
@@ -298,7 +298,7 @@
 			// 正在按这个分类筛选时回到不筛选。悬停时可能已经预加载了删除前的数据，
 			// 换完地址再让 load 重新跑一遍，分类列表和结果都以删除后的为准。
 			if (data.category === category.id) await goto(categoryHref(category.id));
-			await invalidateAll();
+			await refreshAll();
 		} catch (cause) {
 			editError = `没有删除：${cause instanceof ApiError ? cause.message : String(cause)}`;
 		}
@@ -346,7 +346,7 @@
 	function toggleHideFinished() {
 		prefs.hideFinished = !prefs.hideFinished;
 		prefs.save();
-		invalidateAll();
+		refreshAll();
 	}
 
 	function splitTag(tag: string) {
@@ -362,14 +362,14 @@
 	function toggleSeries() {
 		prefs.groupSeries = !prefs.groupSeries;
 		prefs.save();
-		invalidateAll();
+		refreshAll();
 	}
 
 	// 每页本数变了以后原来的页码对不上，回到第一页。已经在第一页时地址不变，要强制重新加载。
 	function changePageSize(size: PageSize) {
 		prefs.pageSize = size;
 		prefs.save();
-		goto(pageHref(1), { invalidateAll: true });
+		goto(pageHref(1), { refreshAll: true });
 	}
 
 	function toggleView() {
@@ -412,7 +412,30 @@
 	afterNavigate(() => {
 		const id = route.state.drawer;
 		drawerInHistory = id;
+		movesSeen = moves;
 		drawer = id === undefined ? null : findBook(id);
+	});
+
+	// refreshAll 在重新加载期间不管别的，加载完把 page.state 换回开始时的值，加载中打开或关上的
+	// 抽屉会被它改回去。只有前进后退或换页以后 page.state 的变化才算数，其余的按眼下的抽屉写回去。
+	let moves = 0;
+	let movesSeen = 0;
+	beforeNavigate(() => {
+		moves += 1;
+	});
+	$effect(() => {
+		const onPopState = () => (moves += 1);
+		window.addEventListener('popstate', onPopState);
+		return () => window.removeEventListener('popstate', onPopState);
+	});
+
+	// 列表刷新（例如批量改标签后的延迟刷新）时抽屉保持开着，换成同一本书的新数据。
+	$effect(() => {
+		void items;
+		void data.recent;
+		untrack(() => {
+			if (drawer) drawer = findBook(drawer.id) ?? drawer;
+		});
 	});
 
 	// 抽屉里的书可能来自列表，也可能来自最近阅读；前进后退回到抽屉开着的记录时按 ID 找回来。
@@ -439,8 +462,13 @@
 	$effect(() => {
 		const id = route.state.drawer;
 		if (id === drawerInHistory) return;
-		drawerInHistory = id;
 		untrack(() => {
+			if (moves === movesSeen && id !== drawer?.id) {
+				replaceState('', drawer ? { drawer: drawer.id } : {});
+				return;
+			}
+			movesSeen = moves;
+			drawerInHistory = id;
 			drawer = id === undefined ? null : findBook(id);
 		});
 	});

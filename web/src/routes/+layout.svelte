@@ -2,9 +2,9 @@
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { dev } from '$app/env';
-	import { invalidateAll } from '$app/navigation';
 	import { settings } from '#lib/settings.svelte.ts';
 	import { activeThemes, applyTheme } from '#lib/themes.ts';
+	import { warmUp } from '#lib/warmup.ts';
 
 	let { children } = $props();
 
@@ -26,10 +26,10 @@
 	// 开发时不注册：开发服务器没有构建出的文件清单，缓存的接口结果还会让改动看起来没生效。
 	onMount(() => {
 		if (dev || !('serviceWorker' in navigator)) return;
-		// 第一次打开时页面的数据在 Service Worker 接管之前就取完了，没进缓存。接管后重新取一次，
-		// 这样第一次打开的书断网后也能重开。
+		// 第一次打开时取过的接口没进 Service Worker 的缓存，接管时补取（见 warmup.ts）。不用 refreshAll
+		// 或 invalidateAll 重跑 load：它们会改写 page.state，开着的阅读器面板、书库详情抽屉会自己关上。
 		if (!navigator.serviceWorker.controller) {
-			navigator.serviceWorker.addEventListener('controllerchange', () => invalidateAll(), {
+			navigator.serviceWorker.addEventListener('controllerchange', () => warmUp(location.origin), {
 				once: true
 			});
 		}

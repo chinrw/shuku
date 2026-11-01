@@ -39,7 +39,7 @@
 		error = '';
 		try {
 			await login(token.trim());
-			await goto(target(), { replaceState: true, invalidateAll: true });
+			await goto(target(), { replaceState: true, refreshAll: true });
 		} catch (cause) {
 			error = cause instanceof ApiError ? cause.message : '网络错误';
 		} finally {
