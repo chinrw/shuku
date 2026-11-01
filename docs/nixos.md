@@ -26,7 +26,7 @@
 
 ```nix
 {
-  programs.shuku = {
+  services.shuku = {
     enable = true;
     instances.doujinshi = {
       libraryDir = "/srv/doujinshi";
@@ -49,7 +49,7 @@
 
 ## 选项
 
-`programs.shuku` 下面：
+`services.shuku` 下面：
 
 | 选项 | 默认值 | 说明 |
 | --- | --- | --- |

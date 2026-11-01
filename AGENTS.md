@@ -18,7 +18,7 @@ nix develop -c cargo fmt --all
 
 推到 main 后，GitHub Actions（`.github/workflows/ci.yml`）在同一个 flake 环境里重跑这些检查，外加网页端的 `pnpm check`、`pnpm test` 和 `pnpm build`。推送 `v*` 标签会触发 `release.yml`，发布静态链接的 x86_64 Linux 二进制和网页端构建产物，用法见 `docs/server.md`。flake 的 rustc 没有 musl 目标，这是唯一不在 flake 环境里编译的地方：它用 rustup 安装与 flake 相同版本的 rustc。只改 Markdown 或 `docs/` 的推送不影响构建和测试，所以不触发 CI。
 
-flake 另外导出包（`packages.<系统>.default`，`nix/package.nix`，服务端加网页端）、NixOS 模块（`nixosModules.default`，`nix/module.nix`，选项 `programs.shuku`，用法见 `docs/nixos.md`）和虚拟机测试（`checks.<系统>.nixos-module`，`nix/test.nix`，要 KVM）。改了 `web/pnpm-lock.yaml` 要同时更新 `nix/package.nix` 里 `fetchPnpmDeps` 的 hash：CI 构建 `.#default.web`，hash 不对会失败并打印正确的值。加控制台设置或改启动参数时，同步模块的选项。
+flake 另外导出包（`packages.<系统>.default`，`nix/package.nix`，服务端加网页端）、NixOS 模块（`nixosModules.default`，`nix/module.nix`，选项 `services.shuku`，用法见 `docs/nixos.md`）和虚拟机测试（`checks.<系统>.nixos-module`，`nix/test.nix`，要 KVM）。改了 `web/pnpm-lock.yaml` 要同时更新 `nix/package.nix` 里 `fetchPnpmDeps` 的 hash：CI 构建 `.#default.web`，hash 不对会失败并打印正确的值。加控制台设置或改启动参数时，同步模块的选项。
 
 桌面和 Android 客户端（`app/`）是独立的 Cargo workspace，不在上面的命令里。Linux 桌面版用 `nix develop .#app` 进入的环境编译（WebKitGTK 等系统库只在这个环境里）；`app/` 有变化时 `.github/workflows/clients.yml` 在 GitHub 的 Linux、Windows、macOS runner 上构建桌面版、在 Linux runner 上构建 Android APK，用 runner 自带的 rustup 和 Android SDK，不经过 flake。发布时 `release.yml` 调用它，把安装包附加到 Release 上。细节见 `docs/clients.md`。
 

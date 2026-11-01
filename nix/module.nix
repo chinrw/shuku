@@ -1,4 +1,4 @@
-# NixOS 模块：每个 programs.shuku.instances.<名字> 是一个 shuku-<名字>.service，
+# NixOS 模块：每个 services.shuku.instances.<名字> 是一个 shuku-<名字>.service，
 # 各自的内容目录、数据目录和端口。用法见 docs/nixos.md。
 { self }:
 {
@@ -9,7 +9,7 @@
 }:
 let
   inherit (lib) mkOption types;
-  cfg = config.programs.shuku;
+  cfg = config.services.shuku;
   enabled = lib.filterAttrs (_: instance: instance.enable) cfg.instances;
 
   # null 表示不管这一项，控制台里改的值保持不变，所以不写进设置文件。
@@ -33,7 +33,7 @@ let
         package = mkOption {
           type = types.package;
           default = cfg.package;
-          defaultText = lib.literalExpression "config.programs.shuku.package";
+          defaultText = lib.literalExpression "config.services.shuku.package";
           description = "这个实例用的 Shuku 包。";
         };
         # 用 str 而不是 path：写成路径字面量时，插进命令行会把整个书库复制进 Nix store。
@@ -78,13 +78,13 @@ let
         user = mkOption {
           type = types.str;
           default = cfg.user;
-          defaultText = lib.literalExpression "config.programs.shuku.user";
+          defaultText = lib.literalExpression "config.services.shuku.user";
           description = "运行这个实例的用户。不是模块建的 shuku 用户时要自己建。";
         };
         group = mkOption {
           type = types.str;
           default = cfg.group;
-          defaultText = lib.literalExpression "config.programs.shuku.group";
+          defaultText = lib.literalExpression "config.services.shuku.group";
           description = "运行这个实例的用户组。";
         };
         environment = mkOption {
@@ -233,7 +233,7 @@ let
     };
 in
 {
-  options.programs.shuku = {
+  options.services.shuku = {
     enable = lib.mkEnableOption "Shuku 漫画书库服务";
     package = mkOption {
       type = types.package;
@@ -268,11 +268,11 @@ in
       [
         {
           assertion = ports == [ ];
-          message = "programs.shuku.instances 的端口重复：${lib.concatMapStringsSep ", " toString ports}";
+          message = "services.shuku.instances 的端口重复：${lib.concatMapStringsSep ", " toString ports}";
         }
         {
           assertion = dataDirs == [ ];
-          message = "programs.shuku.instances 的数据目录重复：${lib.concatStringsSep ", " dataDirs}";
+          message = "services.shuku.instances 的数据目录重复：${lib.concatStringsSep ", " dataDirs}";
         }
       ];
 

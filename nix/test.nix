@@ -22,7 +22,7 @@ pkgs.testers.runNixOSTest {
   name = "shuku-nixos-module";
   nodes.machine = {
     imports = [ self.nixosModules.default ];
-    programs.shuku = {
+    services.shuku = {
       enable = true;
       instances.doujinshi = {
         libraryDir = "${library "doujinshi" "red"}";
