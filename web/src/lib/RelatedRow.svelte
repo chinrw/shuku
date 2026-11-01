@@ -10,8 +10,16 @@
 		label,
 		term,
 		archive,
-		compact = false
-	}: { label: string; term?: string; archive: number; compact?: boolean } = $props();
+		compact = false,
+		grid = false
+	}: {
+		label: string;
+		term?: string;
+		archive: number;
+		compact?: boolean;
+		/** 排成换行的网格而不是横向滑动的一排，阅读器详情面板在手机上的“相似”页用。 */
+		grid?: boolean;
+	} = $props();
 
 	let items = $state<ArchiveItem[] | null>(null);
 	let total = $state(0);
@@ -44,7 +52,7 @@
 		<p class="error">加载失败：{failed}</p>
 	</section>
 {:else if items && items.length > 0}
-	<section class:compact>
+	<section class:compact class:grid>
 		<h2>
 			{label}
 			{#if term !== undefined}
@@ -121,6 +129,12 @@
 
 	.compact .strip {
 		grid-auto-columns: 4rem;
+	}
+
+	.grid .strip {
+		grid-auto-flow: row;
+		grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+		overflow-x: visible;
 	}
 
 	.compact .book span {

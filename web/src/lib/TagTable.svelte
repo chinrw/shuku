@@ -102,6 +102,23 @@
 		cursor: pointer;
 	}
 
+	/* 手机上左边那列命名空间太占宽度：改成命名空间一行、标签在下面一行。 */
+	@media (max-width: 599px) {
+		dl:not(.compact) {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0.1rem;
+		}
+
+		dl:not(.compact) dt {
+			padding-top: 0.45rem;
+			font-size: 0.75rem;
+		}
+
+		dl:not(.compact) dt:first-of-type {
+			padding-top: 0;
+		}
+	}
+
 	/* 手指点的地方要大一些。 */
 	@media (pointer: coarse) {
 		.save {

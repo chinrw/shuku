@@ -81,8 +81,18 @@
 		if (untrack(() => data.detail)) openPanel('detail');
 	});
 
+	// 手机上详情面板分成三页（页面、信息、相似），一次只显示一块；宽屏上三块同时显示。
+	type DetailTab = 'pages' | 'info' | 'similar';
+	let detailTab = $state<DetailTab>('pages');
+	const DETAIL_TABS: [DetailTab, string][] = [
+		['pages', '页面'],
+		['info', '信息'],
+		['similar', '相似']
+	];
+
 	// 详情面板里的页面缩略图停在正在看的那一页，不从第一页开始。
 	$effect(() => {
+		void detailTab;
 		if (panel !== 'detail' || !detailPages) return;
 		const box = detailPages;
 		tick().then(() => box.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'center' }));
@@ -753,6 +763,7 @@
 		<aside
 			class="panel"
 			class:wide={panel === 'detail'}
+			data-tab={detailTab}
 			aria-label={panel === 'detail' ? '详情' : '阅读设置'}
 		>
 			<div class="panel-head">
@@ -843,6 +854,15 @@
 				</div>
 			{:else}
 				<!-- 上面是标签和操作，下面是相似作品，都固定不动；中间的页面缩略图单独滚动。 -->
+				<div class="detail-tabs" role="tablist" aria-label="详情的内容">
+					{#each DETAIL_TABS as [key, label] (key)}
+						<button
+							role="tab"
+							aria-selected={detailTab === key}
+							onclick={() => (detailTab = key)}>{label}</button
+						>
+					{/each}
+				</div>
 				<div class="detail-top">
 					<div class="actions">
 						<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
@@ -873,6 +893,10 @@
 				<!-- 阅读器的状态只在打开时读一次，换到别的书要整页重新加载，和“下一卷”一样。 -->
 				<div class="detail-bottom" data-sveltekit-reload>
 					<RelatedRow label="相似作品" archive={book.id} compact />
+				</div>
+				<!-- 手机上“相似”那一页：同样的推荐排成网格，占满整页。 -->
+				<div class="detail-similar" data-sveltekit-reload>
+					<RelatedRow label="相似作品" archive={book.id} grid />
 				</div>
 			{/if}
 		</aside>
@@ -1217,6 +1241,68 @@
 		margin-top: 0.5rem;
 		padding-top: 0.75rem;
 		border-top: 1px solid #43464e;
+	}
+
+	/* 宽屏上三块同时显示，没有分页标签，也不用网格版的相似作品。 */
+	.detail-tabs,
+	.detail-similar {
+		display: none;
+	}
+
+	/* 手机上三块挤在一屏里每块都太小：改成三页，一次只显示一块，占满面板。 */
+	@container reader (max-width: 599px) {
+		.detail-tabs {
+			display: flex;
+			flex: none;
+			gap: 0.25rem;
+			margin-bottom: 0.75rem;
+			padding: 0.2rem;
+			border-radius: 8px;
+			background: #2b2c31;
+		}
+
+		.detail-tabs button {
+			flex: 1;
+			padding: 0.4rem 0;
+			border: none;
+			border-radius: 6px;
+			background: transparent;
+			color: #a6a9ae;
+			font: inherit;
+			font-size: 0.9rem;
+			cursor: pointer;
+		}
+
+		.detail-tabs button[aria-selected='true'] {
+			background: #4f535b;
+			color: #fff;
+		}
+
+		.detail-bottom {
+			display: none;
+		}
+
+		.panel[data-tab='pages'] .detail-top,
+		.panel[data-tab='pages'] .detail-similar,
+		.panel[data-tab='info'] .overview-pages,
+		.panel[data-tab='info'] .detail-similar,
+		.panel[data-tab='similar'] .detail-top,
+		.panel[data-tab='similar'] .overview-pages {
+			display: none;
+		}
+
+		.panel[data-tab='info'] .detail-top,
+		.panel[data-tab='similar'] .detail-similar {
+			display: block;
+			flex: 1 1 0;
+			max-height: none;
+			min-height: 0;
+			overflow-y: auto;
+		}
+
+		.overview-pages {
+			margin-top: 0;
+		}
 	}
 
 	.actions {
