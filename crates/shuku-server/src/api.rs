@@ -531,10 +531,19 @@ fn list_item(snapshot: &crate::snapshot::Snapshot, item: &crate::snapshot::Item<
         "cover_url": cover_url(item.archive.id, &item.archive.quick_hash),
         "date_added": item.archive.date_added, "source_url": item.archive.source_url,
         "series": item.series.zip(item.archive.series).map(|(series, (_, volume))| json!({
-            "id": series.id, "name": series.name, "volume": volume,
+            "id": series.id, "name": series.name, "volume": volume_number(volume),
             "volumes": series.volumes.len(),
         })),
     })
+}
+
+/// 整数卷号照旧输出成整数，`第10.2話` 这样的才带小数。
+fn volume_number(volume: f64) -> Value {
+    if volume.fract() == 0.0 {
+        json!(volume as u64)
+    } else {
+        json!(volume)
+    }
 }
 
 /// 一个系列和它的各卷，按卷号排列。只有一卷的系列不算系列，返回 404。

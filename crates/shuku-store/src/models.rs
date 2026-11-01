@@ -91,7 +91,7 @@ pub struct Archive {
 }
 
 /// 搜索快照的原料，见 [`crate::Reader::library`]。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Library {
     /// 按小写完整名排序，[`LibraryArchive::tags`] 是这里的下标。
     pub tags: Vec<LibraryTag>,
@@ -128,7 +128,14 @@ pub struct Category {
 impl Library {
     /// 构建 [`shuku_index::Index`] 用的记录，标签用小写完整名。
     pub fn index_records(&self) -> impl Iterator<Item = ArchiveRecord> + '_ {
-        self.archives.iter().map(|archive| ArchiveRecord {
+        // 索引只用卷号给系列内排序，交给它系列里的名次，不用比较小数。
+        let ranks: HashMap<i64, u32> = self
+            .series
+            .iter()
+            .flat_map(|series| series.volumes.iter().zip(0..))
+            .map(|(&id, rank)| (id, rank))
+            .collect();
+        self.archives.iter().map(move |archive| ArchiveRecord {
             id: archive.id,
             title: archive.title.clone(),
             date_added: archive.date_added,
@@ -139,7 +146,9 @@ impl Library {
                 .collect(),
             page_count: archive.page_count,
             is_new: archive.is_new,
-            series: archive.series,
+            series: archive
+                .series
+                .and_then(|(series, _)| Some((series, *ranks.get(&archive.id)?))),
         })
     }
 }
@@ -152,7 +161,7 @@ pub struct LibraryTag {
 }
 
 /// 列表页需要的元数据。内容指纹由服务端用来生成封面 URL。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LibraryArchive {
     pub id: i64,
     pub title: String,
@@ -164,8 +173,9 @@ pub struct LibraryArchive {
     pub source_url: Option<String>,
     /// [`Library::tags`] 的下标，升序，也就是按小写完整名排序，与 [`Archive::tags`] 一致。
     pub tags: Vec<u32>,
-    /// 所属系列的 ID 和卷号，只有一卷的系列不算。
-    pub series: Option<(i64, u32)>,
+    /// 所属系列的 ID 和卷号，只有一卷的系列不算。卷号是系列里的排序位置，可以有小数
+    /// （`第10.2話`），番外等附加篇在正篇后面，见服务端的 `series` 模块。
+    pub series: Option<(i64, f64)>,
 }
 
 /// 见 [`crate::Reader::stats`]。

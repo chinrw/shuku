@@ -121,6 +121,8 @@ export interface ScanSettings {
 	scan_interval_hours: number;
 	/** 额外跳过的目录或文件名，可以用 `*`。 */
 	extra_skip: string[];
+	/** 内容目录下每个第一级文件夹是一部作品。 */
+	series_from_top_dir: boolean;
 }
 
 /** 书库名、条漫判断和允许的主机名。 */

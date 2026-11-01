@@ -48,7 +48,7 @@ pub struct ArchiveRecord {
     pub page_count: u32,
     /// 入库后还没打开过。扫描新增的归档为真，LRR 导入的沿用 LRR 的 isnew。
     pub is_new: bool,
-    /// 所属系列的 ID 和卷号，见 [`Query::collapse_series`]。
+    /// 所属系列的 ID 和这本在系列里的名次（按卷号排，从 0 起），见 [`Query::collapse_series`]。
     pub series: Option<(i64, u32)>,
 }
 
@@ -235,7 +235,7 @@ pub struct Index {
     untagged_docs: RoaringBitmap,
     /// 属于某个系列的归档。
     series_docs: RoaringBitmap,
-    /// `series_docs` 里每本的系列 ID 和卷号。
+    /// `series_docs` 里每本的系列 ID 和在系列里的名次。
     doc_series: HashMap<u32, (i64, u32)>,
 }
 

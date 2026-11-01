@@ -388,3 +388,109 @@ async fn books_imported_from_lrr_ignore_comicinfo_but_still_group_by_path() {
     assert_eq!(grouped["items"][0]["series"]["name"], "作品");
     assert_eq!(grouped["items"][0]["title"], "LRR 作品/01.zip");
 }
+
+#[tokio::test]
+async fn chapters_with_decimals_and_extras_are_ordered_within_the_series() {
+    let fixture = Fixture::new();
+    for (index, name) in [
+        "番外1",
+        "第11話",
+        "第10.2話",
+        "番外",
+        "第10話_試看",
+        "第01話",
+    ]
+    .iter()
+    .enumerate()
+    {
+        fixture.archive_with_pages(&format!("影之实力者/{name}.zip"), index + 1);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+
+    let grouped = json(&router, "/api/search?group=series").await;
+    assert_eq!(grouped["total"], 1);
+    let first = &grouped["items"][0]["series"];
+    assert_eq!(first["volume"], serde_json::json!(1));
+    let series = json(&router, &format!("/api/series/{}", first["id"])).await;
+    assert_eq!(
+        titles(&series),
+        [
+            "影之实力者 第01話",
+            "影之实力者 第10話_試看",
+            "影之实力者 第10.2話",
+            "影之实力者 第11話",
+            "影之实力者 番外",
+            "影之实力者 番外1",
+        ]
+    );
+    // 整数卷号照旧是整数，带小数的才是小数。
+    let all = json(&router, "/api/search?q=10.2").await;
+    assert_eq!(all["items"][0]["series"]["volume"], serde_json::json!(10.2));
+}
+
+#[tokio::test]
+async fn top_folder_mode_groups_unrecognised_names_into_the_existing_series() {
+    let fixture = Fixture::new();
+    let png = fixture.archive("根目录.zip", 3, 4);
+    fixture.archive_with_pages("作品/VOL_1.zip", 1);
+    fixture.archive_with_pages("作品/VOL_2.zip", 2);
+    fixture.archive_with_pages("作品/特装版.zip", 3);
+    // 第一级文件夹本身是一本书。
+    let single = fixture.config.content_dir.join("单本");
+    std::fs::create_dir_all(&single).unwrap();
+    std::fs::write(single.join("001.png"), &png).unwrap();
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    assert_eq!(json(&router, "/api/search?group=series").await["total"], 4);
+    let volume = json(&router, "/api/search?q=%E7%AC%AC1%E5%8D%B7").await;
+    let series_id = volume["items"][0]["series"]["id"].clone();
+
+    let (status, _, _) = request(
+        &router,
+        "PUT",
+        "/api/admin/settings/scan",
+        Some(serde_json::json!({"series_from_top_dir": true})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    app.scan().await.unwrap();
+
+    let grouped = json(&router, "/api/search?group=series").await;
+    assert_eq!(titles(&grouped), ["作品 第1卷", "单本", "根目录"]);
+    assert_eq!(grouped["items"][0]["series"]["id"], series_id);
+    let series = json(&router, &format!("/api/series/{series_id}")).await;
+    assert_eq!(titles(&series), ["作品 第1卷", "作品 第2卷", "作品 特装版"]);
+    for item in &grouped["items"].as_array().unwrap()[1..] {
+        assert_eq!(item["series"], Value::Null);
+    }
+}
+
+#[tokio::test]
+async fn a_folder_with_only_extras_is_not_a_series() {
+    let fixture = Fixture::new();
+    // 同人志书库里作者文件夹下的番外、外传不是哪部作品的附加篇。
+    fixture.archive_with_pages("[作者]/番外.zip", 1);
+    fixture.archive_with_pages("[作者]/外传.zip", 2);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let grouped = json(&router, "/api/search?group=series").await;
+    assert_eq!(titles(&grouped), ["外传", "番外"]);
+
+    // 正篇加进来以后番外跟着归进去，排在正篇后面。
+    fixture.archive_with_pages("[作者]/01.zip", 3);
+    app.scan().await.unwrap();
+    let grouped = json(&router, "/api/search?group=series").await;
+    assert_eq!(grouped["total"], 1);
+    let series = json(
+        &router,
+        &format!("/api/series/{}", grouped["items"][0]["series"]["id"]),
+    )
+    .await;
+    // 都没有序号的番外按入库顺序排。
+    assert_eq!(titles(&series), ["[作者] 01", "[作者] 外传", "[作者] 番外"]);
+}

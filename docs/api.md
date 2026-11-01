@@ -86,7 +86,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 
 `categories` 和归档详情里的一样，是这本书所在的静态分类，书库列表视图每行的书签按钮靠它判断收藏了没有。
 
-`series` 是这本书所属的系列（按卷出版的作品）、它的卷号和这个系列一共几卷，不属于系列时为 `null`。只有一卷的系列不算系列，这时也是 `null`。系列由扫描按路径认出，规则见 [docs/server.md](server.md#系列和卷)。
+`series` 是这本书所属的系列（按卷出版的作品）、它的卷号和这个系列一共几卷，不属于系列时为 `null`。`volume` 是系列里排序用的序号：卷号或话数，`第10.2話` 这样的带小数；番外等附加篇是 10000 加它自己的序号（`番外` 是 10000，`番外2` 是 10002）；第一级目录为一部作品时名字里认不出序号的书是 20000。只有一卷的系列不算系列，这时也是 `null`。系列由扫描按路径认出，规则见 [docs/server.md](server.md#系列和卷)。
 
 列表项带上全部标签和加入时间、来源，网页端在列表和标签弹窗里直接显示，不用逐本请求详情。LRR 把加入时间和来源存成 `date_added`、`source` 标签，Shuku 存在归档表的列里，显示时由网页端还原成这两行。`tags` 的格式与归档详情相同。
 
@@ -550,11 +550,11 @@ E-Hentai 的查找顺序：指定的画廊地址、归档已有的 E-Hentai 来�
 控制台设置页改的设置，存在数据库的 `setting` 表里（键 `scan` 和 `server`），所有设备共用、立即生效：
 
 ```json
-{ "scan_hidden": false, "scan_interval_hours": 0, "extra_skip": ["@eaDir", "*.part"] }
+{ "scan_hidden": false, "scan_interval_hours": 0, "extra_skip": ["@eaDir", "*.part"], "series_from_top_dir": false }
 { "name": "本子", "detect_webtoons": true, "allowed_hosts": ["nas.example.ts.net"] }
 ```
 
-- `scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0（默认）表示不定时，最大 720。`extra_skip` 是额外跳过的目录或文件名，`*` 通配、不分大小写，不能带路径分隔符；它不作用于文件夹书里的单张图片，要跳过整本就写文件夹的名字。
+- `scan_hidden` 为 `true` 时也扫描以 `.` 开头的目录和文件。`scan_interval_hours` 是定时扫描的间隔，从上一次扫描结束算起，0（默认）表示不定时，最大 720。`extra_skip` 是额外跳过的目录或文件名，`*` 通配、不分大小写，不能带路径分隔符；它不作用于文件夹书里的单张图片，要跳过整本就写文件夹的名字。`series_from_top_dir` 为 `true` 时内容目录下每个第一级文件夹是一部作品，见 [docs/server.md](server.md#系列和卷)。
 - `name` 是书库名，最多 100 个字、不能有换行，空字符串表示用默认的“书库”；它显示在书库页左上角和 `/api/info` 里。`detect_webtoons` 见页面清单的 `webtoon`。`allowed_hosts` 是除 IP、`localhost`、不带点的主机名以外允许的 Host，不带端口和通配。
 - PUT 只需带要改的项，列表整体替换（去掉空白和重复项，最多 100 项）；未知字段或无效值返回 400，响应是改后的这一组设置。
 

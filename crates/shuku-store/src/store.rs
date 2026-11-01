@@ -636,9 +636,10 @@ impl Writer<'_> {
         Ok(())
     }
 
-    /// 把归档放进 `key` 对应的系列，作为第 `volume` 卷。系列不存在时以 `name` 新建，
-    /// 已经存在时名字不变。
-    pub fn set_series(&mut self, id: i64, key: &str, name: &str, volume: u32) -> Result<()> {
+    /// 把归档放进 `key` 对应的系列，`volume` 是它在系列里的排序位置，可以有小数：`volume` 列
+    /// 声明为 INTEGER，整数照旧存成整数，带小数的 SQLite 存成 REAL，排序时按数值比较。
+    /// 系列不存在时以 `name` 新建，已经存在时名字不变。
+    pub fn set_series(&mut self, id: i64, key: &str, name: &str, volume: f64) -> Result<()> {
         require_archive(self.connection, id)?;
         let series: i64 = self.connection.query_row(
             "INSERT INTO series (name, key) VALUES (?1, ?2)
@@ -659,6 +660,20 @@ impl Writer<'_> {
         Ok(self
             .connection
             .query_row("SELECT 1 FROM series WHERE key = ?1", [key], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    /// 以 `key` 为归组依据的系列里有没有排序位置小于 `below` 的归档，服务端用它判断有没有正篇。
+    pub fn series_has_volume_below(&self, key: &str, below: f64) -> Result<bool> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT 1 FROM archive JOIN series ON series.id = archive.series_id
+                 WHERE series.key = ?1 AND archive.volume < ?2 LIMIT 1",
+                params![key, below],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some())
     }

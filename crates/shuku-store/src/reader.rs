@@ -183,7 +183,7 @@ impl Reader {
             )?
             .query_map([], |row| {
                 let series = row.get::<_, Option<i64>>(7)?;
-                let volume = row.get::<_, Option<u32>>(8)?.unwrap_or(0);
+                let volume = row.get::<_, Option<f64>>(8)?.unwrap_or(0.0);
                 Ok(LibraryArchive {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -419,14 +419,18 @@ fn read_series_names(connection: &Connection) -> Result<HashMap<i64, String>> {
 
 /// 按 [`LibraryArchive::series`] 列出各系列的卷，按卷号、再按 ID 排列，系列按 ID 升序。
 fn group_series(names: HashMap<i64, String>, archives: &[LibraryArchive]) -> Vec<Series> {
-    let mut members: Vec<(i64, u32, i64)> = archives
+    let mut members: Vec<(i64, f64, i64)> = archives
         .iter()
         .filter_map(|archive| {
             let (series, volume) = archive.series?;
             Some((series, volume, archive.id))
         })
         .collect();
-    members.sort_unstable();
+    members.sort_unstable_by(|a, b| {
+        (a.0.cmp(&b.0))
+            .then(a.1.total_cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+    });
     let mut series: Vec<Series> = names
         .into_iter()
         .map(|(id, name)| Series {

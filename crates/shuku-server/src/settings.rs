@@ -58,6 +58,9 @@ pub(crate) struct ScanSettings {
     /// 额外跳过的目录或文件名，可以用 `*` 通配，不分大小写，例如 `@eaDir`、`*.part`。
     /// 不作用于文件夹书里的单张图片，要跳过整本就写文件夹的名字。
     pub(crate) extra_skip: Vec<String>,
+    /// 内容目录下每个第一级文件夹是一部作品，里面的书都归进这个系列，见 `series::detect`。
+    /// 默认关：同人志书库的第一级常常是按月份或作者分的文件夹，不是一部作品。
+    pub(crate) series_from_top_dir: bool,
 }
 
 impl Default for ScanSettings {
@@ -67,6 +70,7 @@ impl Default for ScanSettings {
             scan_hidden: false,
             scan_interval_hours: 0,
             extra_skip: Vec::new(),
+            series_from_top_dir: false,
         }
     }
 }
@@ -78,6 +82,7 @@ pub(crate) struct ScanPatch {
     scan_hidden: Option<bool>,
     scan_interval_hours: Option<u32>,
     extra_skip: Option<Vec<String>>,
+    series_from_top_dir: Option<bool>,
 }
 
 impl Group for ScanSettings {
@@ -99,6 +104,9 @@ impl Group for ScanSettings {
         }
         if let Some(watch) = patch.watch {
             updated.watch = watch;
+        }
+        if let Some(by_top_dir) = patch.series_from_top_dir {
+            updated.series_from_top_dir = by_top_dir;
         }
         if let Some(patterns) = patch.extra_skip {
             updated.extra_skip = clean_list("extra_skip", patterns, |pattern| {
@@ -379,12 +387,15 @@ mod tests {
             scan_hidden: true,
             scan_interval_hours: 12,
             extra_skip: Vec::new(),
+            series_from_top_dir: false,
         };
         let patch = serde_json::from_str(r#"{"scan_interval_hours": 24}"#).unwrap();
         let updated = settings.apply(patch).unwrap();
         assert!(updated.scan_hidden && updated.watch);
         let patch = serde_json::from_str(r#"{"watch": false}"#).unwrap();
         assert!(!settings.apply(patch).unwrap().watch);
+        let patch = serde_json::from_str(r#"{"series_from_top_dir": true}"#).unwrap();
+        assert!(settings.apply(patch).unwrap().series_from_top_dir);
         // 存过的旧设置没有 watch 字段，按默认的打开。
         let stored: ScanSettings = serde_json::from_str(r#"{"scan_hidden": true}"#).unwrap();
         assert!(stored.watch);

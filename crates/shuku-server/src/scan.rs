@@ -211,7 +211,15 @@ impl App {
                     };
                     // 新书按路径认卷，名字只有卷号的换成带系列名的标题。文件名解析仍用原来的名字。
                     let file_title = file_title(&prepared)?;
-                    let detected = crate::series::detect(&prepared.path, &file_title);
+                    let detected = crate::series::detect(
+                        &prepared.path,
+                        &file_title,
+                        settings.series_from_top_dir,
+                    );
+                    let detected = match detected {
+                        Some(volume) if !volume.joinable(writer)? => None,
+                        detected => detected,
+                    };
                     // ComicInfo 写明了系列和序号时以它为准，但同一文件夹已经按路径归成了系列
                     // （例如在 ComicInfo 归组之前入库的卷）时跟着原系列，免得新卷单独成组。
                     let joins_path_series = match &detected {
@@ -312,7 +320,7 @@ impl App {
                 hook();
             }
         }
-        let assigned = self.assign_series(&walked)?;
+        let assigned = self.assign_series(&walked, settings.series_from_top_dir)?;
         if assigned > 0 {
             tracing::info!(assigned, "已入库的书按路径认出了卷");
         }

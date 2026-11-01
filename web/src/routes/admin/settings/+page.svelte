@@ -185,6 +185,26 @@
 				</div>
 			</div>
 			<p class="adm-note">从上一次扫描结束算起，给文件监视漏掉的变化兜底。服务启动时总会扫描一次。</p>
+			<div class="option">
+				<span class="adm-label">系列</span>
+				<div class="adm-tabs" role="group" aria-label="系列">
+					<button
+						class="adm-tab"
+						aria-pressed={!scan.series_from_top_dir}
+						disabled={saving}
+						onclick={() => changeScan({ series_from_top_dir: false })}>按卷号认</button
+					>
+					<button
+						class="adm-tab"
+						aria-pressed={scan.series_from_top_dir}
+						disabled={saving}
+						onclick={() => changeScan({ series_from_top_dir: true })}>第一级目录为一部作品</button
+					>
+				</div>
+			</div>
+			<p class="adm-note">
+				按卷号认时，名字只有卷号或话数（VOL_1、032、第10話、番外1）的书归进上一层文件夹的系列。第一级目录为一部作品时，书库目录下每个第一级文件夹就是一部作品，里面的书不管叫什么都归进去；适合普通漫画书库，同人志书库别开。下一次扫描起对还没归进系列的书生效。
+			</p>
 		{/if}
 	</section>
 
