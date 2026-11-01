@@ -1,5 +1,11 @@
-/** 书库每页的本数。 */
-export const PAGE_SIZE = 100;
+/** 书库每页可选的本数，搜索接口一次最多返回 200 本。 */
+export const PAGE_SIZES = [50, 100, 200] as const;
+export type PageSize = (typeof PAGE_SIZES)[number];
+export const DEFAULT_PAGE_SIZE: PageSize = 100;
+
+export function isPageSize(value: unknown): value is PageSize {
+	return PAGE_SIZES.includes(value as PageSize);
+}
 
 /**
  * 页码条上显示的页：第一页、最后一页和当前页前后两页，中间断开的地方用 `null` 表示省略号。
@@ -24,6 +30,6 @@ export function pageNumbers(current: number, total: number): (number | null)[] {
 }
 
 /** 总页数，没有结果时也算一页。 */
-export function pageCount(total: number): number {
-	return Math.max(1, Math.ceil(total / PAGE_SIZE));
+export function pageCount(total: number, size: PageSize): number {
+	return Math.max(1, Math.ceil(total / size));
 }

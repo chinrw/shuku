@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pageCount, pageNumbers, PAGE_SIZE } from './pages';
+import { isPageSize, pageCount, pageNumbers } from './pages';
 
 describe('pageNumbers', () => {
 	it('shows every page when there are few', () => {
@@ -24,8 +24,18 @@ describe('pageNumbers', () => {
 
 describe('pageCount', () => {
 	it('rounds up and is at least one', () => {
-		expect(pageCount(0)).toBe(1);
-		expect(pageCount(PAGE_SIZE)).toBe(1);
-		expect(pageCount(PAGE_SIZE + 1)).toBe(2);
+		expect(pageCount(0, 100)).toBe(1);
+		expect(pageCount(100, 100)).toBe(1);
+		expect(pageCount(101, 100)).toBe(2);
+		expect(pageCount(101, 50)).toBe(3);
+	});
+});
+
+describe('isPageSize', () => {
+	it('accepts only the offered sizes', () => {
+		expect(isPageSize(50)).toBe(true);
+		expect(isPageSize(200)).toBe(true);
+		expect(isPageSize(150)).toBe(false);
+		expect(isPageSize('100')).toBe(false);
 	});
 });

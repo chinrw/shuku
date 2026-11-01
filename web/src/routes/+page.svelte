@@ -21,7 +21,7 @@
 	import { forgetMembers } from '#lib/membership.svelte.ts';
 	import { savedTagStore } from '#lib/savedTags.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
-	import { pageCount } from '#lib/pages.ts';
+	import { PAGE_SIZES, pageCount, type PageSize } from '#lib/pages.ts';
 	import Pager from '#lib/Pager.svelte';
 	import RecentRow from '#lib/RecentRow.svelte';
 	import { settings } from '#lib/settings.svelte.ts';
@@ -40,7 +40,7 @@
 
 	let items = $derived<ArchiveItem[]>(data.result?.items ?? []);
 	let query = $derived(data.q);
-	let pages = $derived(pageCount(data.result?.total ?? 0));
+	let pages = $derived(pageCount(data.result?.total ?? 0, data.pageSize));
 
 	// 当前搜索条件的第几页，其余条件不变。
 	function pageHref(page: number) {
@@ -362,6 +362,13 @@
 		prefs.groupSeries = !prefs.groupSeries;
 		prefs.save();
 		invalidateAll();
+	}
+
+	// 每页本数变了以后原来的页码对不上，回到第一页。已经在第一页时地址不变，要强制重新加载。
+	function changePageSize(size: PageSize) {
+		prefs.pageSize = size;
+		prefs.save();
+		goto(pageHref(1), { invalidateAll: true });
 	}
 
 	function toggleView() {
@@ -787,6 +794,21 @@
 />
 
 <Pager page={data.page} {pages} href={pageHref} />
+{#if data.result && data.result.total > PAGE_SIZES[0]}
+	<p class="page-size">
+		<label>
+			每页数量
+			<select
+				value={data.pageSize}
+				onchange={(event) => changePageSize(Number(event.currentTarget.value) as PageSize)}
+			>
+				{#each PAGE_SIZES as size (size)}
+					<option value={size}>{size} 本</option>
+				{/each}
+			</select>
+		</label>
+	</p>
+{/if}
 {#if items.length === 0 && data.result && data.page > 1}
 	<p class="footer">这一页没有书了，<a href={pageHref(1)}>回到第一页</a></p>
 {/if}
@@ -1408,6 +1430,18 @@
 	.picked {
 		outline: 2px solid var(--accent);
 		outline-offset: -2px;
+	}
+
+	.page-size {
+		margin: 0.75rem 1rem;
+		text-align: center;
+		color: var(--muted);
+		font-size: 0.85rem;
+	}
+
+	.page-size select {
+		height: 2rem;
+		margin-left: 0.4rem;
 	}
 
 	.footer {

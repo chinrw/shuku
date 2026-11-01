@@ -1,5 +1,6 @@
 import type { Order, Sort } from './api';
 import { parseOrder, parseSort } from './libraryUrl';
+import { DEFAULT_PAGE_SIZE, isPageSize, type PageSize } from './pages';
 
 export type ReaderMode = 'paged' | 'scroll';
 export type Direction = 'rtl' | 'ltr';
@@ -30,6 +31,8 @@ class Settings {
 	order = $state<Order | null>(null);
 	/** 书库页不显示读到最后一页的书，和别的筛选同时生效。 */
 	hideFinished = $state(false);
+	/** 书库每页的本数。 */
+	pageSize = $state<PageSize>(DEFAULT_PAGE_SIZE);
 	/**
 	 * 批量操作时临时展开各卷，不保存：系列卡只代表一卷，按它选择或按合并后的总数全选，
 	 * 都和服务端实际修改的书对不上。
@@ -50,6 +53,7 @@ class Settings {
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
 		if (typeof saved.groupSeries === 'boolean') this.groupSeries = saved.groupSeries;
 		if (typeof saved.hideFinished === 'boolean') this.hideFinished = saved.hideFinished;
+		if (isPageSize(saved.pageSize)) this.pageSize = saved.pageSize;
 		const sort = typeof saved.sort === 'string' ? parseSort(saved.sort) : null;
 		if (sort) {
 			this.sort = sort;
@@ -72,7 +76,7 @@ class Settings {
 	save() {
 		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
 			this;
-		const { sort, order, quality } = this;
+		const { sort, order, quality, pageSize } = this;
 		localStorage.setItem(
 			KEY,
 			JSON.stringify({
@@ -84,6 +88,7 @@ class Settings {
 				view,
 				groupSeries,
 				hideFinished,
+				pageSize,
 				sort,
 				order,
 				webtoonWidth,

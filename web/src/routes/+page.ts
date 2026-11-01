@@ -17,7 +17,6 @@ import {
 	parseSort,
 	parseTags
 } from '#lib/libraryUrl.ts';
-import { PAGE_SIZE } from '#lib/pages.ts';
 import { savedTagStore } from '#lib/savedTags.svelte.ts';
 import { settings } from '#lib/settings.svelte.ts';
 import type { PageLoad } from './$types';
@@ -30,6 +29,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const sort = urlSort ?? prefs.sort;
 	const order = urlSort ? parseOrder(url.searchParams.get('o')) : prefs.order;
 	const page = parsePage(url.searchParams.get('p'));
+	const pageSize = prefs.pageSize;
 	const category = parseCategory(url.searchParams.get('c'));
 	const filter = parseFilter(url.searchParams.get('f'));
 	// 筛选行上选中的收藏标签，每个都要完整匹配，和其他条件取交集。
@@ -91,8 +91,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				filters,
 				tags,
 				group,
-				offset: (page - 1) * PAGE_SIZE,
-				limit: PAGE_SIZE
+				offset: (page - 1) * pageSize,
+				limit: pageSize
 			}),
 			shelves,
 			reading,
@@ -110,6 +110,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			filters,
 			tags,
 			page,
+			pageSize,
 			group,
 			result,
 			categories: categoryList,
@@ -130,6 +131,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				filters,
 				tags,
 				page,
+				pageSize,
 				group,
 				result: null,
 				categories: await shelves,
