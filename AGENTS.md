@@ -18,6 +18,8 @@ nix develop -c cargo fmt --all
 
 推到 main 后，GitHub Actions（`.github/workflows/ci.yml`）在同一个 flake 环境里重跑这些检查，外加网页端的 `pnpm check`、`pnpm test` 和 `pnpm build`。推送 `v*` 标签会触发 `release.yml`，发布静态链接的 x86_64 Linux 二进制和网页端构建产物，用法见 `docs/server.md`。flake 的 rustc 没有 musl 目标，这是唯一不在 flake 环境里编译的地方：它用 rustup 安装与 flake 相同版本的 rustc。只改 Markdown 或 `docs/` 的推送不影响构建和测试，所以不触发 CI。
 
+flake 另外导出包（`packages.<系统>.default`，`nix/package.nix`，服务端加网页端）、NixOS 模块（`nixosModules.default`，`nix/module.nix`，选项 `programs.shuku`，用法见 `docs/nixos.md`）和虚拟机测试（`checks.<系统>.nixos-module`，`nix/test.nix`，要 KVM）。改了 `web/pnpm-lock.yaml` 要同时更新 `nix/package.nix` 里 `fetchPnpmDeps` 的 hash：CI 构建 `.#default.web`，hash 不对会失败并打印正确的值。加控制台设置或改启动参数时，同步模块的选项。
+
 桌面和 Android 客户端（`app/`）是独立的 Cargo workspace，不在上面的命令里。Linux 桌面版用 `nix develop .#app` 进入的环境编译（WebKitGTK 等系统库只在这个环境里）；`app/` 有变化时 `.github/workflows/clients.yml` 在 GitHub 的 Linux、Windows、macOS runner 上构建桌面版、在 Linux runner 上构建 Android APK，用 runner 自带的 rustup 和 Android SDK，不经过 flake。发布时 `release.yml` 调用它，把安装包附加到 Release 上。细节见 `docs/clients.md`。
 
 ## 当前进度
@@ -31,7 +33,7 @@ nix develop -c cargo fmt --all
 - 详情页的“删除”连原文件一起删（`DELETE /api/archives/{id}?file=true`），确认框里要再勾选一次。服务端用 access(2) 判断能不能写原文件所在的目录，详情接口的 `deletable` 报给网页端；内容目录只读挂载时确认框只说明原因，挂成读写后不用改设置就能删。先删文件再删记录，散放图片的文件夹只删页面清单里的图片。MCP 不提供删除文件。
 - 迁移工具可以早于扫描运行：还没扫描入库的归档把 LRR 的元数据按路径暂存在 `lrr_pending` 表，扫描新增那个路径时在同一个事务里套用。LRR 的 `date_added` 标签就是 Shuku 的加入时间，没有这个标签的归档用文件的修改时间（扫描时间对整个迁移来的书库都是同一天）。
 - 扫描默认跳过以 `.` 开头的目录和文件（下载工具的临时目录常常只有它自己能读）。新入库的归档用文件修改时间作为加入时间。
-- 设置分两类：只有书库目录、数据目录、网页目录和监听地址是启动参数；扫描隐藏条目、额外跳过的名字、定时扫描间隔（默认关，文件监视的后备）、第一级目录是否为一部作品、书库名、条漫自动判断和允许的域名都在控制台改。`setting` 表由各功能共用：每个功能一个键（`scan`、`server`），值是那组设置的 JSON，读写用带 `#[serde(default)]` 的结构，加字段不用迁移；这两组的结构和范围在 `shuku-server` 的 `settings.rs`。定时扫描只在 HTTP 服务里运行。
+- 设置分两类：只有书库目录、数据目录、网页目录和监听地址是启动参数；扫描隐藏条目、额外跳过的名字、定时扫描间隔（默认关，文件监视的后备）、第一级目录是否为一部作品、书库名、条漫自动判断和允许的域名都在控制台改。`setting` 表由各功能共用：每个功能一个键（`scan`、`server`），值是那组设置的 JSON，读写用带 `#[serde(default)]` 的结构，加字段不用迁移；这两组的结构和范围在 `shuku-server` 的 `settings.rs`。定时扫描只在 HTTP 服务里运行。`--settings` 文件（NixOS 模块生成）的格式是两组的补丁，启动时经过 `update_settings` 套用并写库，和控制台的 PUT 同一套校验；没写的字段不动。
 - 扫描只认 `.zip`/`.cbz`、按魔数是 ZIP 的图片扩展名文件和散放图片的文件夹；其他文件只计数（扫描报告的 `skipped`），不列进问题页。
 - 和 LRR 一样，个别页读不出尺寸的书照样入库：坏页留在页面清单里，宽和高记为 0，`archive.broken_pages`（迁移 006）记坏页数，控制台问题页列出它们；ZIP 结构损坏仍然整本失败。
 - JPEG 头部的标记段之间夹着多余字节时 imagesize 读不出尺寸，`shuku-archive` 会像 libjpeg 一样跳过这些字节再读一遍。

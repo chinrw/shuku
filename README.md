@@ -4,7 +4,7 @@ Shuku（拼音“书库”）是一个自托管的漫画书库服务：把一个
 
 使用前需要准备：
 
-- 一台 Linux 机器，用 Nix 从源码运行，或者下载 Releases 里静态链接的 x86_64 二进制。
+- 一台 Linux 机器，用 Nix 从源码运行、在 NixOS 上用 flake 里的模块，或者下载 Releases 里静态链接的 x86_64 二进制。
 - 一个存放漫画的内容目录。目前支持 ZIP 和 CBZ 归档，Shuku 从不修改或重新打包其中的文件，只在你从网页端删除一本书时删掉它；可以只读挂载。
 - 一个独立的数据目录，用来存数据库和图片缓存。
 
@@ -31,6 +31,8 @@ nix develop -c cargo run -p shuku-server --bin shuku -- \
 ```
 
 网页端需要先构建：在 `web/` 下运行 `nix develop -c pnpm install` 和 `nix develop -c pnpm build`，服务端默认从 `web/build` 读取。完整的参数、发布包的用法和扫描规则见 [docs/server.md](docs/server.md)，HTTP 接口见 [docs/api.md](docs/api.md)。
+
+NixOS 上可以用 flake 里的模块，`programs.shuku.instances.<名字>` 每项是一个服务，包里带着网页端，见 [docs/nixos.md](docs/nixos.md)。
 
 ## 元数据
 

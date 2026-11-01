@@ -70,3 +70,8 @@ jobs:
       - name: Web build
         working-directory: web
         run: nix develop -c pnpm build
+
+      # 只构建 Nix 包里的网页端，比整个包快得多，用来发现 pnpm-lock.yaml 改了而
+      # nix/package.nix 里的依赖 hash 没跟着改。
+      - name: Nix web package
+        run: nix build .#default.web --no-link

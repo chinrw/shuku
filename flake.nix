@@ -4,7 +4,7 @@
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
-    { nixpkgs, ... }:
+    { self, nixpkgs, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -13,6 +13,21 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      packages = forAllSystems (pkgs: rec {
+        shuku = pkgs.callPackage ./nix/package.nix { };
+        default = shuku;
+      });
+
+      nixosModules = rec {
+        shuku = import ./nix/module.nix { inherit self; };
+        default = shuku;
+      };
+
+      # 虚拟机测试要 KVM：`nix build .#checks.x86_64-linux.nixos-module`。
+      checks = forAllSystems (pkgs: {
+        nixos-module = import ./nix/test.nix { inherit self pkgs; };
+      });
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
