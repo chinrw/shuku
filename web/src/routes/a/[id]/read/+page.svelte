@@ -1612,7 +1612,9 @@
 		overflow-y: auto;
 	}
 
-	.actions button {
+	/* “标记读完”是子组件里的按钮，和这里的按钮用同一套样式。 */
+	.actions button,
+	.actions :global(.finished-button) {
 		padding: 0.4rem 0.8rem;
 		border: 1px solid var(--border);
 		border-radius: 6px;
