@@ -23,6 +23,8 @@ class Settings {
 	/** 横屏时把相邻两页并排显示。 */
 	spread = $state(true);
 	quality = $state<Quality>('auto');
+	/** 翻页模式里用滚轮翻页。 */
+	wheelTurn = $state(true);
 	view = $state<LibraryView>('grid');
 	/** 书库页同一系列的各卷合成一张卡。 */
 	groupSeries = $state(true);
@@ -55,6 +57,7 @@ class Settings {
 		if (saved.fit === 'screen' || saved.fit === 'width') this.fit = saved.fit;
 		if (typeof saved.spread === 'boolean') this.spread = saved.spread;
 		if (saved.quality === 'auto' || saved.quality === 'original') this.quality = saved.quality;
+		if (typeof saved.wheelTurn === 'boolean') this.wheelTurn = saved.wheelTurn;
 		if (saved.view === 'grid' || saved.view === 'list') this.view = saved.view;
 		if (typeof saved.groupSeries === 'boolean') this.groupSeries = saved.groupSeries;
 		if (typeof saved.hideFinished === 'boolean') this.hideFinished = saved.hideFinished;
@@ -84,7 +87,7 @@ class Settings {
 	save() {
 		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
 			this;
-		const { sort, order, quality, pageSize, theme, darkTheme, lightTheme } = this;
+		const { sort, order, quality, wheelTurn, pageSize, theme, darkTheme, lightTheme } = this;
 		localStorage.setItem(
 			KEY,
 			JSON.stringify({
@@ -93,6 +96,7 @@ class Settings {
 				fit,
 				spread,
 				quality,
+				wheelTurn,
 				view,
 				groupSeries,
 				hideFinished,

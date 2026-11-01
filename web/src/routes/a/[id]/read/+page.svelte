@@ -17,6 +17,7 @@
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
 	import ThemePicker from '#lib/ThemePicker.svelte';
+	import { WheelTurner } from '#lib/wheelTurn.ts';
 	import { NO_ZOOM, panBy, zoomAt, type Zoom } from '#lib/zoom.ts';
 
 	// 滚动模式下页面不会比这个宽，宽屏上两侧留空。
@@ -469,12 +470,27 @@
 		zoom = zoomAt(zoom, factor, px, py, stageWidth, stageHeight);
 	}
 
-	// 滚轮监听要能 preventDefault，所以不用 onwheel 属性，自己加一个非 passive 的。
+	const wheelTurner = new WheelTurner();
+
+	/** 适应宽度时这一屏在 direction 方向上已经滚到头；整页模式总是到头。 */
+	function atEdge(direction: number): boolean {
+		const view = shownSpread();
+		if (!fitWidth || !view) return true;
+		const room = direction > 0 ? view.scrollHeight - view.clientHeight - view.scrollTop : view.scrollTop;
+		return room <= 1;
+	}
+
+	// 滚轮：Ctrl 时缩放，放大着时平移，否则（设置里开着时）往下滚翻到下一页、往上滚翻回上一页。
+	// 适应宽度时先在这一屏里滚动，到头后再滚一次才翻页。
+	// 监听要能 preventDefault，所以不用 onwheel 属性，自己加一个非 passive 的。
 	function wheelZoom(node: HTMLElement) {
 		const onWheel = (event: WheelEvent) => {
-			if (!zoomable) return;
 			// 按行滚动的鼠标（Firefox）每格约 16 像素。
 			const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+			if (!zoomable) {
+				turnByWheel(event, unit);
+				return;
+			}
 			if (event.ctrlKey) {
 				event.preventDefault();
 				const box = stage?.getBoundingClientRect();
@@ -487,10 +503,24 @@
 				const dx = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX;
 				const dy = event.shiftKey && event.deltaX === 0 ? 0 : event.deltaY;
 				zoom = panBy(zoom, -dx * unit, -dy * unit, stageWidth, stageHeight);
+			} else {
+				turnByWheel(event, unit);
 			}
 		};
 		node.addEventListener('wheel', onWheel, { passive: false });
 		return () => node.removeEventListener('wheel', onWheel);
+	}
+
+	function turnByWheel(event: WheelEvent, unit: number) {
+		if (!prefs.wheelTurn || event.ctrlKey || event.shiftKey) return;
+		// 接了鼠标或触控板的 iPad 用两指放大后，滚轮留给浏览器平移。
+		if ((window.visualViewport?.scale ?? 1) > 1.01) return;
+		if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+		const delta = event.deltaY * unit;
+		if (!fitWidth) event.preventDefault();
+		const discrete = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
+		const turn = wheelTurner.feed(delta, event.timeStamp, atEdge(delta), discrete);
+		if (turn !== 0) step(turn);
 	}
 
 	function pointerDown(event: PointerEvent) {
@@ -980,6 +1010,15 @@
 							>
 							<button class:on={prefs.fit === 'width'} onclick={() => update(() => (prefs.fit = 'width'))}
 								>适应宽度</button
+							>
+						</div>
+						<span>滚轮翻页</span>
+						<div class="segmented">
+							<button class:on={prefs.wheelTurn} onclick={() => update(() => (prefs.wheelTurn = true))}
+								>开</button
+							>
+							<button class:on={!prefs.wheelTurn} onclick={() => update(() => (prefs.wheelTurn = false))}
+								>关</button
 							>
 						</div>
 						<span>横屏双页</span>
