@@ -530,6 +530,21 @@
 		}
 	});
 
+	// 图片加载完先解码再显示：`decoding="async"` 时 load 之后还没解码完，直接去掉垫底的
+	// 缩略图会空一下。预取过、插进来时已经下载完的图不做由模糊变清晰，解码完直接换上。
+	// 解码期间换了地址（放大换原图、改了设置）时不动，由新地址的 load 负责显示。
+	async function reveal(image: HTMLImageElement) {
+		const requested = image.src;
+		await image.decode().catch(() => {});
+		if (image.src === requested) image.classList.add('loaded');
+	}
+
+	function showIfCached(image: HTMLImageElement) {
+		if (!image.complete || image.naturalWidth === 0) return;
+		image.classList.add('instant');
+		reveal(image);
+	}
+
 	// 页面中线所在的那一页算当前页。
 	function trackScroll(node: HTMLElement) {
 		const observer = new IntersectionObserver(
@@ -693,14 +708,15 @@
 				ontouchend={touchEnd}
 			>
 				{#each visible as index (index)}
-					<!-- 原图下载完之前先用缩略图垫底，大图在手机上要等一会儿。 -->
+					<!-- 大图下载完之前先用模糊的缩略图垫底，加载完由模糊变清晰。 -->
 					<img
 						class="page"
 						class:half={visible.length === 2}
 						src={src(index)}
 						style:background-image="url({pages[index].thumbnail_url})"
-						onload={(event) => event.currentTarget.classList.add('loaded')}
+						onload={(event) => reveal(event.currentTarget as HTMLImageElement)}
 						onerror={(event) => fallback(event, index)}
+						{@attach showIfCached}
 						decoding="async"
 						width={pages[index].width}
 						height={pages[index].height}
@@ -1059,16 +1075,31 @@
 		width: auto;
 		height: auto;
 		object-fit: contain;
+		transition: filter 0.35s ease-out;
 	}
 
+	/* 没加载完时只显示模糊的缩略图背景：图片内容移出框外（img 会裁掉框外的内容），
+	   免得边下载边一截一截地画出来。加载完换上图片，模糊在过渡里退掉。 */
 	.page:not(:global(.loaded)) {
 		background-position: center;
 		background-repeat: no-repeat;
 		background-size: contain;
+		object-position: -100000px 0;
+		filter: blur(10px);
 	}
 
 	.page:global(.loaded) {
 		background-image: none !important;
+	}
+
+	.page:global(.instant) {
+		transition: none;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.page {
+			transition: none;
+		}
 	}
 
 	.page.half {
