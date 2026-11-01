@@ -21,6 +21,7 @@
 	import { forgetMembers } from '#lib/membership.svelte.ts';
 	import { savedTagStore } from '#lib/savedTags.svelte.ts';
 	import FinishedBadge from '#lib/FinishedBadge.svelte';
+	import { finishedOf, settleFinished } from '#lib/finished.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
 	import { PAGE_SIZES, pageCount, type PageSize } from '#lib/pages.ts';
 	import Pager from '#lib/Pager.svelte';
@@ -40,6 +41,11 @@
 	let serverList = $derived(serverListHref(route.url.href));
 
 	let items = $derived<ArchiveItem[]>(data.result?.items ?? []);
+	// 换上新取的列表时，它已经包含的读完标记改动不再需要本地记着。
+	$effect.pre(() => {
+		const fetchedAt = data.fetchedAt;
+		untrack(() => settleFinished(fetchedAt));
+	});
 	let query = $derived(data.q);
 	let pages = $derived(pageCount(data.result?.total ?? 0, data.pageSize));
 
@@ -132,7 +138,7 @@
 		selecting = true;
 	}
 
-	function endBatch(message: string | null, tags = false) {
+	function endBatch(message: string | null, delayed = false) {
 		selecting = false;
 		selected.clear();
 		selectAll = false;
@@ -147,7 +153,7 @@
 		forgetMembers();
 		refreshAll();
 		// 只改了分类时不动已经排着的刷新，它可能是上一批改标签留下的。
-		if (tags) {
+		if (delayed) {
 			clearTimeout(reloadTimer);
 			reloadTimer = setTimeout(refreshAll, SNAPSHOT_DELAY);
 		}
@@ -711,7 +717,7 @@
 					href={series ? `/s/${series.id}` : `/a/${item.id}/read`}>
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
-					{#if !series && item.progress?.finished}<FinishedBadge />{/if}
+					{#if !series && finishedOf(item.id, item.progress)}<FinishedBadge />{/if}
 					<span class="badge pages">{series ? `${series.volumes} 卷` : `${item.page_count}P`}</span>
 					{#if !series && item.progress && item.page_count > 0}
 						<div
@@ -773,7 +779,7 @@
 								style:width="{item.page_count ? (read / item.page_count) * 100 : 0}%"
 							></span></span
 						>
-						{#if item.progress?.finished}<span class="done"><Icon name="check" size={12} />读完</span>{/if}
+						{#if finishedOf(item.id, item.progress)}<span class="done"><Icon name="check" size={12} />读完</span>{/if}
 						{#if read}{read} / {item.page_count}{:else}<span class:fresh={item.is_new}
 								>{item.is_new ? '新' : '没读过'}</span
 							>{/if}

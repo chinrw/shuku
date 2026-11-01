@@ -75,6 +75,7 @@ impl App {
             )
             .route("/api/archives/{id}/file", get(crate::download::file))
             .route("/api/archives/{id}/progress", put(write_progress))
+            .route("/api/archives/{id}/finished", put(write_finished))
             .merge(self.edit_router())
             .merge(self.categories_router())
             .merge(self.saved_tags_router())
@@ -136,6 +137,33 @@ async fn write_progress(
     Ok(Json(
         json!({"accepted": outcome.accepted, "progress": progress(outcome.progress.as_ref())}),
     ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FinishedInput {
+    finished: bool,
+}
+
+/// 手动标记读完或取消，见 `Writer::set_finished`。
+async fn write_finished(
+    State(app): State<App>,
+    id: std::result::Result<Path<i64>, PathRejection>,
+    body: std::result::Result<Json<FinishedInput>, JsonRejection>,
+) -> Result<Json<Value>> {
+    let Path(id) = id.map_err(Error::bad_request)?;
+    let Json(body) = body.map_err(Error::bad_request)?;
+    app.blocking(move |app| {
+        let archive = app.write(|writer| {
+            writer.set_finished(id, body.finished)?;
+            Ok(writer.archive(id)?.ok_or_else(Error::not_found)?)
+        })?;
+        app.progress_changed();
+        Ok(Json(
+            json!({"progress": progress(archive.progress.as_ref())}),
+        ))
+    })
+    .await
 }
 
 #[derive(Default, Deserialize)]

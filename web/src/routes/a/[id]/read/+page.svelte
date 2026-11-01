@@ -3,9 +3,11 @@
 	import { afterNavigate, pushState, replaceState } from '$app/navigation';
 	import { page as route } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { downloadUrl } from '#lib/api.ts';
+	import { downloadUrl, putProgress, type Progress } from '#lib/api.ts';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
+	import FinishedButton from '#lib/FinishedButton.svelte';
+	import { noteFinished } from '#lib/finished.svelte.ts';
 	import Icon from '#lib/Icon.svelte';
 	import { bytes } from '#lib/format.ts';
 	import { fade, panelEdge, slide, turn } from '#lib/motion.ts';
@@ -188,9 +190,25 @@
 	});
 
 	const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
-	const reporter = new ProgressReporter(book.id, (error) => {
-		progressError = errorText(error);
-	});
+	// 这本书最新的进度：打开时来自直接读库的详情接口，之后按上报和“标记读完”的回复更新。
+	// 读完标记也记进 finished.svelte.ts，回到书库时角标不等快照刷新就是对的。
+	let latestProgress = $state(untrack(() => book.progress));
+	function noteProgress(progress: Progress | null) {
+		latestProgress = progress;
+		noteFinished([book.id], progress?.finished ?? false);
+	}
+	untrack(() => noteProgress(book.progress));
+	const reporter = new ProgressReporter(
+		book.id,
+		(error) => {
+			progressError = errorText(error);
+		},
+		async (id, progress, options) => {
+			const result = await putProgress(id, progress, options);
+			noteProgress(result.progress);
+			return result;
+		}
+	);
 
 	// 只在翻页时上报。打开时不报，免得用旧页码和新时间戳盖掉别的设备更新的进度。
 	function record(page: number) {
@@ -1081,6 +1099,7 @@
 						<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
 						<button onclick={() => closePanel(() => jump(0))}>回到第一页</button>
 						<button onclick={() => closePanel(() => jump(pages.length - 1))}>最后一页</button>
+						<FinishedButton archive={book.id} progress={latestProgress} onchange={noteProgress} />
 						<a href="/a/{book.id}">相关作品</a>
 						{#if book.series}
 							<a href="/s/{book.series.id}">{book.series.name}的全部卷</a>

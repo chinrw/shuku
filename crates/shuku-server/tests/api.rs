@@ -103,6 +103,49 @@ async fn progress_rejects_stale_equal_and_out_of_range_reports() {
     );
 }
 
+#[tokio::test]
+async fn marks_a_book_finished_by_hand() {
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 10, 20);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let id = json(&router, "/api/search").await["items"][0]["id"]
+        .as_i64()
+        .unwrap();
+    let uri = format!("/api/archives/{id}/finished");
+    let put = |body: Value| {
+        let router = router.clone();
+        let uri = uri.clone();
+        async move {
+            let (status, _, bytes) = request(&router, "PUT", &uri, Some(body), &[]).await;
+            (status, serde_json::from_slice::<Value>(&bytes).unwrap())
+        }
+    };
+
+    // 没读过的书记在最后一页（fixture 的书有 2 页）。
+    let (status, body) = put(value!({"finished": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["progress"]["page"], 1);
+    assert_eq!(body["progress"]["finished"], true);
+
+    let (status, body) = put(value!({"finished": false})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["progress"]["page"], 1);
+    assert_eq!(body["progress"]["finished"], false);
+
+    assert_eq!(put(value!({})).await.0, StatusCode::BAD_REQUEST);
+    let (status, _, _) = request(
+        &router,
+        "PUT",
+        "/api/archives/999999/finished",
+        Some(value!({"finished": true})),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 // 暂停的时钟在运行时空闲时自动快进，10 秒的刷新延迟不用真的等。
 #[tokio::test(start_paused = true)]
 async fn search_shows_new_progress_once_the_delayed_refresh_runs() {

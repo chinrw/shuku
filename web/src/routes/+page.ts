@@ -22,6 +22,9 @@ import { settings } from '#lib/settings.svelte.ts';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch, url }) => {
+	// 列表从这一刻的搜索快照取，页面换上它时按这个时刻清理 finished.svelte.ts 里记的标记。
+	// 悬停预加载也会跑 load，所以不在这里清。
+	const fetchedAt = Date.now();
 	const q = url.searchParams.get('q') ?? '';
 	const prefs = settings();
 	// 地址里没写排序时（书库首页、标签链接）用这台设备记住的排序和方向。
@@ -117,7 +120,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			newCount,
 			recent: recentItems,
 			libraryName: name,
-			queryError: null
+			queryError: null,
+			fetchedAt
 		};
 	} catch (error) {
 		// 搜索语句写错时留在列表页显示原因，方便直接改；其他错误交给错误页。
@@ -138,7 +142,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				newCount: await newBooks,
 				recent: [],
 				libraryName: await libraryName,
-				queryError: error.message
+				queryError: error.message,
+				fetchedAt
 			};
 		}
 		throw error;

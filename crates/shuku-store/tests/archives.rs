@@ -140,6 +140,45 @@ fn accepts_only_strictly_newer_progress_and_keeps_it_on_archive_updates() {
 }
 
 #[test]
+fn marks_finished_by_hand_without_moving_existing_progress() {
+    let mut store = Store::open(":memory:").unwrap();
+    let unread = store
+        .save_archive(None, &metadata("one.cbz"), &pages())
+        .unwrap();
+    let reading = store
+        .save_archive(None, &metadata("two.cbz"), &pages())
+        .unwrap();
+    let progress = |store: &Store, id| store.archive(id).unwrap().unwrap().progress.unwrap();
+
+    // 没读过的书记在最后一页。
+    store.set_finished(unread, true).unwrap();
+    let marked = progress(&store, unread);
+    assert_eq!((marked.page, marked.finished), (1, true));
+
+    // 读到一半的书只改标记，页码和翻页时间不变，之后的上报照常比较时间。
+    store.write_progress(reading, 0, 5_000).unwrap();
+    store.set_finished(reading, true).unwrap();
+    let marked = progress(&store, reading);
+    assert_eq!(
+        (marked.page, marked.client_time, marked.finished),
+        (0, 5_000, true)
+    );
+    assert!(!store.write_progress(reading, 1, 4_000).unwrap());
+
+    store.set_finished(reading, false).unwrap();
+    let cleared = progress(&store, reading);
+    assert_eq!(
+        (cleared.page, cleared.client_time, cleared.finished),
+        (0, 5_000, false)
+    );
+
+    assert!(matches!(
+        store.set_finished(reading + 100, true),
+        Err(Error::ArchiveNotFound(_))
+    ));
+}
+
+#[test]
 fn replaces_normalized_tags_atomically_without_affecting_other_archives() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");

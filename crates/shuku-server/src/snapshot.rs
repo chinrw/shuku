@@ -222,6 +222,11 @@ impl App {
 
     /// 列表元数据或标签已经提交了变化：安排一次延迟的整体重建。
     /// 扫描每提交一批就调用，扫得再久，搜索结果里的封面 URL 也最多落后一个刷新延迟。
+    /// 只有阅读进度变了：等刷新延迟后只换快照里的进度表。
+    pub(crate) fn progress_changed(&self) {
+        self.0.changed.notify_one();
+    }
+
     pub(crate) fn listing_changed(&self) {
         self.0.listing_changed.store(true, Ordering::Release);
         self.0.changed.notify_one();

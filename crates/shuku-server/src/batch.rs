@@ -32,6 +32,8 @@ struct BatchBody {
     remove_tags: Vec<String>,
     add_to_category: Option<i64>,
     remove_from_category: Option<i64>,
+    /// 标记读完（true）或取消（false），见 `Writer::set_finished`。
+    finished: Option<bool>,
 }
 
 /// 和搜索接口相同的条件。
@@ -53,6 +55,7 @@ struct Batch {
     tags: Option<ArchiveEdit>,
     add_to_category: Option<i64>,
     remove_from_category: Option<i64>,
+    finished: Option<bool>,
 }
 
 impl App {
@@ -121,6 +124,9 @@ impl App {
                     if let Some(tags) = &batch.tags {
                         tags.apply(writer, id)?;
                     }
+                    if let Some(finished) = batch.finished {
+                        writer.set_finished(id, finished)?;
+                    }
                     Ok(())
                 })();
                 match result {
@@ -133,6 +139,8 @@ impl App {
         })?;
         if batch.tags.is_some() {
             self.listing_changed();
+        } else if batch.finished.is_some() {
+            self.progress_changed();
         }
         Ok(changed)
     }
@@ -161,13 +169,15 @@ async fn batch(
         tags,
         add_to_category: body.add_to_category,
         remove_from_category: body.remove_from_category,
+        finished: body.finished,
     };
     if batch.tags.is_none()
         && batch.add_to_category.is_none()
         && batch.remove_from_category.is_none()
+        && batch.finished.is_none()
     {
         return Err(Error::bad_request(
-            "至少要有 add_tags、remove_tags、add_to_category、remove_from_category 之一",
+            "至少要有 add_tags、remove_tags、add_to_category、remove_from_category、finished 之一",
         ));
     }
     let skip_missing = body.search.is_some();

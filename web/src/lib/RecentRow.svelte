@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ArchiveItem } from './api';
 	import FinishedBadge from './FinishedBadge.svelte';
+	import { finishedOf } from './finished.svelte';
 	import Icon from './Icon.svelte';
 	import { ago } from './time';
 
@@ -48,7 +49,7 @@
 			<div class="book">
 				<a class="cover" href="/a/{item.id}/read" aria-label="接着读 {item.title}">
 					<img src={item.cover_url} alt="" loading="lazy" />
-					{#if item.progress?.finished}<FinishedBadge />{/if}
+					{#if finishedOf(item.id, item.progress)}<FinishedBadge />{/if}
 					{#if item.page_count > 0}
 						<span class="progress" style:width="{((page + 1) / item.page_count) * 100}%"></span>
 					{/if}

@@ -272,6 +272,8 @@ export interface BatchChange {
 	remove_tags?: string[];
 	add_to_category?: number;
 	remove_from_category?: number;
+	/** 标记读完（true）或取消（false）。 */
+	finished?: boolean;
 }
 
 /** 一批在一个事务里改完，返回改了几本。 */
@@ -293,6 +295,20 @@ export async function batch(selection: BatchSelection, change: BatchChange): Pro
 		body: JSON.stringify({ ...target, ...change })
 	});
 	return result.archives;
+}
+
+/** 手动标记读完或取消，返回服务端现在的进度；取消时书没有进度就是 null。 */
+export async function setFinished(id: number, finished: boolean): Promise<Progress | null> {
+	const result = await request<{ progress: Progress | null }>(
+		fetch,
+		`/api/archives/${id}/finished`,
+		{
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ finished })
+		}
+	);
+	return result.progress;
 }
 
 /** 最近读过的归档，按翻页时间从新到旧。 */

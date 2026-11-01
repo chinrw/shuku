@@ -149,3 +149,36 @@ async fn a_bad_batch_changes_nothing() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn marks_books_finished_and_unfinished_in_one_go() {
+    let fixture = Fixture::new();
+    for name in ["a.cbz", "b.cbz"] {
+        fixture.archive_with_pages(name, 3);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let ids: Vec<i64> = json(&router, "/api/search").await["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_i64().unwrap())
+        .collect();
+
+    let (status, body) = post(&router, value!({"ids": ids, "finished": true})).await;
+    assert_eq!((status, body), (StatusCode::OK, value!({"archives": 2})));
+    app.refresh().await.unwrap();
+    assert_eq!(
+        json(&router, "/api/search?filter=finished").await["total"],
+        2
+    );
+
+    let (status, _) = post(&router, value!({"ids": [ids[0]], "finished": false})).await;
+    assert_eq!(status, StatusCode::OK);
+    app.refresh().await.unwrap();
+    assert_eq!(
+        json(&router, "/api/search?filter=finished").await["total"],
+        1
+    );
+}

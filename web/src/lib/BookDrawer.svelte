@@ -3,6 +3,7 @@
 	import { archive as loadArchive, downloadUrl, type ArchiveItem, type Category } from '#lib/api.ts';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
+	import FinishedButton from '#lib/FinishedButton.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { fade, slide } from '#lib/motion.ts';
 	import { artistQueries } from '#lib/related.ts';
@@ -82,6 +83,7 @@
 		{/if}
 		{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
 		<a href="/a/{book.id}/read?panel=detail">详情</a>
+		<FinishedButton archive={book.id} progress={book.progress} />
 		<a href={downloadUrl(book.id)} download>下载</a>
 		<a href="/a/{book.id}?edit">编辑</a>
 	</div>
@@ -179,17 +181,23 @@
 		gap: 0.5rem;
 	}
 
-	.actions a {
+	.actions a,
+	.actions :global(.finished-button) {
 		padding: 0.55rem 0.9rem;
 		border: 1px solid var(--chip-border);
 		border-radius: 8px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
 		text-decoration: none;
 		white-space: nowrap;
+		cursor: pointer;
 	}
 
 	/* 手机上“开始阅读”被挤成两行、别的按钮跟着变高；收窄内边距让一排放得下，放不下时整个按钮换行。 */
 	@media (max-width: 480px) {
-		.actions a {
+		.actions a,
+		.actions :global(.finished-button) {
 			padding: 0.55rem 0.7rem;
 		}
 	}

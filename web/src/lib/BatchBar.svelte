@@ -1,6 +1,7 @@
 <script lang="ts">
-	// 书库页的批量操作栏：给选中的书或整个搜索结果加减标签、加进或移出静态分类。
+	// 书库页的批量操作栏：给选中的书或整个搜索结果加减标签、加进或移出静态分类、标记读完。
 	import { ApiError, batch, type BatchSelection, type Category } from '#lib/api.ts';
+	import { forgetFinished, noteFinished } from '#lib/finished.svelte.ts';
 
 	let {
 		selection,
@@ -17,8 +18,8 @@
 		total: number;
 		all: boolean;
 		categories: Category[];
-		/** `tags` 表示改了标签，搜索结果要等服务端的快照重建才看得到。 */
-		ondone: (message: string, tags: boolean) => void;
+		/** `delayed` 表示改了标签或读完标记，搜索结果要等服务端的快照刷新才看得到。 */
+		ondone: (message: string, delayed: boolean) => void;
 		oncancel: () => void;
 	} = $props();
 
@@ -26,6 +27,7 @@
 	let removeTags = $state('');
 	let addTo = $state('');
 	let removeFrom = $state('');
+	let finished = $state('');
 	let busy = $state(false);
 	let error = $state('');
 	let choices = $derived(categories.filter((category) => !category.dynamic));
@@ -37,7 +39,12 @@
 			.filter(Boolean);
 
 	let ready = $derived(
-		count > 0 && (split(addTags).length > 0 || split(removeTags).length > 0 || !!addTo || !!removeFrom)
+		count > 0 &&
+			(split(addTags).length > 0 ||
+				split(removeTags).length > 0 ||
+				!!addTo ||
+				!!removeFrom ||
+				!!finished)
 	);
 
 	async function run(event: SubmitEvent) {
@@ -50,12 +57,21 @@
 			add_tags: split(addTags),
 			remove_tags: split(removeTags),
 			add_to_category: addTo ? Number(addTo) : undefined,
-			remove_from_category: removeFrom ? Number(removeFrom) : undefined
+			remove_from_category: removeFrom ? Number(removeFrom) : undefined,
+			finished: finished ? finished === 'true' : undefined
 		};
 		const tags = change.add_tags.length > 0 || change.remove_tags.length > 0;
+		// 请求期间还能改选，本地记的读完标记要按这次发出去的选择。
+		const target = selection;
 		try {
-			const changed = await batch(selection, change);
-			ondone(`改了 ${changed} 本${tags ? '，标签约 10 秒后出现在搜索结果里' : ''}`, tags);
+			const changed = await batch(target, change);
+			// 按条件选的不知道具体是哪几本，等快照刷新。
+			if (change.finished !== undefined) {
+				if ('ids' in target) noteFinished(target.ids, change.finished);
+				else forgetFinished();
+			}
+			const delayed = tags || change.finished !== undefined;
+			ondone(`改了 ${changed} 本${delayed ? '，约 10 秒后出现在搜索结果里' : ''}`, delayed);
 		} catch (cause) {
 			error = cause instanceof ApiError ? cause.message : '网络错误';
 		} finally {
@@ -87,6 +103,11 @@
 			{#each choices as category (category.id)}
 				<option value={String(category.id)}>{category.name}</option>
 			{/each}
+		</select>
+		<select bind:value={finished} aria-label="读完标记">
+			<option value="">读完标记…</option>
+			<option value="true">标记读完</option>
+			<option value="false">取消读完</option>
 		</select>
 		<button class="primary" disabled={!ready || busy}>{busy ? '正在改…' : '执行'}</button>
 	</div>

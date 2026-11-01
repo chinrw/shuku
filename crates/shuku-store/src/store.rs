@@ -107,6 +107,10 @@ impl Store {
     pub fn set_content_hash(&mut self, entry: &ScanEntry, hash: &str) -> Result<bool> {
         self.write(|writer| writer.set_content_hash(entry, hash))
     }
+
+    pub fn set_finished(&mut self, id: i64, finished: bool) -> Result<()> {
+        self.write(|writer| writer.set_finished(id, finished))
+    }
 }
 
 impl Writer<'_> {
@@ -708,6 +712,30 @@ impl Writer<'_> {
             params![id, page, client_time],
         )? > 0;
         Ok(accepted)
+    }
+
+    /// 手动标记读完或取消。标记时没有进度的书记在最后一页，和读到最后一页一样（LRR 的
+    /// “标记为已读”也是这样）；已有进度的只改标记，不动页码和翻页时间，各设备之后的
+    /// 上报照常按时间先后比较。
+    pub fn set_finished(&mut self, id: i64, finished: bool) -> Result<()> {
+        let transaction = self.connection;
+        require_archive(transaction, id)?;
+        if finished {
+            transaction.execute(
+                "INSERT INTO progress (archive_id, page, client_time, updated_at, finished)
+                 SELECT id, max(page_count - 1, 0), CAST(unixepoch('subsec') * 1000 AS INTEGER),
+                    CAST(unixepoch('subsec') * 1000 AS INTEGER), 1
+                 FROM archive WHERE id = ?1
+                 ON CONFLICT(archive_id) DO UPDATE SET finished = 1",
+                [id],
+            )?;
+        } else {
+            transaction.execute(
+                "UPDATE progress SET finished = 0 WHERE archive_id = ?1",
+                [id],
+            )?;
+        }
+        Ok(())
     }
 }
 
