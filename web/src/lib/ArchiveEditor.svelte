@@ -163,7 +163,7 @@
 	button.primary {
 		border-color: var(--accent);
 		background: var(--accent);
-		color: white;
+		color: var(--on-accent);
 	}
 
 	button:disabled {

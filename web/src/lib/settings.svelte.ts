@@ -1,6 +1,7 @@
 import type { Order, Sort } from './api';
 import { parseOrder, parseSort } from './libraryUrl';
 import { DEFAULT_PAGE_SIZE, isPageSize, type PageSize } from './pages';
+import { DEFAULT_DARK, DEFAULT_LIGHT, findTheme, type ThemeChoice } from './themes';
 
 export type ReaderMode = 'paged' | 'scroll';
 export type Direction = 'rtl' | 'ltr';
@@ -42,9 +43,13 @@ class Settings {
 	webtoonWidth = $state<number>(WEBTOON_WIDTH.default);
 	/** 手动指定的条漫开关，按归档 ID 记。没有记录的书按页面宽高比自动判断。 */
 	webtoon = $state<Record<number, boolean>>({});
+	/** 配色，见 themes.ts。跟随系统时深色和浅色各用 darkTheme、lightTheme。 */
+	theme = $state<ThemeChoice>('system');
+	darkTheme = $state<string>(DEFAULT_DARK);
+	lightTheme = $state<string>(DEFAULT_LIGHT);
 
 	constructor() {
-		const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+		const saved = load();
 		if (saved.mode === 'paged' || saved.mode === 'scroll') this.mode = saved.mode;
 		if (saved.direction === 'rtl' || saved.direction === 'ltr') this.direction = saved.direction;
 		if (saved.fit === 'screen' || saved.fit === 'width') this.fit = saved.fit;
@@ -66,6 +71,9 @@ class Settings {
 		) {
 			this.webtoonWidth = saved.webtoonWidth;
 		}
+		if (saved.theme === 'system' || findTheme(saved.theme)) this.theme = saved.theme;
+		if (findTheme(saved.darkTheme, 'dark')) this.darkTheme = saved.darkTheme;
+		if (findTheme(saved.lightTheme, 'light')) this.lightTheme = saved.lightTheme;
 		if (saved.webtoon && typeof saved.webtoon === 'object') {
 			for (const [id, value] of Object.entries(saved.webtoon)) {
 				if (typeof value === 'boolean') this.webtoon[Number(id)] = value;
@@ -76,7 +84,7 @@ class Settings {
 	save() {
 		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
 			this;
-		const { sort, order, quality, pageSize } = this;
+		const { sort, order, quality, pageSize, theme, darkTheme, lightTheme } = this;
 		localStorage.setItem(
 			KEY,
 			JSON.stringify({
@@ -92,9 +100,22 @@ class Settings {
 				sort,
 				order,
 				webtoonWidth,
-				webtoon
+				webtoon,
+				theme,
+				darkTheme,
+				lightTheme
 			})
 		);
+	}
+}
+
+// 根布局一打开就读设置，存储被禁用或内容损坏时用默认值，不能让整个网页端打不开。
+function load(): Record<string, any> {
+	try {
+		const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+		return saved && typeof saved === 'object' ? saved : {};
+	} catch {
+		return {};
 	}
 }
 

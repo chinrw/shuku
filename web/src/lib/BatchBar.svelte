@@ -160,7 +160,7 @@
 		border: 1px solid var(--accent);
 		border-radius: 6px;
 		background: var(--accent);
-		color: white;
+		color: var(--on-accent);
 		font: inherit;
 		cursor: pointer;
 	}

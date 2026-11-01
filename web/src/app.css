@@ -1,54 +1,12 @@
 /*
- * 深色和浅色配色分别取自 LRR 自带的深色和浅色主题，跟随系统切换。
- * 作者、社团、原作三类命名空间的颜色与 LRR 一致，浅色下调深以便在米色背景上看清。
+ * 颜色变量（--bg、--fg 等）不在这里定义：全部配色在 src/lib/themes.ts，由 app.html 的内联脚本
+ * 和根布局写到 <html> 的 style 上。
  */
 :root {
-	--bg: #34353b;
-	--surface: #43464e;
-	/* 比底色更深一层，控制台的侧栏、日志和进度条底槽用。 */
-	--sunken: #2b2c31;
-	--raised: #4b4f57;
-	--chip: #4f535b;
-	--chip-border: #6d7179;
-	--fg: #dddddd;
-	--muted: #a6a9ae;
-	--faint: #7c8087;
-	--border: #50545c;
-	--link: #3b97ea;
-	--accent: #3b97ea;
-	--new: #e8833a;
-	--danger: #f87171;
-	--artist: #22a7f0;
-	--group: #36d7b7;
-	--parody: #d2527f;
-	color-scheme: dark;
 	font-family: system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif;
 	color: var(--fg);
 	background: var(--bg);
 	-webkit-text-size-adjust: 100%;
-}
-
-@media (prefers-color-scheme: light) {
-	:root {
-		--bg: #e3e0d1;
-		--surface: #edebdf;
-		--sunken: #d6d1bd;
-		--raised: #f2efdf;
-		--chip: #f2efdf;
-		--chip-border: #806769;
-		--fg: #5c0d11;
-		--muted: #806769;
-		--faint: #a8999a;
-		--border: #cfcab6;
-		--link: #9b4e03;
-		--accent: #9b4e03;
-		--new: #c4561b;
-		--danger: #b91c1c;
-		--artist: #0f6ba8;
-		--group: #0e7f69;
-		--parody: #a8325e;
-		color-scheme: light;
-	}
 }
 
 * {

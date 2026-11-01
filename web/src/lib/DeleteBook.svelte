@@ -160,6 +160,6 @@
 	.danger {
 		border-color: var(--danger);
 		background: var(--danger);
-		color: white;
+		color: var(--on-accent);
 	}
 </style>

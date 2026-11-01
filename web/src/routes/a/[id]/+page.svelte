@@ -310,7 +310,7 @@
 	.actions a.primary {
 		border-color: var(--accent);
 		background: var(--accent);
-		color: white;
+		color: var(--on-accent);
 	}
 
 	.categories {

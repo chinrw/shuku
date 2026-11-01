@@ -144,7 +144,7 @@
 
 	.busy {
 		background: var(--accent);
-		color: #fff;
+		color: var(--on-accent);
 	}
 
 	.warn {

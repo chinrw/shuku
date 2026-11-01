@@ -10,6 +10,7 @@
 	import { adminStatus } from '#lib/adminStatus.svelte.ts';
 	import MetadataSettings from './MetadataSettings.svelte';
 	import TokenSettings from './TokenSettings.svelte';
+	import ThemePicker from '#lib/ThemePicker.svelte';
 	import { settings, type Direction, type LibraryView, type ReaderMode } from '#lib/settings.svelte.ts';
 
 	const prefs = settings();
@@ -274,6 +275,10 @@
 		<h2>这台设备</h2>
 		<p class="adm-note">存在浏览器里，只影响当前设备。</p>
 		<div class="option">
+			<span class="adm-label picker-label">配色</span>
+			<ThemePicker />
+		</div>
+		<div class="option">
 			<span class="adm-label">书库视图</span>
 			<div class="adm-tabs" role="group" aria-label="书库视图">
 				{#each views as [key, label] (key)}
@@ -322,6 +327,12 @@
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		background: var(--bg);
+	}
+
+	/* 跟随系统时配色下面还有两行，标签对齐第一行。 */
+	.picker-label {
+		align-self: start;
+		padding-top: 0.35rem;
 	}
 
 	.option {

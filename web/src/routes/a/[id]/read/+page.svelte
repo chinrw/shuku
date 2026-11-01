@@ -15,6 +15,7 @@
 	import { buildSpreads } from '#lib/spreads.ts';
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
+	import ThemePicker from '#lib/ThemePicker.svelte';
 
 	// 滚动模式下页面不会比这个宽，宽屏上两侧留空。
 	const SCROLL_MAX_WIDTH = 960;
@@ -881,6 +882,8 @@
 							>
 						</div>
 					{/if}
+					<span class="picker-label">配色</span>
+					<ThemePicker />
 				</div>
 			{:else}
 				<!-- 上面是标签和操作，下面是相似作品，都固定不动；中间的页面缩略图单独滚动。 -->
@@ -1194,7 +1197,13 @@
 		gap: 0.6rem 1rem;
 		margin-bottom: 1.25rem;
 		font-size: 0.9rem;
-		color: #a6a9ae;
+		color: var(--muted);
+	}
+
+	/* 跟随系统时配色下面还有两行，标签对齐第一行。 */
+	.picker-label {
+		align-self: start;
+		padding-top: 0.35rem;
 	}
 
 	/* 竖屏时条漫总是占满宽度，这个宽度只在横屏生效。 */
@@ -1208,7 +1217,7 @@
 	.segmented {
 		display: flex;
 		width: fit-content;
-		border: 1px solid #50545c;
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		overflow: hidden;
 	}
@@ -1217,14 +1226,14 @@
 		padding: 0.3rem 0.9rem;
 		border: none;
 		background: transparent;
-		color: #ccc;
+		color: var(--muted);
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
 
 	.segmented button.on {
-		background: #4f535b;
-		color: #fff;
+		background: var(--chip);
+		color: var(--fg);
 	}
 
 	.scrim {
@@ -1235,11 +1244,6 @@
 
 	/* 宽屏是右侧抽屉，手机上是底部弹出的面板。 */
 	.panel {
-		--fg: #dddddd;
-		--muted: #a6a9ae;
-		--chip: #4f535b;
-		--chip-border: #6d7179;
-		--link: #3b97ea;
 		position: absolute;
 		top: 0;
 		right: 0;
@@ -1248,9 +1252,8 @@
 		overflow-y: auto;
 		padding: 1rem;
 		padding-top: max(1rem, env(safe-area-inset-top));
-		background: #34353b;
+		background: var(--bg);
 		color: var(--fg);
-		--accent: #3b97ea;
 		user-select: text;
 		-webkit-user-select: text;
 	}
@@ -1274,7 +1277,7 @@
 		flex: none;
 		margin-top: 0.5rem;
 		padding-top: 0.75rem;
-		border-top: 1px solid #43464e;
+		border-top: 1px solid var(--border);
 	}
 
 	/* 宽屏上三块同时显示，没有分页标签，也不用网格版的相似作品。 */
@@ -1292,7 +1295,7 @@
 			margin-bottom: 0.75rem;
 			padding: 0.2rem;
 			border-radius: 8px;
-			background: #2b2c31;
+			background: var(--sunken);
 		}
 
 		.detail-tabs button {
@@ -1301,15 +1304,15 @@
 			border: none;
 			border-radius: 6px;
 			background: transparent;
-			color: #a6a9ae;
+			color: var(--muted);
 			font: inherit;
 			font-size: 0.9rem;
 			cursor: pointer;
 		}
 
 		.detail-tabs button[aria-selected='true'] {
-			background: #4f535b;
-			color: #fff;
+			background: var(--chip);
+			color: var(--fg);
 		}
 
 		.detail-bottom {
@@ -1348,9 +1351,9 @@
 
 	.actions a {
 		padding: 0.4rem 0.8rem;
-		border: 1px solid #50545c;
+		border: 1px solid var(--border);
 		border-radius: 6px;
-		color: #ddd;
+		color: var(--fg);
 		font-size: 0.85rem;
 		text-decoration: none;
 	}
@@ -1364,10 +1367,10 @@
 
 	.actions button {
 		padding: 0.4rem 0.8rem;
-		border: 1px solid #50545c;
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		background: transparent;
-		color: #ddd;
+		color: var(--fg);
 		font: inherit;
 		font-size: 0.85rem;
 		cursor: pointer;
@@ -1406,7 +1409,6 @@
 		margin: 1rem 0 0;
 		line-height: 1.7;
 		white-space: pre-wrap;
-		color: #ccc;
 	}
 
 	.next-volume {
@@ -1419,9 +1421,10 @@
 		transform: translateX(-50%);
 		margin: 0;
 		padding: 0.3rem 0.3rem 0.3rem 0.9rem;
-		border: 1px solid #43464e;
+		border: 1px solid var(--border);
 		border-radius: 8px;
-		background: #2b2c31;
+		background: var(--sunken);
+		color: var(--fg);
 		font-size: 0.9rem;
 		white-space: nowrap;
 	}
@@ -1429,8 +1432,8 @@
 	.next-volume a {
 		padding: 0.3rem 0.8rem;
 		border-radius: 6px;
-		background: #3b97ea;
-		color: white;
+		background: var(--accent);
+		color: var(--on-accent);
 		text-decoration: none;
 	}
 
@@ -1443,6 +1446,7 @@
 		padding: 0.4rem 0.8rem;
 		border-radius: 6px;
 		background: #7f1d1d;
+		color: #fff;
 		font-size: 0.85rem;
 	}
 

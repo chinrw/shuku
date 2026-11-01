@@ -18,6 +18,25 @@
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<meta name="apple-mobile-web-app-title" content="书库" />
 		<title>Shuku</title>
+		<!-- 网页端的代码加载前先套上上次的配色（src/lib/themes.ts 的 applyTheme 存的），打开时不闪默认色。 -->
+		<script>
+			try {
+				const saved = JSON.parse(localStorage.getItem('shuku.theme'));
+				const light = matchMedia('(prefers-color-scheme: light)').matches;
+				const theme = saved[light ? 'light' : 'dark'];
+				const root = document.documentElement;
+				root.dataset.theme = theme.id;
+				root.style.colorScheme = theme.scheme;
+				for (const [token, value] of Object.entries(theme.colors)) {
+					root.style.setProperty('--' + token, value);
+				}
+				for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+					meta.content = saved[meta.media.includes('light') ? 'light' : 'dark'].colors.bg;
+				}
+			} catch {
+				// 第一次打开或者存储不可用，等根布局按设置套用。
+			}
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

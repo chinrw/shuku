@@ -1243,7 +1243,7 @@
 		top: 0.3rem;
 		left: 0.3rem;
 		background: var(--new);
-		color: white;
+		color: var(--on-accent);
 	}
 
 	.badge.pages {

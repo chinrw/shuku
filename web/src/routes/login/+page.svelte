@@ -114,7 +114,7 @@
 		border: 1px solid var(--accent);
 		border-radius: 8px;
 		background: var(--accent);
-		color: white;
+		color: var(--on-accent);
 		font: inherit;
 		font-weight: 600;
 		cursor: pointer;

@@ -134,7 +134,7 @@
 
 .adm-state.running {
 	background: var(--accent);
-	color: #fff;
+	color: var(--on-accent);
 }
 
 .adm-state.failed {
@@ -183,12 +183,12 @@
 .adm-button.primary {
 	border-color: var(--accent);
 	background: var(--accent);
-	color: #fff;
+	color: var(--on-accent);
 	font-weight: 600;
 }
 
 .adm-button.primary:hover:not(:disabled) {
-	color: #fff;
+	color: var(--on-accent);
 	filter: brightness(1.1);
 }
 

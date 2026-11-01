@@ -185,7 +185,7 @@
 		flex: 1;
 		border-color: var(--accent);
 		background: var(--accent);
-		color: white;
+		color: var(--on-accent);
 		font-weight: 600;
 		text-align: center;
 	}

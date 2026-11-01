@@ -96,7 +96,7 @@
 		padding: 0.5rem 0.9rem;
 		border-radius: 6px;
 		background: var(--accent);
-		color: white;
+		color: var(--on-accent);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
