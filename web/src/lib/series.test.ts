@@ -8,7 +8,7 @@ function volume(id: number, progress: [page: number, time: number] | null): Arch
 		title: `第${id}卷`,
 		page_count: 10,
 		is_new: false,
-		progress: progress && { page: progress[0], client_time: progress[1] },
+		progress: progress && { page: progress[0], client_time: progress[1], finished: false },
 		cover_url: '',
 		date_added: 0,
 		source_url: null,

@@ -1,8 +1,8 @@
-import { putProgress, type Progress } from './api';
+import { putProgress, type Progress, type ProgressReport } from './api';
 
 type Send = (
 	id: number,
-	progress: Progress,
+	progress: ProgressReport,
 	options: { keepalive: boolean }
 ) => Promise<{ accepted: boolean; progress: Progress }>;
 
@@ -11,7 +11,7 @@ type Send = (
  * 服务端按 client_time 判断新旧，所以时刻取翻页的那一刻，不取发送的时刻。
  */
 export class ProgressReporter {
-	#pending: Progress | null = null;
+	#pending: ProgressReport | null = null;
 	#timer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(

@@ -29,6 +29,7 @@
 		'arrow-up': 'M12 19V5M5 12l7-7 7 7',
 		'arrow-down': 'M12 5v14M19 12l-7 7-7-7',
 		shuffle: 'M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5',
+		check: 'M20 6 9 17l-5-5',
 		'check-square': 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'
 	};
 

@@ -20,6 +20,7 @@
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import { forgetMembers } from '#lib/membership.svelte.ts';
 	import { savedTagStore } from '#lib/savedTags.svelte.ts';
+	import FinishedBadge from '#lib/FinishedBadge.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { PAGE_SIZES, pageCount, type PageSize } from '#lib/pages.ts';
 	import Pager from '#lib/Pager.svelte';
@@ -682,6 +683,7 @@
 					href={series ? `/s/${series.id}` : `/a/${item.id}/read`}>
 					<img src={item.cover_url} alt="" loading="lazy" />
 					{#if item.is_new && !item.progress}<span class="badge new">新</span>{/if}
+					{#if !series && item.progress?.finished}<FinishedBadge />{/if}
 					<span class="badge pages">{series ? `${series.volumes} 卷` : `${item.page_count}P`}</span>
 					{#if !series && item.progress && item.page_count > 0}
 						<div
@@ -743,6 +745,7 @@
 								style:width="{item.page_count ? (read / item.page_count) * 100 : 0}%"
 							></span></span
 						>
+						{#if item.progress?.finished}<span class="done"><Icon name="check" size={12} />读完</span>{/if}
 						{#if read}{read} / {item.page_count}{:else}<span class:fresh={item.is_new}
 								>{item.is_new ? '新' : '没读过'}</span
 							>{/if}
@@ -1399,6 +1402,13 @@
 		flex-direction: column;
 		gap: 0.2rem;
 		min-width: 4rem;
+	}
+
+	.done {
+		display: flex;
+		align-items: center;
+		gap: 0.15rem;
+		color: var(--fg);
 	}
 
 	.track {

@@ -61,7 +61,7 @@ async fn progress_rejects_stale_equal_and_out_of_range_reports() {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             serde_json::from_slice::<Value>(&bytes).unwrap(),
-            value!({"accepted":accepted,"progress":{"page":expected_page,"client_time":expected_time}})
+            value!({"accepted":accepted,"progress":{"page":expected_page,"client_time":expected_time,"finished":true}})
         );
     }
     for body in [
@@ -73,7 +73,8 @@ async fn progress_rejects_stale_equal_and_out_of_range_reports() {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(serde_json::from_slice::<Value>(&bytes).unwrap()["error"].is_string());
     }
-    let current = value!({"page":0,"client_time":2001});
+    // 读到过最后一页（第 2 页），之后翻回第 1 页也保持读完过。
+    let current = value!({"page":0,"client_time":2001,"finished":true});
     assert_eq!(
         json(&router, &format!("/api/archives/{id}")).await["progress"],
         current
@@ -126,7 +127,10 @@ async fn search_shows_new_progress_once_the_delayed_refresh_runs() {
     loop {
         let progress = json(&router, "/api/search").await["items"][0]["progress"].clone();
         if progress != Value::Null {
-            assert_eq!(progress, value!({"page": 1, "client_time": 1000}));
+            assert_eq!(
+                progress,
+                value!({"page": 1, "client_time": 1000, "finished": true})
+            );
             break;
         }
         assert!(started.elapsed() < std::time::Duration::from_secs(60));
@@ -526,7 +530,7 @@ async fn recent_lists_read_archives_newest_first_and_validates_limit() {
     assert_eq!(ids(all.clone()), [b, a, c]);
     assert_eq!(
         all["items"][0]["progress"],
-        value!({"page": 0, "client_time": 3000})
+        value!({"page": 0, "client_time": 3000, "finished": false})
     );
     assert!(all["items"][0]["cover_url"].is_string());
     assert_eq!(ids(json(&router, "/api/recent?limit=2").await), [b, a]);

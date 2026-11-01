@@ -756,7 +756,9 @@ fn tag_groups<'a>(tags: impl IntoIterator<Item = &'a Tag>) -> Vec<Value> {
 
 fn progress(value: Option<&Progress>) -> Value {
     match value {
-        Some(value) => json!({"page": value.page, "client_time": value.client_time}),
+        Some(value) => json!({
+            "page": value.page, "client_time": value.client_time, "finished": value.finished,
+        }),
         None => Value::Null,
     }
 }

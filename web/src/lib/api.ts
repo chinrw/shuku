@@ -4,7 +4,12 @@ import { redirectToLogin } from './auth';
 export interface Progress {
 	page: number;
 	client_time: number;
+	/** 读到过最后一页，之后重读到前面也保持为真。 */
+	finished: boolean;
 }
+
+/** 上报进度的请求体，“读完过”由服务端判断。 */
+export type ProgressReport = Omit<Progress, 'finished'>;
 
 export interface ArchiveItem {
 	id: number;
@@ -339,7 +344,7 @@ export function downloadUrl(id: number): string {
 
 export function putProgress(
 	id: number,
-	progress: Progress,
+	progress: ProgressReport,
 	options: { keepalive?: boolean } = {}
 ): Promise<{ accepted: boolean; progress: Progress }> {
 	return request(fetch, `/api/archives/${id}/progress`, {

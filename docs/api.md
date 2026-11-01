@@ -58,10 +58,10 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 `Progress`：
 
 ```json
-{ "page": 12, "client_time": 1761800000000 }
+{ "page": 12, "client_time": 1761800000000, "finished": false }
 ```
 
-`page` 从 0 开始。没有进度时字段为 `null`。
+`page` 从 0 开始。`finished` 是这本读到过最后一页，之后重读到前面也保持为真。没有进度时字段为 `null`。
 
 `ArchiveItem`（列表项）：
 
@@ -71,7 +71,7 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
   "title": "作品名 第1卷",
   "page_count": 180,
   "is_new": false,
-  "progress": { "page": 12, "client_time": 1761800000000 },
+  "progress": { "page": 12, "client_time": 1761800000000, "finished": false },
   "cover_url": "/api/archives/42/thumbnail?v=<quick_hash>",
   "date_added": 1700000000,
   "source_url": null,
@@ -354,12 +354,12 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 `client_time` 是客户端翻到这一页的时间。服务端只接受比已有记录新的上报。响应带回服务端当前的进度，客户端据此判断自己是否落后于别的设备：
 
 ```json
-{ "accepted": true, "progress": { "page": 13, "client_time": 1761800005000 } }
+{ "accepted": true, "progress": { "page": 13, "client_time": 1761800005000, "finished": false } }
 ```
 
 `page` 超出页数时返回 400，归档不存在时返回 404。
 
-被接受的上报到了最后一页时，服务端记下这本“读完过”，之后再上报前面的页也不清掉，`finished` 筛选按它算。迁移 012 给已有进度里停在最后一页的补记上。
+被接受的上报到了最后一页时，服务端记下这本“读完过”，之后再上报前面的页也不清掉，进度里的 `finished` 和 `finished` 筛选都按它算。迁移 012 给已有进度里停在最后一页的补记上。
 
 服务端把一秒内到达的上报合并成一次提交，响应在写入提交后才返回，所以最多要等约 1 秒。收到响应的上报已经写进数据库。
 
