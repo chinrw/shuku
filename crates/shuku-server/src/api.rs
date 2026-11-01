@@ -156,7 +156,7 @@ async fn write_finished(
     app.blocking(move |app| {
         let archive = app.write(|writer| {
             writer.set_finished(id, body.finished)?;
-            Ok(writer.archive(id)?.ok_or_else(Error::not_found)?)
+            writer.archive(id)?.ok_or_else(Error::not_found)
         })?;
         app.progress_changed();
         Ok(Json(
