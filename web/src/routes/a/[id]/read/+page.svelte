@@ -248,8 +248,9 @@
 		return (!upgraded.has(index) && variantUrl(index)) || pages[index].url;
 	}
 
-	// 两指放大（viewport 的缩放）时把眼前的页换成原图；换 src 时旧图一直显示到新图加载完。
-	// 放大着点两侧翻页时新的一屏也换。滚动模式按当前页和前后各一页算。
+	// 两指放大（viewport 的缩放）时把眼前的页换成原图；换 src 时旧图一直显示到新图加载完，
+	// 翻页模式下缩小的图还垫在背景里，原图解码完之前不会空。放大着点两侧翻页时新的一屏也换。
+	// 滚动模式按当前页和前后各一页算。
 	function upgradeIfZoomed() {
 		if (!variants || (window.visualViewport?.scale ?? 1) <= 1.05) return;
 		const shown = mode === 'paged' ? visible : [current - 1, current, current + 1];
@@ -541,18 +542,19 @@
 	});
 
 	// 图片加载完先解码再显示：`decoding="async"` 时 load 之后还没解码完，直接去掉垫底的
-	// 缩略图会空一下。预取过、插进来时已经下载完的图不做由模糊变清晰，解码完直接换上。
-	// 解码期间换了地址（放大换原图、改了设置）时不动，由新地址的 load 负责显示。
+	// 缩略图会空一下。解码期间换了地址（放大换原图、改了设置）时不动，由新地址的 load 负责显示。
+	// 放大换上的原图解码完后也撤掉垫在背景里的缩小的图，免得透过透明的地方露出来。
 	async function reveal(image: HTMLImageElement) {
 		const requested = image.src;
 		await image.decode().catch(() => {});
-		if (image.src === requested) image.classList.add('loaded');
+		if (image.src !== requested) return;
+		image.classList.add('loaded');
+		if (image.classList.contains('upgraded')) image.classList.add('sharp');
 	}
 
+	// 预取过、插进来时已经下载完的图不会再触发 load。
 	function showIfCached(image: HTMLImageElement) {
-		if (!image.complete || image.naturalWidth === 0) return;
-		image.classList.add('instant');
-		reveal(image);
+		if (image.complete && image.naturalWidth > 0) reveal(image);
 	}
 
 	// 页面中线所在的那一页算当前页。
@@ -718,12 +720,14 @@
 				ontouchend={touchEnd}
 			>
 				{#each visible as index (index)}
-					<!-- 大图下载完之前先用模糊的缩略图垫底，加载完由模糊变清晰。 -->
+					<!-- 大图下载并解码完之前用缩略图垫底；放大换原图时垫的是缩小的图。 -->
 					<img
 						class="page"
 						class:half={visible.length === 2}
+						class:upgraded={upgraded.has(index)}
 						src={src(index)}
-						style:background-image="url({pages[index].thumbnail_url})"
+						style:background-image="url({(upgraded.has(index) && variantUrl(index)) ||
+							pages[index].thumbnail_url})"
 						onload={(event) => reveal(event.currentTarget as HTMLImageElement)}
 						onerror={(event) => fallback(event, index)}
 						{@attach showIfCached}
@@ -1085,31 +1089,20 @@
 		width: auto;
 		height: auto;
 		object-fit: contain;
-		transition: filter 0.35s ease-out;
-	}
-
-	/* 没加载完时只显示模糊的缩略图背景：图片内容移出框外（img 会裁掉框外的内容），
-	   免得边下载边一截一截地画出来。加载完换上图片，模糊在过渡里退掉。 */
-	.page:not(:global(.loaded)) {
 		background-position: center;
 		background-repeat: no-repeat;
 		background-size: contain;
+	}
+
+	/* 没加载完时只显示缩略图背景：图片内容移出框外（img 会裁掉框外的内容），
+	   免得边下载边一截一截地画出来。 */
+	.page:not(:global(.loaded)) {
 		object-position: -100000px 0;
-		filter: blur(10px);
 	}
 
-	.page:global(.loaded) {
+	.page:global(.loaded):not(.upgraded),
+	.page:global(.sharp) {
 		background-image: none !important;
-	}
-
-	.page:global(.instant) {
-		transition: none;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.page {
-			transition: none;
-		}
 	}
 
 	.page.half {
