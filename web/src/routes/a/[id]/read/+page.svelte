@@ -17,6 +17,7 @@
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
 	import ThemePicker from '#lib/ThemePicker.svelte';
+	import { NO_ZOOM, panBy, zoomAt, type Zoom } from '#lib/zoom.ts';
 
 	// 滚动模式下页面不会比这个宽，宽屏上两侧留空。
 	const SCROLL_MAX_WIDTH = 960;
@@ -445,10 +446,75 @@
 			: (event.clientX - box.left) / box.width;
 	}
 
+	// 电脑上放大看一屏：Ctrl+滚轮（触控板两指张开时浏览器也发这个）以鼠标为中心缩放，
+	// + / - / 0 键缩放和还原，放大后拖动或滚轮平移。只在整页的翻页模式里，翻页时还原。
+	// 手机和 iPad（含接了键盘的）用浏览器自己的两指缩放：单指拖动、滑动翻页和放大换原图都按
+	// 浏览器的缩放判断。转 90 度也只在触屏设备上有。
+	let zoom = $state<Zoom>(NO_ZOOM);
+	let zoomable = $derived(!touchDevice && mode === 'paged' && !fitWidth);
+	let zoomed = $derived(zoom.scale > 1);
+	let drag: { x: number; y: number } | null = $state(null);
+	// 这次按下后拖动过，松开时的点击不算点按。
+	let panned = false;
+
+	$effect(() => {
+		void spreadIndex;
+		void zoomable;
+		void stageWidth;
+		void stageHeight;
+		zoom = NO_ZOOM;
+	});
+
+	function zoomTo(factor: number, px = stageWidth / 2, py = stageHeight / 2) {
+		zoom = zoomAt(zoom, factor, px, py, stageWidth, stageHeight);
+	}
+
+	// 滚轮监听要能 preventDefault，所以不用 onwheel 属性，自己加一个非 passive 的。
+	function wheelZoom(node: HTMLElement) {
+		const onWheel = (event: WheelEvent) => {
+			if (!zoomable) return;
+			// 按行滚动的鼠标（Firefox）每格约 16 像素。
+			const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+			if (event.ctrlKey) {
+				event.preventDefault();
+				const box = stage?.getBoundingClientRect();
+				const px = event.clientX - (box?.left ?? 0);
+				const py = event.clientY - (box?.top ?? 0);
+				zoomTo(Math.exp(-event.deltaY * unit * 0.002), px, py);
+			} else if (zoomed) {
+				event.preventDefault();
+				// Shift+滚轮横向移动，有的浏览器仍然只给 deltaY。
+				const dx = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX;
+				const dy = event.shiftKey && event.deltaX === 0 ? 0 : event.deltaY;
+				zoom = panBy(zoom, -dx * unit, -dy * unit, stageWidth, stageHeight);
+			}
+		};
+		node.addEventListener('wheel', onWheel, { passive: false });
+		return () => node.removeEventListener('wheel', onWheel);
+	}
+
+	function pointerDown(event: PointerEvent) {
+		panned = false;
+		if (!zoomed || event.pointerType !== 'mouse' || event.button !== 0) return;
+		drag = { x: event.clientX, y: event.clientY };
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+	}
+
+	function pointerMove(event: PointerEvent) {
+		if (!drag) return;
+		const dx = event.clientX - drag.x;
+		const dy = event.clientY - drag.y;
+		if (Math.abs(dx) + Math.abs(dy) > 0) panned = true;
+		zoom = panBy(zoom, dx, dy, stageWidth, stageHeight);
+		drag = { x: event.clientX, y: event.clientY };
+	}
+
 	// 两侧三分之一翻页，中间在全屏时叫出或收起底栏。刚滑动翻过页时浏览器可能还补一次点击，忽略它。
+	// 放大时点两侧不翻页，免得拖动看图时误翻。
 	function tap(event: MouseEvent) {
-		if (swiped) return;
+		if (swiped || panned) return;
 		const x = across(event);
+		if (zoomed && (x <= 1 / 3 || x >= 2 / 3)) return;
 		if (x > 1 / 3 && x < 2 / 3) {
 			if (immersive) overlay = !overlay;
 			return;
@@ -518,6 +584,20 @@
 			event.preventDefault();
 			return;
 		}
+		if (zoomable && !event.altKey && !event.metaKey) {
+			// Ctrl 加这几个键本来是浏览器缩放整个网页，在这里页面只会缩在一屏里不变大，所以接过来。
+			const factor: Record<string, number> = { '+': 1.5, '=': 1.5, '-': 1 / 1.5 };
+			if (factor[event.key]) {
+				zoomTo(factor[event.key]);
+				event.preventDefault();
+				return;
+			}
+			if (event.key === '0') {
+				zoom = NO_ZOOM;
+				event.preventDefault();
+				return;
+			}
+		}
 		const rtl = prefs.direction === 'rtl';
 		switch (event.key) {
 			case 'ArrowLeft':
@@ -534,12 +614,14 @@
 				advance(-1);
 				break;
 			case 'ArrowDown':
-				if (!fitWidth) return;
-				scrollWithin(1, 0.2);
+				if (zoomed) zoom = panBy(zoom, 0, -stageHeight * 0.2, stageWidth, stageHeight);
+				else if (fitWidth) scrollWithin(1, 0.2);
+				else return;
 				break;
 			case 'ArrowUp':
-				if (!fitWidth) return;
-				scrollWithin(-1, 0.2);
+				if (zoomed) zoom = panBy(zoom, 0, stageHeight * 0.2, stageWidth, stageHeight);
+				else if (fitWidth) scrollWithin(-1, 0.2);
+				else return;
 				break;
 			default:
 				return;
@@ -728,10 +810,18 @@
 				class="paged"
 				class:rtl={prefs.direction === 'rtl'}
 				class:fit-width={fitWidth}
+				class:zoomed
+				class:dragging={drag !== null}
+				style:transform={zoomed ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` : null}
 				bind:this={pagedView}
 				onclick={tap}
 				ontouchstart={touchStart}
 				ontouchend={touchEnd}
+				onpointerdown={pointerDown}
+				onpointermove={pointerMove}
+				onpointerup={() => (drag = null)}
+				onpointercancel={() => (drag = null)}
+				{@attach wheelZoom}
 			>
 				<!-- 点击和滑动由外面这层处理，翻页动画播放时照样能接着翻。新旧两屏叠在一起各自滑动。
 					转屏等重新排版时不播放：turnSign 在这一屏滑进来以后清零。 -->
@@ -755,6 +845,7 @@
 								onerror={(event) => fallback(event, index)}
 								{@attach showIfCached}
 								decoding="async"
+								draggable="false"
 								width={pages[index].width}
 								height={pages[index].height}
 								alt="第 {index + 1} 页"
@@ -763,6 +854,11 @@
 					</div>
 				{/key}
 			</div>
+			{#if zoomed}
+				<button class="zoom-badge" onclick={() => (zoom = NO_ZOOM)} aria-label="还原大小">
+					{Math.round(zoom.scale * 100)}%<Icon name="close" />
+				</button>
+			{/if}
 		{:else}
 			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 			<div
@@ -1097,6 +1193,8 @@
 		position: relative;
 		flex: 1;
 		min-height: 0;
+		/* 放大后超出图片区域的部分不能盖到工具栏上。 */
+		overflow: hidden;
 	}
 
 	/* 翻页动画时新旧两屏叠在这个框里滑动，裁掉露在外面的部分。 */
@@ -1112,6 +1210,41 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+	}
+
+	.paged {
+		transform-origin: 0 0;
+	}
+
+	.paged.zoomed {
+		cursor: grab;
+	}
+
+	.paged.dragging {
+		cursor: grabbing;
+	}
+
+	.zoom-badge {
+		position: absolute;
+		right: 0.75rem;
+		bottom: 0.75rem;
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.3rem 0.5rem 0.3rem 0.7rem;
+		border: none;
+		border-radius: 999px;
+		background: rgb(0 0 0 / 0.65);
+		color: #fff;
+		font: inherit;
+		font-size: 0.85rem;
+		font-variant-numeric: tabular-nums;
+		cursor: pointer;
+	}
+
+	.zoom-badge :global(svg) {
+		width: 1rem;
+		height: 1rem;
 	}
 
 	/* 从右往左读时，第一页放在右边。 */
