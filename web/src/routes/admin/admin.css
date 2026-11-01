@@ -266,24 +266,188 @@
 	color: var(--muted);
 }
 
-/* 设置页一项一行：左边名字，右边按钮或输入框。 */
+/* 设置页一项一行：左边名字，右边按钮或输入框，问号展开的说明占满下一行。 */
 .adm-option {
 	display: grid;
 	grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr);
 	align-items: center;
-	gap: 0.75rem;
+	gap: 0.4rem 0.75rem;
 	padding: 0.6rem 0;
 	border-top: 1px solid var(--border);
+}
+
+/* 控件有几行时（配色）名字对齐第一行。单行控件高 2.5rem，名字也占这么高，看起来仍是居中。 */
+.adm-option-name {
+	align-self: start;
+	display: flex;
+	align-items: center;
+	min-height: 2.5rem;
+	min-width: 0;
+}
+
+.adm-option-control {
+	min-width: 0;
+}
+
+.adm-help-text {
+	grid-column: 1 / -1;
+	flex-basis: 100%;
+}
+
+/* 问号按钮的点击区域是 2.5rem 见方，用负边距抵掉，不把一行撑高。 */
+.adm-help {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 2.5rem;
+	height: 2.5rem;
+	margin: -0.6rem -0.4rem;
+	padding: 0;
+	border: none;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+.adm-help:hover,
+.adm-help[aria-expanded='true'] {
+	color: var(--link);
+}
+
+.adm-card-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0 0.5rem;
+}
+
+.adm-card-head .adm-help {
+	margin-left: -0.6rem;
+}
+
+.adm-check-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: 0.4rem;
+}
+
+.adm-check {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.85rem;
+}
+
+.adm-check input {
+	width: 1.1rem;
+	height: 1.1rem;
+	accent-color: var(--accent);
+}
+
+.adm-input {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 0.4rem 0.6rem;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--sunken);
+	color: var(--fg);
+	font-size: 0.85rem;
+}
+
+/* 少用的设置收在“高级”里，元数据的每个来源也是一张折叠起来的卡片。 */
+.adm-advanced,
+.adm-source {
+	border-top: 1px solid var(--border);
+}
+
+.adm-advanced > summary,
+.adm-source > summary {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0 0.6rem;
+	min-height: 2.5rem;
+	cursor: pointer;
+	list-style: none;
+}
+
+.adm-advanced > summary::-webkit-details-marker,
+.adm-source > summary::-webkit-details-marker {
+	display: none;
+}
+
+.adm-advanced > summary::before,
+.adm-source > summary::before {
+	content: '';
+	width: 0.45rem;
+	height: 0.45rem;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 120ms ease;
+}
+
+.adm-advanced[open] > summary::before,
+.adm-source[open] > summary::before {
+	transform: rotate(45deg);
+}
+
+.adm-advanced > summary {
+	color: var(--muted);
+	font-size: 0.85rem;
+}
+
+.adm-source > summary .name {
+	font-weight: 600;
+	font-size: 0.9rem;
+}
+
+/* 折叠内容在 ::details-content 里，details 上的 flex 管不到它们，用相邻间距。 */
+.adm-source > :not(summary) + :not(summary) {
+	margin-top: 0.5rem;
+}
+
+.adm-advanced > .adm-check-row + .adm-check-row {
+	margin-top: 0.3rem;
+}
+
+.adm-source[open] {
+	padding-bottom: 0.6rem;
+}
+
+.adm-advanced[open] {
+	padding-bottom: 0.3rem;
+}
+
+a.adm-tab {
+	display: inline-flex;
+	align-items: center;
+	color: inherit;
+	text-decoration: none;
+}
+
+.adm-tab[aria-current='page'] {
+	background: var(--fg);
+	border-color: var(--fg);
+	color: var(--bg);
 }
 
 /* 手机上两栏会把按钮和输入框挤到半屏宽，改成名字在上、控件在下。 */
 @media (max-width: 600px) {
 	.adm-option {
 		grid-template-columns: minmax(0, 1fr);
-		gap: 0.45rem;
 	}
 
 	.adm-tab {
+		min-height: 2.5rem;
+	}
+
+	/* 整行都是勾选框的点击区域，行高给够手指点。 */
+	.adm-check {
 		min-height: 2.5rem;
 	}
 }

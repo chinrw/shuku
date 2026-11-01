@@ -15,6 +15,8 @@
 		type DeviceToken
 	} from '#lib/auth.ts';
 	import { ago } from '#lib/time.ts';
+	import CardHead from './CardHead.svelte';
+	import Setting from './Setting.svelte';
 
 	let status = $state<AuthStatus | null>(null);
 	let tokens = $state<DeviceToken[]>([]);
@@ -96,15 +98,16 @@
 </script>
 
 <section class="adm-card">
-	<h2>设备令牌</h2>
-	<p class="adm-note">
-		每台设备一个令牌，可以单独吊销。agent 通过 /mcp 访问时总要带令牌（Authorization: Bearer）；
-		网页端和 API 默认不要，打开下面的开关以后也要。
-	</p>
+	<CardHead
+		title="设备令牌"
+		help="每台设备一个令牌，可以单独吊销。agent 通过 /mcp 访问时总要带令牌（Authorization: Bearer）；网页端和 API 默认不要，打开“网页端也需要令牌”以后也要。"
+	/>
 	{#if error}<p class="error" role="alert">{error}</p>{/if}
 	{#if status}
-		<div class="adm-option">
-			<span class="adm-label">网页端也需要令牌</span>
+		<Setting
+			label="网页端也需要令牌"
+			help="打开后，网页端和 API 也要先用令牌登录。要先在这台设备上登录才能打开，免得把自己挡在外面。"
+		>
 			<div class="adm-tabs" role="group" aria-label="网页端也需要令牌">
 				<button
 					class="adm-tab"
@@ -119,9 +122,8 @@
 					onclick={() => run(() => setRequireToken(false))}>关</button
 				>
 			</div>
-		</div>
-		<div class="adm-option">
-			<span class="adm-label">这台设备</span>
+		</Setting>
+		<Setting label="这台设备">
 			<div class="device">
 				{#if status.device}
 					已用“{status.device.name}”的令牌登录
@@ -130,7 +132,7 @@
 					没有登录{#if !status.require_token}，要打开开关先在这台设备上登录{/if}
 				{/if}
 			</div>
-		</div>
+		</Setting>
 	{/if}
 
 	{#if created}
@@ -182,6 +184,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.75rem;
+		font-size: 0.85rem;
 	}
 
 	.created {

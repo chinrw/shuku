@@ -4,6 +4,7 @@
 	import { bytes, clock, count, duration, percent } from '#lib/format.ts';
 	import Icon from '#lib/Icon.svelte';
 	import ScanProgress from '#lib/ScanProgress.svelte';
+	import MetadataQueues from './MetadataQueues.svelte';
 
 	let status = $derived(adminStatus.current);
 	let pending = $state<string | null>(null);
@@ -153,6 +154,8 @@
 				<button class="adm-button danger" disabled={pending !== null} onclick={clear}>清空缓存…</button>
 			</div>
 		</section>
+
+		<MetadataQueues />
 	</div>
 {/if}
 
