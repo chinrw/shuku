@@ -1097,8 +1097,23 @@
 				<div class="detail-top">
 					<div class="actions">
 						<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
-						<button onclick={() => closePanel(() => jump(0))}>回到第一页</button>
-						<button onclick={() => closePanel(() => jump(pages.length - 1))}>最后一页</button>
+						<!-- 和工具栏两端的按钮一样按阅读方向：从右往左读时左边是最后一页。 -->
+						<button
+							class="jump"
+							onclick={() => closePanel(() => jump(rtlPaged ? pages.length - 1 : 0))}
+							aria-label={rtlPaged ? '最后一页' : '回到第一页'}
+							title={rtlPaged ? '最后一页' : '回到第一页'}
+						>
+							<Icon name="chevrons-left" size={18} />
+						</button>
+						<button
+							class="jump"
+							onclick={() => closePanel(() => jump(rtlPaged ? 0 : pages.length - 1))}
+							aria-label={rtlPaged ? '回到第一页' : '最后一页'}
+							title={rtlPaged ? '回到第一页' : '最后一页'}
+						>
+							<Icon name="chevrons-right" size={18} />
+						</button>
 						<FinishedButton archive={book.id} progress={latestProgress} onchange={noteProgress} />
 						<a href="/a/{book.id}">相关作品</a>
 						{#if book.series}
@@ -1623,6 +1638,12 @@
 		font: inherit;
 		font-size: 0.85rem;
 		cursor: pointer;
+	}
+
+	.actions button.jump {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.4rem 0.5rem;
 	}
 
 	@media (max-width: 599px) {
