@@ -112,9 +112,13 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem 0.75rem;
-		max-width: 1200px;
-		width: 100%;
-		margin: 0 auto;
+	}
+
+	/* 电脑上和书库内容（窗口的 90%）对齐。 */
+	@media (min-width: 1024px) {
+		.bar {
+			padding-inline: calc(5% + 1.25rem);
+		}
 	}
 
 	.all {

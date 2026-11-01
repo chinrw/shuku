@@ -846,15 +846,16 @@
 		border-bottom: 1px solid var(--border);
 	}
 
-	/* 电脑上书库内容居中，宽度上限 1200px；顶栏的背景占满宽，里面的内容和下面对齐。 */
+	/* 电脑上书库内容居中，宽度是窗口的 90%，和 LRR 默认的 Modern 主题一样不设上限；
+	   顶栏的背景占满宽，里面的内容和下面对齐。 */
 	@media (min-width: 1024px) {
 		.page {
-			max-width: 1200px;
+			max-width: 90%;
 			margin: 0 auto;
 		}
 
 		header {
-			padding-inline: max(1.25rem, calc((100% - 1200px) / 2 + 1.25rem));
+			padding-inline: calc(5% + 1.25rem);
 		}
 	}
 
@@ -1129,7 +1130,7 @@
 		padding: 0.75rem;
 	}
 
-	/* 内容宽度上限 1200px（见 .page），和 LRR 一样一排五本。 */
+	/* 内容宽度是窗口的 90%（见 .page），一排的本数随窗口变：1280 宽 5 本，1920 宽 7 本，2560 宽 10 本。 */
 	@media (min-width: 1024px) {
 		.grid {
 			grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
