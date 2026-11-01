@@ -62,11 +62,19 @@
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+		max-width: 100%;
 		color: var(--muted);
 		font-size: 0.85rem;
 	}
 
+	/* 窄的时候缩下拉框，不把“深色时用”挤成一字一行。 */
+	label span {
+		flex: none;
+	}
+
 	select {
+		min-width: 0;
+		max-width: 100%;
 		padding: 0.3rem 0.5rem;
 		border: 1px solid var(--border);
 		border-radius: 6px;

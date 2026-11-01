@@ -119,7 +119,7 @@
 			只扫 zip、cbz 和散放图片的文件夹，别的文件只计数。存在服务端，所有设备共用，下一次扫描起生效。
 		</p>
 		{#if scan}
-			<div class="option">
+			<div class="adm-option">
 				<span class="adm-label">自动扫描新文件</span>
 				<div class="adm-tabs" role="group" aria-label="自动扫描新文件">
 					<button
@@ -139,7 +139,7 @@
 			<p class="adm-note">
 				监视书库目录，有文件变化后安静 10 秒自动扫描。书库在网络盘上监视不到变化时关掉，改用下面的定时扫描。
 			</p>
-			<div class="option">
+			<div class="adm-option">
 				<span class="adm-label">隐藏目录</span>
 				<div class="adm-tabs" role="group" aria-label="隐藏目录">
 					<button
@@ -158,7 +158,7 @@
 			</div>
 			<p class="adm-note">以 . 开头的目录和文件通常是下载工具的临时目录，往往只有那个程序自己能读。</p>
 			<form
-				class="option"
+				class="adm-option"
 				onsubmit={(event) => {
 					event.preventDefault();
 					changeScan({ extra_skip: split(skipText) });
@@ -177,7 +177,7 @@
 				</div>
 			</form>
 			<p class="adm-note">目录或文件名，逗号分隔，可以用 * 通配，不分大小写。对文件夹里的单张图片不起作用，要跳过整本就写文件夹名。跳过的地方已入库的书保持原样。</p>
-			<div class="option">
+			<div class="adm-option">
 				<span class="adm-label">定时扫描</span>
 				<div class="adm-tabs" role="group" aria-label="定时扫描">
 					{#each intervals as [hours, label] (hours)}
@@ -191,7 +191,7 @@
 				</div>
 			</div>
 			<p class="adm-note">从上一次扫描结束算起，给文件监视漏掉的变化兜底。服务启动时总会扫描一次。</p>
-			<div class="option">
+			<div class="adm-option">
 				<span class="adm-label">系列</span>
 				<div class="adm-tabs" role="group" aria-label="系列">
 					<button
@@ -218,7 +218,7 @@
 		<h2>阅读和访问</h2>
 		{#if general}
 			<form
-				class="option"
+				class="adm-option"
 				onsubmit={(event) => {
 					event.preventDefault();
 					changeGeneral({ name: nameText });
@@ -231,7 +231,7 @@
 				</div>
 			</form>
 			<p class="adm-note">显示在书库页左上角。同一台机器上开了几个实例时，桌面和手机客户端用它区分服务器。</p>
-			<div class="option">
+			<div class="adm-option">
 				<span class="adm-label">条漫判断</span>
 				<div class="adm-tabs" role="group" aria-label="条漫判断">
 					<button
@@ -250,7 +250,7 @@
 			</div>
 			<p class="adm-note">按页面宽高比判断条漫并改用上下连续滚动。关闭后只认阅读器里手动打开的条漫开关。</p>
 			<form
-				class="option"
+				class="adm-option"
 				onsubmit={(event) => {
 					event.preventDefault();
 					changeGeneral({ allowed_hosts: split(hostsText) });
@@ -300,11 +300,11 @@
 	<section class="adm-card">
 		<h2>这台设备</h2>
 		<p class="adm-note">存在浏览器里，只影响当前设备。</p>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label picker-label">配色</span>
 			<ThemePicker />
 		</div>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">滑动动画</span>
 			<div class="adm-tabs" role="group" aria-label="滑动动画">
 				{#each MOTIONS as [key, label] (key)}
@@ -312,7 +312,7 @@
 				{/each}
 			</div>
 		</div>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">书库视图</span>
 			<div class="adm-tabs" role="group" aria-label="书库视图">
 				{#each views as [key, label] (key)}
@@ -320,7 +320,7 @@
 				{/each}
 			</div>
 		</div>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">阅读方式</span>
 			<div class="adm-tabs" role="group" aria-label="阅读方式">
 				{#each modes as [key, label] (key)}
@@ -328,7 +328,7 @@
 				{/each}
 			</div>
 		</div>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">翻页方向</span>
 			<div class="adm-tabs" role="group" aria-label="翻页方向">
 				{#each directions as [key, label] (key)}
@@ -336,7 +336,7 @@
 				{/each}
 			</div>
 		</div>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">横屏双页</span>
 			<div class="adm-tabs" role="group" aria-label="横屏双页">
 				<button class="adm-tab" aria-pressed={prefs.spread} onclick={() => set('spread', true)}>开</button>
@@ -367,14 +367,5 @@
 	.picker-label {
 		align-self: start;
 		padding-top: 0.35rem;
-	}
-
-	.option {
-		display: grid;
-		grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr);
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.6rem 0;
-		border-top: 1px solid var(--border);
 	}
 </style>

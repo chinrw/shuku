@@ -172,8 +172,14 @@
 		margin: 0 0 1rem;
 	}
 
-	/* 窄屏时导航变成顶部一排可横滑的分区标签。 */
+	/* 窄屏时导航变成顶部的几排分区标签。 */
 	@media (max-width: 800px) {
+		/* 导航和内容各占一行。不靠顶部对齐的话，内容短的页面里 min-height
+		   多出的高度会分给导航那一行，导航下面空出一大块。 */
+		.console {
+			align-content: flex-start;
+		}
+
 		nav {
 			max-width: none;
 			flex-basis: 100%;
@@ -186,14 +192,13 @@
 
 		.links {
 			flex-direction: row;
-			overflow-x: auto;
+			flex-wrap: wrap;
 			gap: 0.5rem;
-			padding-bottom: 0.2rem;
 		}
 
 		.links a {
 			flex: none;
-			min-height: 2.25rem;
+			min-height: 2.5rem;
 			padding: 0 0.85rem;
 			border: 1px solid var(--chip-border);
 			border-radius: 999px;

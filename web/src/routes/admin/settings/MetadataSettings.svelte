@@ -359,4 +359,11 @@
 		color: var(--danger);
 		font-size: 0.8rem;
 	}
+
+	/* 手机上整行都是勾选框的点击区域，行高给够手指点。 */
+	@media (max-width: 600px) {
+		.check {
+			min-height: 2.5rem;
+		}
+	}
 </style>

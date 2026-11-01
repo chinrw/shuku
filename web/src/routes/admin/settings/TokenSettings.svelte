@@ -103,7 +103,7 @@
 	</p>
 	{#if error}<p class="error" role="alert">{error}</p>{/if}
 	{#if status}
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">网页端也需要令牌</span>
 			<div class="adm-tabs" role="group" aria-label="网页端也需要令牌">
 				<button
@@ -120,7 +120,7 @@
 				>
 			</div>
 		</div>
-		<div class="option">
+		<div class="adm-option">
 			<span class="adm-label">这台设备</span>
 			<div class="device">
 				{#if status.device}
@@ -177,15 +177,6 @@
 </section>
 
 <style>
-	.option {
-		display: grid;
-		grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr);
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.6rem 0;
-		border-top: 1px solid var(--border);
-	}
-
 	.device {
 		display: flex;
 		flex-wrap: wrap;

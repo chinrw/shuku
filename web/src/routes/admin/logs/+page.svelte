@@ -150,7 +150,9 @@
 
 	@media (max-width: 600px) {
 		.line {
-			grid-template-columns: auto auto;
+			grid-template-columns: auto minmax(0, 1fr);
+			row-gap: 0.1rem;
+			padding: 0.4rem 1rem;
 		}
 
 		.message {
