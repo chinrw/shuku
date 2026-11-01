@@ -248,6 +248,16 @@
 		return Math.min(across, (stageHeight * width) / height);
 	}
 
+	/**
+	 * 整页模式里图片的 CSS 宽度。比屏幕小的图也放大到占满（全屏后跟着变大），只用 CSS 的
+	 * max-width 和 max-height 时只缩不放。适应宽度时由 CSS 占满宽度；坏页不知道宽高比。
+	 */
+	function fittedWidth(index: number): string | null {
+		const { width, height } = pages[index];
+		if (fitWidth || width === 0 || height === 0) return null;
+		return `${Math.floor(displayWidth(index))}px`;
+	}
+
 	/** 按屏幕该取的缩小的图；不该缩（电脑、设成原图、图本来就不大、坏页）时是 null。 */
 	function variantUrl(index: number): string | null {
 		const page = pages[index];
@@ -869,6 +879,7 @@
 								class:half={visible.length === 2}
 								class:upgraded={upgraded.has(index)}
 								src={src(index)}
+								style:width={fittedWidth(index)}
 								style:background-image="url({(upgraded.has(index) && variantUrl(index)) ||
 									pages[index].thumbnail_url})"
 								onload={(event) => reveal(event.currentTarget as HTMLImageElement)}
