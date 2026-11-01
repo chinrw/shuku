@@ -361,22 +361,26 @@
 	// 当前这屏抢带宽，所以等当前这屏加载完，再一张一张地取；下一屏不太大的图下载完顺便解码，
 	// 翻过去马上能显示，其余的只下载不解码，免得手机上同时占着几张大图解码后的内存。
 	// 解码不等，下一张接着下载：等解码完再下载会让网络空着，大图上能把速率拉低一半以上。
-	// 翻走时取消还没取完的。
+	// 按屏幕取的图只有一两 MB，但服务端第一次生成每张要 0.2 到 0.4 秒，所以多取一屏；
+	// 要取的全是缩小的图时同时取两张，服务端的几个核一起生成。动图要下载完才知道服务端
+	// 原样返回了它，这时两张原图会分着带宽下载，只是下一页晚到一些。翻走时取消还没取完的。
 	$effect(() => {
 		if (mode !== 'paged') return;
 		const next = spreads[spreadIndex + 1] ?? [];
+		const ahead = variants ? [2, 3] : [2];
 		const queue = [
 			...next.map((index) => ({ index, decode: true })),
-			...(spreads[spreadIndex + 2] ?? []).map((index) => ({ index, decode: false })),
+			...ahead
+				.flatMap((offset) => spreads[spreadIndex + offset] ?? [])
+				.map((index) => ({ index, decode: false })),
 			...(spreads[spreadIndex - 1] ?? []).map((index) => ({ index, decode: false }))
 		];
 		let cancelled = false;
 		const started: HTMLImageElement[] = [];
-		(async () => {
-			const shown = [...(pagedView?.querySelectorAll('img') ?? [])];
-			await Promise.all(shown.map(settled));
-			for (const { index, decode } of queue) {
-				if (cancelled) return;
+		let taken = 0;
+		const worker = async () => {
+			while (!cancelled && taken < queue.length) {
+				const { index, decode } = queue[taken++];
 				const image = new Image();
 				started.push(image);
 				image.src = src(index);
@@ -387,6 +391,12 @@
 					image.decode().catch(() => {});
 				}
 			}
+		};
+		(async () => {
+			const shown = [...(pagedView?.querySelectorAll('img') ?? [])];
+			await Promise.all(shown.map(settled));
+			const allVariants = untrack(() => queue.every(({ index }) => src(index) !== pages[index].url));
+			await Promise.all(Array.from({ length: allVariants ? 2 : 1 }, worker));
 		})();
 		return () => {
 			cancelled = true;

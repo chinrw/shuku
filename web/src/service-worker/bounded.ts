@@ -46,7 +46,8 @@ export class BoundedCache {
 		}
 		if (size > budget * MAX_ENTRY) return;
 		// 存入、计数和删除整个排队：并发替换同一个地址时，各自读到的旧大小才不会重复扣减。
-		// 阅读器一次只预取一张图，排队不会让多少响应积在内存里。
+		// 阅读器一次最多预取两张图，除了动图，同时取两张时都是一两 MB 的缩小的图，排队不会
+		// 让多少响应积在内存里。
 		return this.#enqueue(() => (current() ? this.#store(url, response, size, budget) : undefined));
 	}
 
