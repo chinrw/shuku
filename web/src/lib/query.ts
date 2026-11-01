@@ -47,6 +47,37 @@ export function lastTerm(input: string): {
 	return { head: input.slice(0, cut), text, excluded, done };
 }
 
+/**
+ * 最后一个词条里空格后面的最后一个词，供补全的第二步使用。服务端只按逗号分词，
+ * 但 LRR 的补全按最后一个逗号、空格后面的词查，习惯 LRR 的人会用空格隔开标签。
+ * 词条里有引号、已经收尾，或者里面没有空格时是 null。
+ */
+export function lastWord(
+	input: string
+): { before: string; text: string; excluded: boolean } | null {
+	const term = lastTerm(input);
+	const rest = input.slice(term.head.length).trim();
+	// 词条里有没转义的引号时，空格可能在引号里，不能拆。
+	if (term.done || /(^|[^\\])"/.test(rest) || !/\s/.test(rest)) return null;
+	const start = input.search(/\S+$/);
+	if (start < 0) return null;
+	const word = input.slice(start);
+	const excluded = word.startsWith('-');
+	const text = (excluded ? word.slice(1) : word).replace(/\\(.)/g, '$1');
+	if (text === '') return null;
+	return { before: input.slice(0, start).trimEnd(), text, excluded };
+}
+
+/**
+ * 用补全选中的标签替换最后一个词，前面的空格换成逗号，让它成为单独的词条。
+ * 只在 `lastWord` 不是 null 时调用。
+ */
+export function completeWord(input: string, tag: string): string {
+	const word = lastWord(input);
+	if (!word) return completeTerm(input, tag);
+	return `${word.before}, ${word.excluded ? '-' : ''}${tagTerm('', tag)}, `;
+}
+
 /** 用补全选中的标签替换最后一个词条，保留排除标记，末尾留好逗号方便接着输入。 */
 export function completeTerm(input: string, tag: string): string {
 	const { head, excluded } = lastTerm(input);

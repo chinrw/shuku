@@ -32,7 +32,13 @@
 	import { defaultOrder, filterLabel, libraryHref, SORTS, type UrlFilter } from '#lib/libraryUrl.ts';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { onDestroy, untrack } from 'svelte';
-	import { completeTerm, lastTerm, stripTrailingSeparator } from '#lib/query.ts';
+	import {
+		completeTerm,
+		completeWord,
+		lastTerm,
+		lastWord,
+		stripTrailingSeparator
+	} from '#lib/query.ts';
 	import { byline, formatDate, namespaceClass, rowTags } from '#lib/tags.ts';
 
 	let { data } = $props();
@@ -190,8 +196,11 @@
 	}
 
 	// 搜索框补全：停止输入一小会儿后按最后一个词条查标签，新请求发出时取消旧请求。
+	// 整个词条查不到、里面又有空格时，像 LRR 一样改按空格后面的最后一个词查，
+	// 选中后把那个空格换成逗号（`byWord`）。
 	const SUGGEST_DELAY = 120;
 	let suggestions = $state<TagCount[]>([]);
+	let byWord = false;
 	let active = $state(-1);
 	let suggestTimer: ReturnType<typeof setTimeout> | undefined;
 	let suggestAbort: AbortController | undefined;
@@ -211,7 +220,11 @@
 		suggestAbort = abort;
 		suggestTimer = setTimeout(async () => {
 			try {
-				suggestions = await suggestTags(term.text, abort.signal);
+				let found = await suggestTags(term.text, abort.signal);
+				const word = lastWord(query);
+				byWord = found.length === 0 && word !== null;
+				if (byWord && word) found = await suggestTags(word.text, abort.signal);
+				suggestions = found;
 			} catch (error) {
 				// 补全失败不影响搜索本身，被新输入取消的请求也走这里。
 				if (!abort.signal.aborted) console.warn('标签补全失败', error);
@@ -220,7 +233,7 @@
 	}
 
 	function pick(tag: string) {
-		query = completeTerm(query, tag);
+		query = byWord ? completeWord(query, tag) : completeTerm(query, tag);
 		closeSuggestions();
 	}
 

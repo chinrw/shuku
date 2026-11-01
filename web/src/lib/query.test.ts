@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { addTerm, completeTerm, lastTerm, stripTrailingSeparator, tagTerm } from './query';
+import {
+	addTerm,
+	completeTerm,
+	completeWord,
+	lastTerm,
+	lastWord,
+	stripTrailingSeparator,
+	tagTerm
+} from './query';
 
 describe('tagTerm', () => {
 	it('quotes namespaced tags for an exact match', () => {
@@ -53,6 +61,32 @@ describe('lastTerm', () => {
 		expect(lastTerm('artist:b\\$').done).toBe(false);
 		expect(lastTerm('"artist:b\\"').done).toBe(false);
 		expect(lastTerm('"artist:b\\\\"').done).toBe(true);
+	});
+});
+
+describe('lastWord', () => {
+	it('takes the word after the last space of the last term', () => {
+		expect(lastWord('"artist:a", big -lo')).toEqual({
+			before: '"artist:a", big',
+			text: 'lo',
+			excluded: true
+		});
+	});
+
+	it('is null without a space, for quoted or finished terms and after a trailing space', () => {
+		expect(lastWord('a, lo')).toBeNull();
+		expect(lastWord('"long ha')).toBeNull();
+		expect(lastWord('alpha "long ha')).toBeNull();
+		expect(lastWord('- "long ha')).toBeNull();
+		expect(lastWord('alpha lo$')).toBeNull();
+		expect(lastWord('alpha lo ')).toBeNull();
+	});
+});
+
+describe('completeWord', () => {
+	it('turns the space before the word into a separator', () => {
+		expect(completeWord('alpha lo', 'long hair')).toBe('alpha, "long hair", ');
+		expect(completeWord('x, alpha -lo', 'long hair')).toBe('x, alpha, -"long hair", ');
 	});
 });
 
