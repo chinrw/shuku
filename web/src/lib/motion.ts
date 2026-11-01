@@ -1,7 +1,8 @@
 import type { TransitionConfig } from 'svelte/transition';
+import { settings } from '#lib/settings.svelte.ts';
 
 // 网页端只有两种动画：面板从屏幕边缘滑进来（遮罩同时淡入），和阅读器翻页时的左右滑动。
-// 系统设置了减少动态效果时都不播放。
+// 阅读设置里的“滑动动画”可以关掉，默认跟随系统的“减少动态效果”。
 
 /** 和 CSS 的 cubic-bezier() 相同的缓动曲线。 */
 export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x: number) => number {
@@ -24,7 +25,11 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (x:
 const easeOut = cubicBezier(0.2, 0.8, 0.2, 1);
 
 function duration(ms: number): number {
-	return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ms;
+	const motion = settings().motion;
+	if (motion === 'system') {
+		return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ms;
+	}
+	return motion === 'on' ? ms : 0;
 }
 
 // 退场中的元素由 Svelte 设成 inert，不挡点击；中途又进场时 Svelte 会复用它并取消 inert。

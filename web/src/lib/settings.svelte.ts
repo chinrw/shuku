@@ -8,6 +8,13 @@ export type Direction = 'rtl' | 'ltr';
 /** 翻页模式下整页放进屏幕，或者页宽占满屏幕、上下滚动。 */
 export type Fit = 'screen' | 'width';
 export type LibraryView = 'grid' | 'list';
+/** 面板滑入和翻页滑动：跟随系统的“减少动态效果”，或者总是播放、总是不播放。 */
+export type Motion = 'system' | 'on' | 'off';
+export const MOTIONS: [Motion, string][] = [
+	['system', '跟随系统'],
+	['on', '开'],
+	['off', '关']
+];
 /** 手机和平板上阅读器按屏幕取缩小的图（放大时换原图），或者总用原图。 */
 export type Quality = 'auto' | 'original';
 
@@ -49,6 +56,7 @@ class Settings {
 	theme = $state<ThemeChoice>('system');
 	darkTheme = $state<string>(DEFAULT_DARK);
 	lightTheme = $state<string>(DEFAULT_LIGHT);
+	motion = $state<Motion>('system');
 
 	constructor() {
 		const saved = load();
@@ -77,6 +85,7 @@ class Settings {
 		if (saved.theme === 'system' || findTheme(saved.theme)) this.theme = saved.theme;
 		if (findTheme(saved.darkTheme, 'dark')) this.darkTheme = saved.darkTheme;
 		if (findTheme(saved.lightTheme, 'light')) this.lightTheme = saved.lightTheme;
+		if (saved.motion === 'system' || saved.motion === 'on' || saved.motion === 'off') this.motion = saved.motion;
 		if (saved.webtoon && typeof saved.webtoon === 'object') {
 			for (const [id, value] of Object.entries(saved.webtoon)) {
 				if (typeof value === 'boolean') this.webtoon[Number(id)] = value;
@@ -87,7 +96,7 @@ class Settings {
 	save() {
 		const { mode, direction, fit, spread, view, groupSeries, hideFinished, webtoonWidth, webtoon } =
 			this;
-		const { sort, order, quality, wheelTurn, pageSize, theme, darkTheme, lightTheme } = this;
+		const { sort, order, quality, wheelTurn, pageSize, theme, darkTheme, lightTheme, motion } = this;
 		localStorage.setItem(
 			KEY,
 			JSON.stringify({
@@ -107,7 +116,8 @@ class Settings {
 				webtoon,
 				theme,
 				darkTheme,
-				lightTheme
+				lightTheme,
+				motion
 			})
 		);
 	}

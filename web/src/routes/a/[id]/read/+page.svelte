@@ -12,7 +12,7 @@
 	import PageGrid from '#lib/PageGrid.svelte';
 	import RelatedRow from '#lib/RelatedRow.svelte';
 	import { ProgressReporter } from '#lib/progress.ts';
-	import { settings, WEBTOON_WIDTH } from '#lib/settings.svelte.ts';
+	import { MOTIONS, settings, WEBTOON_WIDTH } from '#lib/settings.svelte.ts';
 	import { buildSpreads } from '#lib/spreads.ts';
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
@@ -1056,6 +1056,14 @@
 					{/if}
 					<span class="picker-label">配色</span>
 					<ThemePicker />
+					<span>滑动动画</span>
+					<div class="segmented">
+						{#each MOTIONS as [key, label] (key)}
+							<button class:on={prefs.motion === key} onclick={() => update(() => (prefs.motion = key))}
+								>{label}</button
+							>
+						{/each}
+					</div>
 				</div>
 			{:else}
 				<!-- 上面是标签和操作，下面是相似作品，都固定不动；中间的页面缩略图单独滚动。 -->

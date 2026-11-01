@@ -11,7 +11,13 @@
 	import MetadataSettings from './MetadataSettings.svelte';
 	import TokenSettings from './TokenSettings.svelte';
 	import ThemePicker from '#lib/ThemePicker.svelte';
-	import { settings, type Direction, type LibraryView, type ReaderMode } from '#lib/settings.svelte.ts';
+	import {
+		MOTIONS,
+		settings,
+		type Direction,
+		type LibraryView,
+		type ReaderMode
+	} from '#lib/settings.svelte.ts';
 
 	const prefs = settings();
 	let server = $derived(adminStatus.current?.server);
@@ -82,7 +88,7 @@
 		[720, '每 30 天']
 	];
 
-	function set<K extends 'view' | 'mode' | 'direction' | 'spread'>(key: K, value: (typeof prefs)[K]) {
+	function set<K extends 'view' | 'mode' | 'direction' | 'spread' | 'motion'>(key: K, value: (typeof prefs)[K]) {
 		prefs[key] = value;
 		prefs.save();
 	}
@@ -297,6 +303,14 @@
 		<div class="option">
 			<span class="adm-label picker-label">配色</span>
 			<ThemePicker />
+		</div>
+		<div class="option">
+			<span class="adm-label">滑动动画</span>
+			<div class="adm-tabs" role="group" aria-label="滑动动画">
+				{#each MOTIONS as [key, label] (key)}
+					<button class="adm-tab" aria-pressed={prefs.motion === key} onclick={() => set('motion', key)}>{label}</button>
+				{/each}
+			</div>
 		</div>
 		<div class="option">
 			<span class="adm-label">书库视图</span>
