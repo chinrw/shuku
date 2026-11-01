@@ -1,10 +1,12 @@
 //! 在控制台里改的设置，存在 SQLite 的 setting 表里。表由各功能共用，每个功能一个键、
 //! 值是那组设置的 JSON；这里有 `scan`（扫描）和 `server`（书库名、条漫判断、允许的主机名）两组。
-//! 只有书库目录、数据目录、网页目录和监听地址是启动参数。
+//! 只有书库目录、数据目录、网页目录和监听地址是启动参数。`--settings` 文件（例如 NixOS
+//! 模块生成的）在启动时把其中写到的字段当作一次控制台修改套用，没写的字段保持控制台里的值。
 
 use crate::{App, Error, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
+    path::Path,
     sync::{Arc, PoisonError},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -20,7 +22,7 @@ const MAX_ITEM_LEN: usize = 255;
 const MAX_NAME_CHARS: usize = 100;
 
 /// 一组设置：在 setting 表里的键，以及 PUT 时怎样把补丁合进去。
-pub(crate) trait Group: Clone + Default + Serialize + DeserializeOwned {
+pub(crate) trait Group: Clone + Default + PartialEq + Serialize + DeserializeOwned {
     const KEY: &'static str;
     type Patch: DeserializeOwned;
 
@@ -241,6 +243,14 @@ fn wildcard_match(pattern: &str, name: &str) -> bool {
     pattern[p..].iter().all(|&ch| ch == '*')
 }
 
+/// `--settings` 文件的内容：每组是和控制台 PUT 相同的补丁，校验也相同。
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SettingsFile {
+    scan: Option<ScanPatch>,
+    server: Option<ServerPatch>,
+}
+
 /// 两组设置一起放在 `App` 里，每次读都拿一份副本。
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Settings {
@@ -293,6 +303,10 @@ impl App {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let updated = select(&mut current).apply(patch)?;
+        // 启动时套用的设置文件多半和库里一样，不必每次都写库、记日志。
+        if updated == *select(&mut current) {
+            return Ok(updated);
+        }
         self.write(|writer| Ok(writer.set_setting(G::KEY, &updated)?))?;
         // 允许的域名等安全相关的设置也在这里改，留一条日志，控制台的日志页能看到改成了什么。
         tracing::info!(
@@ -304,6 +318,21 @@ impl App {
         drop(current);
         self.0.settings_changed.notify_one();
         Ok(updated)
+    }
+
+    /// 启动时套用设置文件。文件里写了的字段覆盖库里的值并写回库里，服务运行时仍可以在
+    /// 控制台改，下次启动再被文件盖回去；没写的字段不动。
+    pub fn apply_settings_file(&self, path: &Path) -> Result<()> {
+        let text = std::fs::read_to_string(path)?;
+        let file: SettingsFile = serde_json::from_str(&text)
+            .map_err(|error| Error::Config(format!("设置文件 {} 无效：{error}", path.display())))?;
+        if let Some(patch) = file.scan {
+            self.update_settings(patch, |all| &mut all.scan)?;
+        }
+        if let Some(patch) = file.server {
+            self.update_settings(patch, |all| &mut all.server)?;
+        }
+        Ok(())
     }
 
     /// 按设置定时在后台扫描（结束后接着补算指纹，和手动触发一样）。只在 HTTP 服务里启动；

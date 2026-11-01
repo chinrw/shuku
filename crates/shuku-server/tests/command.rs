@@ -17,6 +17,7 @@ fn command() -> Command {
         "SHUKU_DATA_DIR",
         "SHUKU_WEB_DIR",
         "SHUKU_LISTEN",
+        "SHUKU_SETTINGS",
     ] {
         command.env_remove(name);
     }

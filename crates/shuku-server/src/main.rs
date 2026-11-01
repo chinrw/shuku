@@ -37,6 +37,13 @@ struct Cli {
         help = "HTTP 监听地址"
     )]
     listen: SocketAddr,
+    #[arg(
+        long,
+        env = "SHUKU_SETTINGS",
+        global = true,
+        help = "启动时套用的设置文件（JSON），写了的字段覆盖控制台里的值"
+    )]
+    settings: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -95,6 +102,10 @@ async fn main() -> Result<()> {
     let app = App::open(config).await?;
     if let Some(Command::Token(command)) = cli.command {
         return token_command(&app, command);
+    }
+    if let Some(path) = &cli.settings {
+        app.apply_settings_file(path)
+            .with_context(|| format!("套用设置文件 {} 失败", path.display()))?;
     }
     if matches!(cli.command, Some(Command::Scan)) {
         let report = app.scan().await?;
