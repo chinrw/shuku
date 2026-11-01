@@ -184,6 +184,14 @@
 		border: 1px solid var(--chip-border);
 		border-radius: 8px;
 		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	/* 手机上“开始阅读”被挤成两行、别的按钮跟着变高；收窄内边距让一排放得下，放不下时整个按钮换行。 */
+	@media (max-width: 480px) {
+		.actions a {
+			padding: 0.55rem 0.7rem;
+		}
 	}
 
 	.actions a.primary {

@@ -22,27 +22,29 @@
 		<dt class={namespaceClass(row.namespace)}>{row.label}:</dt>
 		<dd>
 			{#each row.values as value, index (index)}
-				{#if value.href === null}
-					<span class="chip plain">{value.text}</span>
-				{:else if value.external}
-					<a class="chip" href={value.href} target="_blank" rel="noreferrer">{value.text}</a>
-				{:else}
-					<a class="chip" href={value.href}>{value.text}</a>
-				{/if}
-				{#if saveable && value.tag}
-					{@const on = saved.has(value.tag)}
-					<button
-						class="save"
-						class:on
-						aria-pressed={on}
-						aria-label={on ? `取消收藏标签 ${value.text}` : `收藏标签 ${value.text}`}
-						title={saved.error ? `没有保存：${saved.error}` : on ? '已收藏，点一下取消' : '收藏这个标签'}
-						disabled={saved.isPending(value.tag)}
-						onclick={() => value.tag && saved.toggle(value.tag)}
-					>
-						<Icon name="bookmark" size={12} filled={on} />
-					</button>
-				{/if}
+				<span class="item">
+					{#if value.href === null}
+						<span class="chip plain">{value.text}</span>
+					{:else if value.external}
+						<a class="chip" href={value.href} target="_blank" rel="noreferrer">{value.text}</a>
+					{:else}
+						<a class="chip" href={value.href}>{value.text}</a>
+					{/if}
+					{#if saveable && value.tag}
+						{@const on = saved.has(value.tag)}
+						<button
+							class="save"
+							class:on
+							aria-pressed={on}
+							aria-label={on ? `取消收藏标签 ${value.text}` : `收藏标签 ${value.text}`}
+							title={saved.error ? `没有保存：${saved.error}` : on ? '已收藏，点一下取消' : '收藏这个标签'}
+							disabled={saved.isPending(value.tag)}
+							onclick={() => value.tag && saved.toggle(value.tag)}
+						>
+							<Icon name="bookmark" size={12} filled={on} />
+						</button>
+					{/if}
+				</span>
 			{/each}
 		</dd>
 	{/each}
@@ -71,8 +73,17 @@
 		min-width: 0;
 	}
 
+	/* 标签和后面的收藏按钮一起换行，按钮不会单独掉到下一行开头。 */
+	.item {
+		display: inline-flex;
+		align-items: center;
+		max-width: 100%;
+		min-width: 0;
+	}
+
 	/* LRR 的 div.gt：带边框的小块。 */
 	.chip {
+		min-width: 0;
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;

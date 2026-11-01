@@ -1497,6 +1497,10 @@
 		overflow-y: auto;
 	}
 
+	.detail-top :global(.picker) {
+		margin-bottom: 0.6rem;
+	}
+
 	.detail-bottom {
 		flex: none;
 		margin-top: 0.5rem;

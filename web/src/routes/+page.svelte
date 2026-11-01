@@ -1389,16 +1389,23 @@
 		text-overflow: ellipsis;
 	}
 
+	/* 只显示一行：放不下的标签换到被藏起来的第二行，不切掉半个；单个太长的标签用省略号。 */
 	.chips {
 		grid-area: chips;
 		display: flex;
+		flex-wrap: wrap;
 		gap: 0.25rem;
 		min-width: 0;
+		max-height: calc(1.2rem + 2px);
 		overflow: hidden;
 	}
 
 	.chips .chip {
-		flex: none;
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		padding: 0 0.35rem;
 		border: 1px solid var(--chip-border);
 		border-radius: 5px;
