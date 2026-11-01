@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { fly } from 'svelte/transition';
 	import { archive as loadArchive, downloadUrl, type ArchiveItem, type Category } from '#lib/api.ts';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
+	import { fade, slide } from '#lib/motion.ts';
 	import { artistQueries } from '#lib/related.ts';
 	import RelatedRow from '#lib/RelatedRow.svelte';
 	import TagTable from '#lib/TagTable.svelte';
@@ -53,8 +53,13 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="scrim" onclick={onclose}></div>
-<aside class="drawer" aria-label="{book.title} 的详情" transition:fly={{ x: 420, duration: 260 }}>
+<div class="scrim" onclick={onclose} in:fade out:fade></div>
+<aside
+	class="drawer"
+	aria-label="{book.title} 的详情"
+	in:slide={{ from: 'right' }}
+	out:slide={{ from: 'right' }}
+>
 	<div class="head">
 		<button class="icon-button" onclick={onclose} aria-label="关闭详情"><Icon name="close" /></button>
 	</div>

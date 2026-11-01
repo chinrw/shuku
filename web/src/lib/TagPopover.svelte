@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ArchiveItem } from './api';
+	import { fade, slide } from './motion';
 	import TagTable from './TagTable.svelte';
 	import { tagRows } from './tags';
 
@@ -36,14 +37,15 @@
 	});
 </script>
 
-{#if sheet}
-	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-	<div class="scrim" onclick={onclose}></div>
-{/if}
+<!-- 底部面板滑上来、遮罩淡入；宽屏的浮层直接出现。关上时直接消失，书库页这时已经把 item 清空了。
+	遮罩不放进 {#if} 里，否则它不是随这个组件一起出现的，进场动画不会播放。 -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="scrim" class:hidden={!sheet} onclick={onclose} in:fade></div>
 <div
 	class="popover"
 	class:sheet
 	style={sheet ? undefined : position}
+	in:slide={{ from: sheet ? 'bottom' : null }}
 	role="dialog"
 	tabindex="-1"
 	aria-label="{item.title} 的标签"
@@ -84,6 +86,10 @@
 		inset: 0;
 		z-index: 19;
 		background: rgb(0 0 0 / 0.45);
+	}
+
+	.scrim.hidden {
+		display: none;
 	}
 
 	.head {

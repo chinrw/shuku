@@ -8,6 +8,7 @@
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import Icon from '#lib/Icon.svelte';
 	import { bytes } from '#lib/format.ts';
+	import { fade, panelEdge, slide, turn } from '#lib/motion.ts';
 	import PageGrid from '#lib/PageGrid.svelte';
 	import RelatedRow from '#lib/RelatedRow.svelte';
 	import { ProgressReporter } from '#lib/progress.ts';
@@ -198,8 +199,18 @@
 		replaceState(`?page=${page}`, route.state);
 	}
 
-	function go(page: number) {
-		if (page >= 0 && page < pages.length && page !== current) record(page);
+	// 翻页模式下点两侧、滑动、方向键这样一屏一屏地翻时，新的一屏滑进来，方向和阅读方向一致：
+	// 从右往左读时下一屏从左边进来。跳页（滑块、缩略图、第一页和最后一页）直接换。
+	let turnSign = $state(0);
+	// 每次带动画的翻页都换一个新的元素：快速来回翻时 Svelte 会复用还在滑出去的那一屏，
+	// 它保留着旧的滚动位置和缓存的滑动方向。
+	let turns = $state(0);
+
+	function go(page: number, delta = 0) {
+		if (page < 0 || page >= pages.length || page === current) return;
+		turnSign = delta * (prefs.direction === 'rtl' ? -1 : 1);
+		if (delta) turns += 1;
+		record(page);
 	}
 
 	// 翻过最后一页时提示下一卷。阅读器的状态在打开时读一次，换书要整页重新加载。
@@ -208,7 +219,7 @@
 
 	function step(delta: number) {
 		const target = spreads[spreadIndex + delta];
-		if (target) go(target[0]);
+		if (target) go(target[0], delta);
 		// 双页时最后一屏只记它的第一页，翻过最后一屏才算读完，补记最后一页，
 		// “读完”筛选和系列页的续读才认。
 		if (!target && delta > 0 && pages.length > 0) go(pages.length - 1);
@@ -308,15 +319,17 @@
 
 	let stage = $state<HTMLElement>();
 
-	// 适应宽度时翻到新的一屏从顶部开始看。
-	$effect(() => {
-		void spreadIndex;
-		if (pagedView) pagedView.scrollTop = 0;
-	});
+	/**
+	 * 正在显示的那一屏。翻页动画时旧的一屏还在 DOM 里滑出去，Svelte 把它设成 inert。
+	 * 每一屏自己滚动（适应宽度时），换屏总是新建元素，所以新的一屏从顶部开始。
+	 */
+	function shownSpread(): HTMLElement | null {
+		return pagedView?.querySelector<HTMLElement>(':scope > .spread:not([inert])') ?? null;
+	}
 
 	/** 适应宽度时在这一屏里滚动一段；已经到头、或者整页模式时返回 false。 */
 	function scrollWithin(delta: 1 | -1, fraction: number): boolean {
-		const view = pagedView;
+		const view = shownSpread();
 		if (!fitWidth || !view) return false;
 		const room = delta > 0 ? view.scrollHeight - view.clientHeight - view.scrollTop : view.scrollTop;
 		if (room <= 1) return false;
@@ -395,7 +408,7 @@
 			}
 		};
 		(async () => {
-			const shown = [...(pagedView?.querySelectorAll('img') ?? [])];
+			const shown = [...(shownSpread()?.querySelectorAll('img') ?? [])];
 			await Promise.all(shown.map(settled));
 			const allVariants = untrack(() => queue.every(({ index }) => src(index) !== pages[index].url));
 			await Promise.all(Array.from({ length: allVariants ? 2 : 1 }, worker));
@@ -720,24 +733,35 @@
 				ontouchstart={touchStart}
 				ontouchend={touchEnd}
 			>
-				{#each visible as index (index)}
-					<!-- 大图下载并解码完之前用缩略图垫底；放大换原图时垫的是缩小的图。 -->
-					<img
-						class="page"
-						class:half={visible.length === 2}
-						class:upgraded={upgraded.has(index)}
-						src={src(index)}
-						style:background-image="url({(upgraded.has(index) && variantUrl(index)) ||
-							pages[index].thumbnail_url})"
-						onload={(event) => reveal(event.currentTarget as HTMLImageElement)}
-						onerror={(event) => fallback(event, index)}
-						{@attach showIfCached}
-						decoding="async"
-						width={pages[index].width}
-						height={pages[index].height}
-						alt="第 {index + 1} 页"
-					/>
-				{/each}
+				<!-- 点击和滑动由外面这层处理，翻页动画播放时照样能接着翻。新旧两屏叠在一起各自滑动。
+					转屏等重新排版时不播放：turnSign 在这一屏滑进来以后清零。 -->
+				{#key `${visible.join()}:${turns}`}
+					<div
+						class="spread"
+						in:turn={{ sign: turnSign }}
+						out:turn={{ sign: turnSign }}
+						onintroend={() => (turnSign = 0)}
+					>
+						{#each visible as index (index)}
+							<!-- 大图下载并解码完之前用缩略图垫底；放大换原图时垫的是缩小的图。 -->
+							<img
+								class="page"
+								class:half={visible.length === 2}
+								class:upgraded={upgraded.has(index)}
+								src={src(index)}
+								style:background-image="url({(upgraded.has(index) && variantUrl(index)) ||
+									pages[index].thumbnail_url})"
+								onload={(event) => reveal(event.currentTarget as HTMLImageElement)}
+								onerror={(event) => fallback(event, index)}
+								{@attach showIfCached}
+								decoding="async"
+								width={pages[index].width}
+								height={pages[index].height}
+								alt="第 {index + 1} 页"
+							/>
+						{/each}
+					</div>
+				{/key}
 			</div>
 		{:else}
 			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -790,9 +814,11 @@
 
 	{#if panel}
 		<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-		<div class="scrim" onclick={() => closePanel()}></div>
+		<div class="scrim" onclick={() => closePanel()} in:fade out:fade></div>
 		<aside
 			class="panel"
+			in:slide={{ from: panelEdge() }}
+			out:slide={{ from: panelEdge() }}
 			class:wide={panel === 'detail'}
 			data-tab={detailTab}
 			aria-label={panel === 'detail' ? '详情' : '阅读设置'}
@@ -1073,7 +1099,14 @@
 		min-height: 0;
 	}
 
+	/* 翻页动画时新旧两屏叠在这个框里滑动，裁掉露在外面的部分。 */
 	.paged {
+		position: absolute;
+		inset: 0;
+		overflow: hidden;
+	}
+
+	.spread {
 		position: absolute;
 		inset: 0;
 		display: flex;
@@ -1082,7 +1115,7 @@
 	}
 
 	/* 从右往左读时，第一页放在右边。 */
-	.paged.rtl {
+	.paged.rtl .spread {
 		flex-direction: row-reverse;
 	}
 
@@ -1113,7 +1146,7 @@
 	}
 
 	/* 上下的 auto 外边距让比屏幕矮的页居中，比屏幕高的页从顶部开始。 */
-	.paged.fit-width {
+	.paged.fit-width .spread {
 		align-items: flex-start;
 		overflow-y: auto;
 		overscroll-behavior: contain;
