@@ -1668,8 +1668,11 @@
 		margin-bottom: 0.75rem;
 	}
 
+	/* 没有空格的长标题也要折行，否则会把右边的关闭按钮挤出面板。 */
 	.panel h2 {
 		flex: 1;
+		min-width: 0;
+		overflow-wrap: anywhere;
 		margin: 0.35rem 0 0;
 		font-size: 1rem;
 		line-height: 1.4;
