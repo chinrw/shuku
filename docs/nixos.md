@@ -106,7 +106,15 @@ sudo -u shuku shuku --content-dir /srv/manga --data-dir /var/lib/shuku/manga tok
 
 服务停止时收到 SIGINT，和在终端里按 Ctrl-C 一样正常退出。
 
-## 测试模块
+## 检查包和模块
+
+构建完整的 Nix 包：
+
+```bash
+nix build .#default -L
+```
+
+该命令构建网页端和两个服务端程序，并在包实际使用的 Nixpkgs SQLite 上运行 `shuku-store` 测试，不需要 KVM。普通 Cargo 构建和 musl 发布仍使用 bundled SQLite。
 
 `checks.x86_64-linux.nixos-module` 是一个 NixOS 虚拟机测试：起两个实例，各读一个构建时生成的小书库，确认都扫描入库、设置生效、加固的限制没有挡住文件监视。它需要 KVM：
 

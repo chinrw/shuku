@@ -8,6 +8,8 @@
   pnpmConfigHook,
   pnpm,
   nodejs,
+  pkg-config,
+  sqlite,
   nasm,
   makeWrapper,
 }:
@@ -69,12 +71,19 @@ rustPlatform.buildRustPackage {
     "-p"
     "shuku-migrate-lrr"
   ];
-  # 测试由 CI 在开发环境里跑，这里只构建。
-  doCheck = false;
+  # Cargo 默认使用 bundled，这里显式选择 Nixpkgs 提供的 SQLite。
+  env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
+  buildInputs = [ sqlite ];
+  # 开发环境测试使用 bundled SQLite，这里再验证 Nixpkgs 提供的库。
+  cargoTestFlags = [
+    "-p"
+    "shuku-store"
+  ];
   # AVIF 解码器的 x86 SIMD 汇编需要 NASM。
   nativeBuildInputs = [
     nasm
     makeWrapper
+    pkg-config
   ];
   postInstall = ''
     mkdir -p $out/share/shuku
