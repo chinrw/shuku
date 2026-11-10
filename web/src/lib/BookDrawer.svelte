@@ -70,32 +70,38 @@
 		</a>
 		<div class="info">
 			<h2>{book.title}</h2>
-			<p class="meta">
-				{book.page_count} 页
-				{#if book.progress}<br />读到第 {resume + 1} 页{/if}
-			</p>
+			<p class="meta">{book.page_count} 页</p>
+			<a class="primary" href="/a/{book.id}/read">{book.progress ? '继续阅读' : '开始阅读'}</a>
+			<div class="reading-links">
+				{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
+				<a href="/a/{book.id}/read?panel=detail">详情</a>
+			</div>
 		</div>
 	</div>
-	<div class="actions">
-		<a class="primary" href="/a/{book.id}/read">{book.progress ? '继续阅读' : '开始阅读'}</a>
-		{#if detail?.id === book.id}
-			<BookmarkButton archive={book.id} members={detail.members} bind:categories />
-		{/if}
-		{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
-		<a href="/a/{book.id}/read?panel=detail">详情</a>
+	<div class="reading-state">
+		<span class="meta">{book.progress ? `读到第 ${resume + 1} 页` : '还没开始阅读'}</span>
 		<FinishedButton archive={book.id} progress={book.progress} />
-		<a href={downloadUrl(book.id)} download>下载</a>
-		<a href="/a/{book.id}?edit">编辑</a>
-	</div>
-	<div class="tags">
-		<TagTable rows={tagRows(book)} saveable />
 	</div>
 	{#if detail?.id === book.id}
-		<CategoryPicker archive={book.id} bind:categories members={detail.members} />
-		{#if detail.summary}<p class="summary">{detail.summary}</p>{/if}
+		<section class="section" aria-label="分类">
+			<div class="section-head">
+				<h3>分类</h3>
+				<BookmarkButton archive={book.id} members={detail.members} bind:categories />
+			</div>
+			<CategoryPicker archive={book.id} bind:categories members={detail.members} />
+		</section>
 	{:else if detailError}
 		<p class="error">分类和简介没有加载出来：{detailError}</p>
 	{/if}
+	<section class="section" aria-label="标签">
+		<h3>标签</h3>
+		<TagTable rows={tagRows(book)} saveable />
+	</section>
+	{#if detail?.id === book.id && detail.summary}<p class="summary">{detail.summary}</p>{/if}
+	<div class="secondary-actions">
+		<a href={downloadUrl(book.id)} download>下载</a>
+		<a href="/a/{book.id}?edit">编辑资料</a>
+	</div>
 	{#key book.id}
 		{#each artistQueries(book.tags) as query (query.term)}
 			<RelatedRow label={query.label} term={query.term} archive={book.id} />
@@ -147,7 +153,7 @@
 
 	.cover {
 		flex: none;
-		width: 120px;
+		width: 100px;
 	}
 
 	.cover img {
@@ -159,10 +165,14 @@
 
 	.info {
 		min-width: 0;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
 	}
 
 	h2 {
-		margin: 0 0 0.5rem;
+		margin: 0;
 		font-size: 1rem;
 		line-height: 1.4;
 		overflow-wrap: anywhere;
@@ -175,46 +185,77 @@
 		line-height: 1.6;
 	}
 
-	.actions {
+	.reading-links,
+	.secondary-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: 0.5rem 1rem;
 	}
 
-	.actions a,
-	.actions :global(.finished-button) {
+	.primary {
 		padding: 0.55rem 0.9rem;
-		border: 1px solid var(--chip-border);
+		border: 1px solid var(--accent);
 		border-radius: 8px;
-		background: transparent;
-		color: inherit;
+		background: var(--accent);
+		color: var(--on-accent);
 		font: inherit;
 		text-decoration: none;
 		white-space: nowrap;
 		cursor: pointer;
-	}
-
-	/* 手机上“开始阅读”被挤成两行、别的按钮跟着变高；收窄内边距让一排放得下，放不下时整个按钮换行。 */
-	@media (max-width: 480px) {
-		.actions a,
-		.actions :global(.finished-button) {
-			padding: 0.55rem 0.7rem;
-		}
-	}
-
-	.actions a.primary {
-		flex: 1;
-		border-color: var(--accent);
-		background: var(--accent);
-		color: var(--on-accent);
 		font-weight: 600;
 		text-align: center;
 	}
 
-	.tags {
-		padding: 0.75rem;
-		border-radius: 9px;
-		background: var(--surface);
+	.reading-links a,
+	.secondary-actions a {
+		color: var(--muted);
+		font-size: 0.85rem;
+		text-decoration: none;
+	}
+
+	.reading-links a:hover,
+	.secondary-actions a:hover {
+		color: var(--link);
+	}
+
+	.reading-state,
+	.section-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.reading-state :global(.finished-button) {
+		padding: 0.35rem 0;
+		border: none;
+		background: none;
+		color: var(--muted);
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+
+	.reading-state :global(.finished-button.on) {
+		color: var(--accent);
+	}
+
+	.section {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.section,
+	.secondary-actions {
+		padding-top: 1rem;
+		border-top: 1px solid var(--border);
+	}
+
+	h3 {
+		margin: 0;
+		font-size: 0.85rem;
+		font-weight: 600;
 	}
 
 	.summary {

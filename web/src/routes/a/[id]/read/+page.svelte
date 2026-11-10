@@ -986,102 +986,112 @@
 			</div>
 			{#if panel === 'settings'}
 				<div class="settings">
-					<span>条漫</span>
-					<div class="segmented">
-						<button class:on={prefs.webtoon[book.id] === undefined} onclick={() => setWebtoon(undefined)}
-							>自动（{detectedWebtoon ? '是' : '否'}）</button
-						>
-						<button class:on={prefs.webtoon[book.id] === true} onclick={() => setWebtoon(true)}>开</button>
-						<button class:on={prefs.webtoon[book.id] === false} onclick={() => setWebtoon(false)}>关</button>
-					</div>
-					{#if webtoon}
-						<span>条漫宽度</span>
-						<label class="width">
-							<input
-								type="range"
-								min={WEBTOON_WIDTH.min}
-								max={WEBTOON_WIDTH.max}
-								step={WEBTOON_WIDTH.step}
-								value={prefs.webtoonWidth}
-								oninput={(event) =>
-									update(() => (prefs.webtoonWidth = Number(event.currentTarget.value)))}
-								aria-label="条漫宽度"
-							/>
-							<span>{prefs.webtoonWidth}px</span>
-						</label>
-					{:else}
-						<span>阅读方式</span>
-						<div class="segmented">
-							<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
-								>翻页</button
-							>
-							<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
-								>滚动</button
-							>
+					<section class="settings-group" aria-label="这本书的阅读设置">
+						<h3>这本书</h3>
+						<div class="settings-fields">
+							<span>条漫</span>
+							<div class="segmented">
+								<button class:on={prefs.webtoon[book.id] === undefined} onclick={() => setWebtoon(undefined)}
+									>自动（{detectedWebtoon ? '是' : '否'}）</button
+								>
+								<button class:on={prefs.webtoon[book.id] === true} onclick={() => setWebtoon(true)}>开</button>
+								<button class:on={prefs.webtoon[book.id] === false} onclick={() => setWebtoon(false)}>关</button>
+							</div>
 						</div>
-					{/if}
-					{#if mode === 'paged'}
-						<span>方向</span>
-						<div class="segmented">
-							<button
-								class:on={prefs.direction === 'rtl'}
-								onclick={() => update(() => (prefs.direction = 'rtl'))}>右→左</button
-							>
-							<button
-								class:on={prefs.direction === 'ltr'}
-								onclick={() => update(() => (prefs.direction = 'ltr'))}>左→右</button
-							>
+					</section>
+					<section class="settings-group" aria-label="这台设备的阅读设置">
+						<h3>这台设备</h3>
+						<div class="settings-fields">
+							{#if webtoon}
+								<span>条漫宽度</span>
+								<label class="width">
+									<input
+										type="range"
+										min={WEBTOON_WIDTH.min}
+										max={WEBTOON_WIDTH.max}
+										step={WEBTOON_WIDTH.step}
+										value={prefs.webtoonWidth}
+										oninput={(event) =>
+											update(() => (prefs.webtoonWidth = Number(event.currentTarget.value)))}
+										aria-label="条漫宽度"
+									/>
+									<span>{prefs.webtoonWidth}px</span>
+								</label>
+							{:else}
+								<span>阅读方式</span>
+								<div class="segmented">
+									<button class:on={prefs.mode === 'paged'} onclick={() => update(() => (prefs.mode = 'paged'))}
+										>翻页</button
+									>
+									<button class:on={prefs.mode === 'scroll'} onclick={() => update(() => (prefs.mode = 'scroll'))}
+										>滚动</button
+									>
+								</div>
+							{/if}
+							{#if mode === 'paged'}
+								<span>方向</span>
+								<div class="segmented">
+									<button
+										class:on={prefs.direction === 'rtl'}
+										onclick={() => update(() => (prefs.direction = 'rtl'))}>右→左</button
+									>
+									<button
+										class:on={prefs.direction === 'ltr'}
+										onclick={() => update(() => (prefs.direction = 'ltr'))}>左→右</button
+									>
+								</div>
+								<span>缩放</span>
+								<div class="segmented">
+									<button class:on={prefs.fit === 'screen'} onclick={() => update(() => (prefs.fit = 'screen'))}
+										>整页</button
+									>
+									<button class:on={prefs.fit === 'width'} onclick={() => update(() => (prefs.fit = 'width'))}
+										>适应宽度</button
+									>
+								</div>
+								<span>滚轮翻页</span>
+								<div class="segmented">
+									<button class:on={prefs.wheelTurn} onclick={() => update(() => (prefs.wheelTurn = true))}
+										>开</button
+									>
+									<button class:on={!prefs.wheelTurn} onclick={() => update(() => (prefs.wheelTurn = false))}
+										>关</button
+									>
+								</div>
+								<span>横屏双页</span>
+								<div class="segmented">
+									<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
+									<button class:on={!prefs.spread} onclick={() => update(() => (prefs.spread = false))}
+										>关</button
+									>
+								</div>
+							{/if}
+							{#if touchDevice}
+								<span>图片</span>
+								<div class="segmented">
+									<button
+										class:on={prefs.quality === 'auto'}
+										onclick={() => update(() => (prefs.quality = 'auto'))}
+										title="按屏幕取缩小的图，放大时换原图">按屏幕</button
+									>
+									<button
+										class:on={prefs.quality === 'original'}
+										onclick={() => update(() => (prefs.quality = 'original'))}>原图</button
+									>
+								</div>
+							{/if}
+							<span class="picker-label">配色</span>
+							<ThemePicker />
+							<span>滑动动画</span>
+							<div class="segmented">
+								{#each MOTIONS as [key, label] (key)}
+									<button class:on={prefs.motion === key} onclick={() => update(() => (prefs.motion = key))}
+										>{label}</button
+									>
+								{/each}
+							</div>
 						</div>
-						<span>缩放</span>
-						<div class="segmented">
-							<button class:on={prefs.fit === 'screen'} onclick={() => update(() => (prefs.fit = 'screen'))}
-								>整页</button
-							>
-							<button class:on={prefs.fit === 'width'} onclick={() => update(() => (prefs.fit = 'width'))}
-								>适应宽度</button
-							>
-						</div>
-						<span>滚轮翻页</span>
-						<div class="segmented">
-							<button class:on={prefs.wheelTurn} onclick={() => update(() => (prefs.wheelTurn = true))}
-								>开</button
-							>
-							<button class:on={!prefs.wheelTurn} onclick={() => update(() => (prefs.wheelTurn = false))}
-								>关</button
-							>
-						</div>
-						<span>横屏双页</span>
-						<div class="segmented">
-							<button class:on={prefs.spread} onclick={() => update(() => (prefs.spread = true))}>开</button>
-							<button class:on={!prefs.spread} onclick={() => update(() => (prefs.spread = false))}
-								>关</button
-							>
-						</div>
-					{/if}
-					{#if touchDevice}
-						<span>图片</span>
-						<div class="segmented">
-							<button
-								class:on={prefs.quality === 'auto'}
-								onclick={() => update(() => (prefs.quality = 'auto'))}
-								title="按屏幕取缩小的图，放大时换原图">按屏幕</button
-							>
-							<button
-								class:on={prefs.quality === 'original'}
-								onclick={() => update(() => (prefs.quality = 'original'))}>原图</button
-							>
-						</div>
-					{/if}
-					<span class="picker-label">配色</span>
-					<ThemePicker />
-					<span>滑动动画</span>
-					<div class="segmented">
-						{#each MOTIONS as [key, label] (key)}
-							<button class:on={prefs.motion === key} onclick={() => update(() => (prefs.motion = key))}
-								>{label}</button
-							>
-						{/each}
-					</div>
+					</section>
 				</div>
 			{:else}
 				<!-- 上面是标签和操作，下面是相似作品，都固定不动；中间的页面缩略图单独滚动。 -->
@@ -1450,12 +1460,29 @@
 
 	.settings {
 		display: grid;
-		grid-template-columns: max-content 1fr;
-		align-items: center;
-		gap: 0.6rem 1rem;
+		gap: 1.5rem;
 		margin-bottom: 1.25rem;
 		font-size: 0.9rem;
 		color: var(--muted);
+	}
+
+	.settings-group + .settings-group {
+		border-top: 1px solid var(--border);
+		padding-top: 1.25rem;
+	}
+
+	.settings-group h3 {
+		margin: 0 0 0.75rem;
+		color: var(--fg);
+		font-size: 0.9rem;
+		font-weight: 600;
+	}
+
+	.settings-fields {
+		display: grid;
+		grid-template-columns: max-content minmax(0, 1fr);
+		align-items: center;
+		gap: 0.6rem 1rem;
 	}
 
 	/* 跟随系统时配色下面还有两行，标签对齐第一行。 */

@@ -8,6 +8,7 @@
 		count,
 		total,
 		all = $bindable(),
+		height = $bindable(0),
 		categories,
 		ondone,
 		oncancel
@@ -17,6 +18,7 @@
 		count: number;
 		total: number;
 		all: boolean;
+		height?: number;
 		categories: Category[];
 		/** `delayed` 表示改了标签或读完标记，搜索结果要等服务端的快照刷新才看得到。 */
 		ondone: (message: string, delayed: boolean) => void;
@@ -80,36 +82,66 @@
 	}
 </script>
 
-<form class="bar" onsubmit={run} aria-label="批量操作">
-	<div class="line">
+<form class="bar" bind:clientHeight={height} onsubmit={run} aria-label="批量操作">
+	<div class="fields">
+		<fieldset>
+			<legend>标签调整</legend>
+			<div class="pair">
+				<label>
+					添加
+					<input bind:value={addTags} placeholder="标签，逗号分隔" aria-label="加的标签" />
+				</label>
+				<label>
+					移除
+					<input bind:value={removeTags} placeholder="标签，逗号分隔" aria-label="去掉的标签" />
+				</label>
+			</div>
+		</fieldset>
+		<fieldset>
+			<legend>分类调整</legend>
+			<div class="pair">
+				<label>
+					加入
+					<select bind:value={addTo} aria-label="加入分类">
+						<option value="">不修改</option>
+						{#each choices as category (category.id)}
+							<option value={String(category.id)}>{category.name}</option>
+						{/each}
+					</select>
+				</label>
+				<label>
+					移出
+					<select bind:value={removeFrom} aria-label="移出分类">
+						<option value="">不修改</option>
+						{#each choices as category (category.id)}
+							<option value={String(category.id)}>{category.name}</option>
+						{/each}
+					</select>
+				</label>
+			</div>
+		</fieldset>
+		<fieldset>
+			<legend>阅读状态</legend>
+			<label>
+				读完标记
+				<select bind:value={finished} aria-label="读完标记">
+					<option value="">不修改</option>
+					<option value="true">标记读完</option>
+					<option value="false">取消读完</option>
+				</select>
+			</label>
+		</fieldset>
+	</div>
+	<div class="line scope">
 		<strong>已选 {count} 本</strong>
 		<label class="all">
 			<input type="checkbox" bind:checked={all} />
 			全部 {total} 本搜索结果
 		</label>
-		<button type="button" class="plain" onclick={oncancel}>取消</button>
-	</div>
-	<div class="line fields">
-		<input bind:value={addTags} placeholder="加标签，逗号分隔" aria-label="加的标签" />
-		<input bind:value={removeTags} placeholder="去掉标签，逗号分隔" aria-label="去掉的标签" />
-		<select bind:value={addTo} aria-label="加入分类">
-			<option value="">加入分类…</option>
-			{#each choices as category (category.id)}
-				<option value={String(category.id)}>{category.name}</option>
-			{/each}
-		</select>
-		<select bind:value={removeFrom} aria-label="移出分类">
-			<option value="">移出分类…</option>
-			{#each choices as category (category.id)}
-				<option value={String(category.id)}>{category.name}</option>
-			{/each}
-		</select>
-		<select bind:value={finished} aria-label="读完标记">
-			<option value="">读完标记…</option>
-			<option value="true">标记读完</option>
-			<option value="false">取消读完</option>
-		</select>
-		<button class="primary" disabled={!ready || busy}>{busy ? '正在改…' : '执行'}</button>
+		<div class="actions">
+			<button type="button" class="plain" onclick={oncancel}>取消</button>
+			<button class="primary" disabled={!ready || busy}>{busy ? '正在改…' : `应用到 ${count} 本`}</button>
+		</div>
 	</div>
 	{#if error}<p class="error" role="alert">{error}</p>{/if}
 </form>
@@ -121,6 +153,8 @@
 		z-index: 20;
 		display: grid;
 		gap: 0.5rem;
+		max-height: 70dvh;
+		overflow-y: auto;
 		padding: 0.6rem 1rem;
 		padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
 		border-top: 1px solid var(--border);
@@ -151,7 +185,7 @@
 	}
 
 	.plain {
-		margin-left: auto;
+		padding: 0.4rem;
 		border: none;
 		background: none;
 		color: var(--link);
@@ -159,19 +193,53 @@
 		cursor: pointer;
 	}
 
-	/* 宽屏上输入框停在 22rem，“执行”靠右，和上一行的“取消”对齐。 */
-	.fields input {
-		flex: 1 1 10rem;
-		min-width: 0;
-		max-width: 22rem;
+	.fields {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+		gap: 0.75rem 1.5rem;
 	}
 
-	.fields .primary {
+	fieldset {
+		min-width: 0;
+		margin: 0;
+		padding: 0;
+		border: none;
+	}
+
+	legend {
+		margin-bottom: 0.4rem;
+		font-size: 0.85rem;
+		font-weight: 600;
+	}
+
+	.pair {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+
+	.fields label {
+		display: grid;
+		gap: 0.2rem;
+		color: var(--muted);
+		font-size: 0.8rem;
+	}
+
+	.scope {
+		border-top: 1px solid var(--border);
+		padding-top: 0.6rem;
+	}
+
+	.actions {
+		display: flex;
+		gap: 0.75rem;
 		margin-left: auto;
 	}
 
 	.fields input,
 	.fields select {
+		width: 100%;
+		min-width: 0;
 		height: 2.25rem;
 		padding: 0 0.6rem;
 		border: 1px solid var(--border);

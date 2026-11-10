@@ -89,6 +89,7 @@
 	// 批量模式下点卡片是选中它，不打开书；“全部搜索结果”勾上时改整个搜索结果。
 	let selecting = $state(false);
 	let selectAll = $state(false);
+	let batchHeight = $state(0);
 	const selected = new SvelteSet<number>();
 	let batchMessage = $state<string | null>(null);
 
@@ -546,58 +547,9 @@
 			</ul>
 		{/if}
 	</form>
-	<div class="controls">
-		<select
-			value={data.sort}
-			onchange={(event) => navigate(data.q, event.currentTarget.value as Sort)}
-			aria-label="排序"
-		>
-			{#each SORTS as [value, label] (value)}
-				<option {value}>{label}</option>
-			{/each}
-			{#if !SORTS.some(([value]) => value === data.sort)}
-				<option value={data.sort}>{data.sort}</option>
-			{/if}
-		</select>
-		<button
-			class="icon-button"
-			onclick={flipOrder}
-			aria-label={order === 'asc' ? '当前从小到大，改成从大到小' : '当前从大到小，改成从小到大'}
-			title={order === 'asc' ? '从小到大' : '从大到小'}
-		>
-			<Icon name={order === 'asc' ? 'arrow-up' : 'arrow-down'} size={18} />
-		</button>
-		<button
-			class="icon-button"
-			onclick={openRandom}
-			disabled={picking}
-			aria-label="随机一本"
-			title="随机一本"
-		>
-			<Icon name="shuffle" size={18} />
-		</button>
-		<button
-			class="icon-button"
-			class:on={selecting}
-			onclick={() => (selecting ? endBatch(null) : startBatch())}
-			disabled={startingBatch}
-			aria-pressed={selecting}
-			aria-label="批量操作"
-			title="批量操作"
-		>
-			<Icon name="check-square" size={18} />
-		</button>
-		<button
-			class="icon-button"
-			onclick={toggleView}
-			aria-label={prefs.view === 'grid' ? '列表视图' : '封面视图'}
-		>
-			<Icon name={prefs.view === 'grid' ? 'list' : 'grid'} size={18} />
-		</button>
-		<a class="icon-button" href="/admin" aria-label="控制台" title="控制台">
-			<Icon name="settings" size={18} />
-		</a>
-	</div>
+	<a class="icon-button admin-link" href="/admin" aria-label="控制台" title="控制台">
+		<Icon name="settings" size={18} />
+	</a>
 </header>
 
 <div class="page">
@@ -710,6 +662,59 @@
 {#if batchMessage}
 	<p class="status" role="status">{batchMessage}</p>
 {/if}
+
+<div class="results-toolbar">
+	<h1>{data.q ? '搜索结果' : '书库'}</h1>
+	<div class="controls">
+		<select
+			value={data.sort}
+			onchange={(event) => navigate(data.q, event.currentTarget.value as Sort)}
+			aria-label="排序"
+		>
+			{#each SORTS as [value, label] (value)}
+				<option {value}>{label}</option>
+			{/each}
+			{#if !SORTS.some(([value]) => value === data.sort)}
+				<option value={data.sort}>{data.sort}</option>
+			{/if}
+		</select>
+		<button
+			class="icon-button"
+			onclick={flipOrder}
+			aria-label={order === 'asc' ? '当前从小到大，改成从大到小' : '当前从大到小，改成从小到大'}
+			title={order === 'asc' ? '从小到大' : '从大到小'}
+		>
+			<Icon name={order === 'asc' ? 'arrow-up' : 'arrow-down'} size={18} />
+		</button>
+		<button
+			class="icon-button"
+			onclick={openRandom}
+			disabled={picking}
+			aria-label="随机一本"
+			title="随机一本"
+		>
+			<Icon name="shuffle" size={18} />
+		</button>
+		<button
+			class="icon-button"
+			class:on={selecting}
+			onclick={() => (selecting ? endBatch(null) : startBatch())}
+			disabled={startingBatch}
+			aria-pressed={selecting}
+			aria-label="批量操作"
+			title="批量操作"
+		>
+			<Icon name="check-square" size={18} />
+		</button>
+		<button
+			class="icon-button"
+			onclick={toggleView}
+			aria-label={prefs.view === 'grid' ? '列表视图' : '封面视图'}
+		>
+			<Icon name={prefs.view === 'grid' ? 'list' : 'grid'} size={18} />
+		</button>
+	</div>
+</div>
 
 <Pager page={data.page} {pages} href={pageHref} />
 
@@ -865,7 +870,7 @@
 
 {#if selecting}
 	<!-- 底部操作栏盖住的高度，让最后一排书也能点到。 -->
-	<div class="bar-space"></div>
+	<div style:height="{batchHeight}px" aria-hidden="true"></div>
 	<BatchBar
 		selection={selectAll
 			? { search: { q: data.q, category: data.category, filters: data.filters, tags: data.tags } }
@@ -873,6 +878,7 @@
 		count={selectAll ? (data.result?.total ?? 0) : selected.size}
 		total={data.result?.total ?? 0}
 		bind:all={selectAll}
+		bind:height={batchHeight}
 		categories={categoryList}
 		ondone={endBatch}
 		oncancel={() => endBatch(null)}
@@ -940,10 +946,30 @@
 		color: var(--fg);
 	}
 
+	.admin-link {
+		margin-left: auto;
+	}
+
+	.results-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin: 1rem 1rem 0;
+	}
+
+	.results-toolbar h1 {
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 600;
+	}
+
 	.controls {
 		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
 		gap: 0.5rem;
-		margin-left: auto;
 	}
 
 	select {
@@ -954,7 +980,7 @@
 		background: var(--surface);
 	}
 
-	/* 手机上搜索框单独占一行，品牌和按钮在上面一行。 */
+	/* 手机上搜索框单独占一行，品牌和控制台入口在上面一行。 */
 	@media (max-width: 599px) {
 		form {
 			order: 3;
@@ -1486,10 +1512,6 @@
 
 	.fresh {
 		color: var(--new);
-	}
-
-	.bar-space {
-		height: 8rem;
 	}
 
 	.picked {
