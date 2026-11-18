@@ -139,10 +139,12 @@ impl App {
                     Ok(match reader.archive(id)? {
                         None => Deletion::NotFound,
                         // 读不了的目录里的文件无法确认不在，按还在处理。
-                        Some(archive) => match content.join(&archive.metadata.path).try_exists() {
-                            Ok(false) => Deletion::Deleted,
-                            Ok(true) | Err(_) => Deletion::FilePresent,
-                        },
+                        Some(archive) => {
+                            match files::try_exists(&content.join(&archive.metadata.path)) {
+                                Ok(false) => Deletion::Deleted,
+                                Ok(true) | Err(_) => Deletion::FilePresent,
+                            }
+                        }
                     })
                 })
                 .collect::<Result<Vec<_>>>()?
@@ -202,7 +204,14 @@ impl App {
         let path = content.join(&archive.metadata.path);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => files::remove_book(content, &path, &archive.metadata, &pages)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => self.content_mounted()?,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                self.content_mounted()?
+            }
             Err(error) => return Err(error.into()),
         }
         self.write(|writer| Ok(writer.delete_archive(id)?))?;

@@ -121,7 +121,7 @@ impl App {
                 continue;
             }
             // 文件夹里的图片都删了、只剩空目录时也算失踪。
-            match path.try_exists() {
+            match crate::files::try_exists(&path) {
                 Ok(true) if !path.is_dir() || folders.contains(&path) => {}
                 Ok(_) => missing
                     .entry(entry.quick_hash.clone())

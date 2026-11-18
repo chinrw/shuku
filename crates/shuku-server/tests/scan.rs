@@ -74,6 +74,39 @@ async fn ignores_symlinks_in_content_and_keeps_missing_records_for_future_moves(
 }
 
 #[tokio::test]
+async fn recognizes_moves_when_a_parent_directory_becomes_the_archive() {
+    let fixture = Fixture::new();
+    fixture.archive("book.zip/book.zip", 80, 120);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let original = app.index().search(&Query::default()).unwrap().ids;
+    let id = original[0];
+    let mut store = Store::open(fixture.database()).unwrap();
+    store.write_progress(id, 2, 1000).unwrap();
+    let category = store
+        .write::<_, shuku_store::Error>(|writer| {
+            let category = writer.create_category("收藏", "", false)?;
+            writer.set_category_member(category, id, true)?;
+            Ok(category)
+        })
+        .unwrap();
+
+    let content = &fixture.config.content_dir;
+    let moved = fixture.root.path().join("moved.zip");
+    std::fs::rename(content.join("book.zip/book.zip"), &moved).unwrap();
+    std::fs::remove_dir(content.join("book.zip")).unwrap();
+    std::fs::rename(moved, content.join("book.zip")).unwrap();
+
+    let report = app.scan().await.unwrap();
+    assert_eq!((report.added, report.moved, report.failed), (0, 1, 0));
+    assert_eq!(app.index().search(&Query::default()).unwrap().ids, original);
+    let archive = store.archive(id).unwrap().unwrap();
+    assert_eq!(archive.metadata.path, "book.zip");
+    assert_eq!(archive.progress.unwrap().page, 2);
+    assert_eq!(store.archive_categories(id).unwrap(), [category]);
+}
+
+#[tokio::test]
 async fn scans_nested_zips_and_preserves_identity_on_moves_and_changes() {
     let fixture = Fixture::new();
     fixture.archive("nested/漫画 2.cbz", 800, 1200);

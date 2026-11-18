@@ -10,6 +10,14 @@ use std::path::Path;
 /// 删除散放图片的文件夹时，页面先挪进这个隐藏目录。扫描默认跳过以 `.` 开头的目录。
 const STAGING: &str = ".shuku-deleting";
 
+/// 上级目录被普通文件替换后，旧路径同样已经不存在；权限等其他错误仍交给调用方处理。
+pub(crate) fn try_exists(path: &Path) -> std::io::Result<bool> {
+    match path.try_exists() {
+        Err(error) if error.kind() == ErrorKind::NotADirectory => Ok(false),
+        result => result,
+    }
+}
+
 /// 删除 `path` 上这条记录对应的原文件，`path` 必须存在。调用方持有扫描锁。
 pub(crate) fn remove_book(
     content: &Path,

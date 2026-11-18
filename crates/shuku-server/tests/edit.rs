@@ -170,6 +170,26 @@ async fn only_records_whose_files_are_gone_can_be_deleted() {
 }
 
 #[tokio::test]
+async fn records_below_a_directory_replaced_by_a_file_are_missing_and_deletable() {
+    for suffix in ["", "?file=true"] {
+        let (fixture, app, router, all) = scanned(&["book.zip/book.zip"]).await;
+        let uri = format!("/api/archives/{}", all[0]);
+        let content = &fixture.config.content_dir;
+        std::fs::remove_file(content.join("book.zip/book.zip")).unwrap();
+        std::fs::remove_dir(content.join("book.zip")).unwrap();
+        fixture.archive("book.zip", 10, 20);
+
+        assert_eq!(json(&router, &uri).await["missing"], true);
+        let original = std::fs::read(content.join("book.zip")).unwrap();
+        let (status, result) = send(&router, "DELETE", &format!("{uri}{suffix}"), None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{suffix}: {result}");
+        assert_eq!(std::fs::read(content.join("book.zip")).unwrap(), original);
+        app.refresh().await.unwrap();
+        assert_eq!(json(&router, "/api/search").await["total"], 0);
+    }
+}
+
+#[tokio::test]
 async fn missing_records_from_the_last_scan_are_deleted_in_bulk() {
     let (fixture, app, router, all) = scanned(&["a.cbz", "b.cbz", "c.cbz"]).await;
     for name in ["a.cbz", "b.cbz"] {

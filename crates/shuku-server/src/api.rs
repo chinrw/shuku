@@ -720,7 +720,7 @@ pub(crate) fn detail_json(app: &App, id: i64) -> Result<Value> {
     });
     let tags = tag_groups(&archive.tags);
     let path = app.0.config.content_dir.join(&archive.metadata.path);
-    let missing = matches!(path.try_exists(), Ok(false));
+    let missing = matches!(crate::files::try_exists(&path), Ok(false));
     let deletable = crate::files::can_delete(&path);
     Ok(json!({
         "id": archive.id, "title": archive.metadata.title,
