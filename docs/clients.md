@@ -9,14 +9,14 @@
 
 ## 安装
 
-在仓库的 Releases 页面下载对应平台的文件：
+[Nightly 开发版](https://github.com/chinrw/shuku/releases/tag/nightly)随 main 上的客户端成功构建更新，下载链接固定。需要正式版时，到 [Releases](https://github.com/chinrw/shuku/releases) 选择版本号。
 
 | 平台 | 文件 |
 | --- | --- |
-| Linux | `…-linux-x86_64.AppImage`（加执行权限后直接运行）或 `…-linux-x86_64.deb` |
-| Windows | `…-windows-x86_64.setup.exe` |
-| macOS | `…-macos-universal.dmg`，Intel 和 Apple Silicon 通用 |
-| Android | `…-android-arm64.apk` |
+| Linux | [AppImage](https://github.com/chinrw/shuku/releases/download/nightly/shuku-linux-x86_64.AppImage)（加执行权限后直接运行）或 [deb](https://github.com/chinrw/shuku/releases/download/nightly/shuku-linux-x86_64.deb) |
+| Windows | [下载 Windows x64 安装包](https://github.com/chinrw/shuku/releases/download/nightly/shuku-windows-x86_64.setup.exe) |
+| macOS | [下载通用 DMG](https://github.com/chinrw/shuku/releases/download/nightly/shuku-macos-universal.dmg)，Intel 和 Apple Silicon 通用 |
+| Android | [下载 arm64 APK](https://github.com/chinrw/shuku/releases/download/nightly/shuku-android-arm64.apk) |
 
 安装包没有经过 Apple 和微软的代码签名。macOS 第一次打开时在 Finder 里右键选“打开”，或者运行 `xattr -cr /Applications/Shuku.app`；Windows 的 SmartScreen 提示里选“仍要运行”。
 
@@ -65,14 +65,17 @@ node --test '../test/*.test.js'
 
 ### CI 和发布
 
-`.github/workflows/clients.yml` 在 `app/` 或客户端工作流有变化时构建四个平台。PR 检查调用同一工作流，不传发布签名密钥。推到 main 后也会构建，产物在那次运行的 Artifacts 里，保留 14 天。推送 `v*` 标签时 `release.yml` 带着版本号调用它，把安装包和 `SHA256SUMS` 附加到 Release 上。
+`.github/workflows/clients.yml` 在 `app/` 或客户端工作流有变化时构建四个平台。PR 检查调用同一工作流，不传发布签名密钥。推到 main 后也会构建，产物在那次运行的 Artifacts 里，保留 14 天。main 上成功的推送构建和手动运行的 Clients 还会把同一批安装包发布到 Nightly，不需要等到晚上或重新编译。推送 `v*` 标签时 `release.yml` 带着版本号调用它，把安装包和 `SHA256SUMS` 附加到 Release 上。
 
-Android 的发布签名从仓库的 Actions secrets 读取。没有配置时 APK 用构建机临时的调试密钥签名，每次构建的签名都不同，装新版本前要先卸载旧的，服务器列表也会随之丢失。配置一次正式密钥：
+Android 的发布签名从仓库的 Actions secrets 读取。没有配置时 APK 用构建机临时的调试密钥签名，每次构建的签名都不同，装新版本前要先卸载旧的，服务器列表也会随之丢失。已有发布密钥时沿用它；首次配置时，在自己的电脑、仓库外的私密目录中生成密钥。以下命令需要 JDK 的 `keytool` 和已登录 GitHub 的 `gh`：
 
-```bash
-keytool -genkeypair -v -keystore shuku-release.jks -alias shuku \
-  -keyalg RSA -keysize 4096 -validity 10000
-base64 -w0 shuku-release.jks   # 结果填进 ANDROID_KEYSTORE_BASE64
+```sh
+keytool -genkeypair -storetype PKCS12 -keystore shuku-release.p12 \
+  -alias shuku -keyalg RSA -keysize 3072 -validity 10000
+base64 < shuku-release.p12 | tr -d '\n' | gh secret set ANDROID_KEYSTORE_BASE64 -R chinrw/shuku
+gh secret set ANDROID_KEY_ALIAS -R chinrw/shuku --body shuku
+gh secret set ANDROID_KEYSTORE_PASSWORD -R chinrw/shuku
+gh secret set ANDROID_KEY_PASSWORD -R chinrw/shuku
 ```
 
-在仓库的 Settings › Secrets and variables › Actions 里添加 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`（上面是 `shuku`）和 `ANDROID_KEY_PASSWORD`。密钥文件自己备份好，丢了以后新版本就不能覆盖安装。
+用上面的 PKCS12 密钥时，最后两条命令都在提示时输入创建密钥时设置的同一个密码。备份密钥文件和密码；GitHub 不提供 secret 值下载。配置后在 main 上手动运行一次 [Clients](https://github.com/chinrw/shuku/actions/workflows/clients.yml)，Nightly 就会换成固定签名的 APK。临时签名的旧包需先卸载一次，以后用同一密钥签名的新版可覆盖安装。
