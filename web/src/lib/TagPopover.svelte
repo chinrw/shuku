@@ -1,22 +1,27 @@
 <script lang="ts">
-	import type { ArchiveItem } from './api';
+	import type { ArchiveItem, SeriesRef } from './api';
+	import Icon from './Icon.svelte';
 	import { fade, slide } from './motion';
 	import TagTable from './TagTable.svelte';
 	import { tagRows } from './tags';
 
-	// 宽屏是贴着标签行的浮层；手机上屏幕太窄，改成底部弹出的面板。
+	// 宽屏是贴着标签行的浮层；窄屏上屏幕太窄，改成从底部滑出的标签面板。
 	let {
 		item,
+		series = null,
 		anchor,
 		sheet,
 		onclose,
+		ondetail,
 		onpointerenter,
 		onpointerleave
 	}: {
 		item: ArchiveItem;
+		series?: SeriesRef | null;
 		anchor: DOMRect;
 		sheet: boolean;
 		onclose: () => void;
+		ondetail?: () => void;
 		onpointerenter: (event: PointerEvent) => void;
 		onpointerleave: (event: PointerEvent) => void;
 	} = $props();
@@ -37,24 +42,35 @@
 	});
 </script>
 
-<!-- 底部面板滑上来、遮罩淡入；宽屏的浮层直接出现。关上时直接消失，书库页这时已经把 item 清空了。
-	遮罩不放进 {#if} 里，否则它不是随这个组件一起出现的，进场动画不会播放。 -->
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="scrim" class:hidden={!sheet} onclick={onclose} in:fade></div>
+<!-- 窄屏上是底部滑入滑出的面板和遮罩；宽屏上 motion.ts 对 from: null 使用 0ms，浮层立即出现和消失。 -->
+{#if sheet}
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<div class="scrim" onclick={onclose} in:fade out:fade></div>
+{/if}
 <div
 	class="popover"
 	class:sheet
 	style={sheet ? undefined : position}
 	in:slide={{ from: sheet ? 'bottom' : null }}
+	out:slide={{ from: sheet ? 'bottom' : null }}
 	role="dialog"
 	tabindex="-1"
-	aria-label="{item.title} 的标签"
+	aria-label="{series ? series.name : item.title} 的标签"
 	{onpointerenter}
 	{onpointerleave}
 >
 	{#if sheet}
 		<div class="head">
-			<a class="title" href="/a/{item.id}">{item.title}</a>
+			{#if series}
+				<a class="title" href="/s/{series.id}">{series.name}</a>
+			{:else if ondetail}
+				<button class="title" onclick={ondetail}>{item.title}</button>
+			{:else}
+				<a class="title" href="/a/{item.id}">{item.title}</a>
+			{/if}
+			<button class="close" onclick={onclose} aria-label="关闭标签">
+				<Icon name="close" size={18} />
+			</button>
 		</div>
 	{/if}
 	<TagTable rows={tagRows(item)} saveable />
@@ -65,6 +81,7 @@
 		position: fixed;
 		z-index: 20;
 		overflow-y: auto;
+		overscroll-behavior: contain;
 		padding: 0.75rem;
 		border: 1px solid var(--border);
 		border-radius: 10px;
@@ -88,17 +105,47 @@
 		background: rgb(0 0 0 / 0.45);
 	}
 
-	.scrim.hidden {
-		display: none;
-	}
-
 	.head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
 		margin-bottom: 0.75rem;
 	}
 
 	.title {
+		min-width: 0;
+		padding: 0;
+		border: none;
+		background: none;
+		color: inherit;
+		font: inherit;
 		font-weight: 600;
 		line-height: 1.4;
+		text-align: left;
 		text-decoration: none;
+		overflow-wrap: anywhere;
+		cursor: pointer;
+	}
+
+	.title:hover {
+		color: var(--link);
+	}
+
+	.close {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin: -0.25rem -0.25rem 0 0;
+		padding: 0.35rem;
+		border: none;
+		background: transparent;
+		color: var(--muted);
+		cursor: pointer;
+	}
+
+	.close:hover {
+		color: var(--fg);
 	}
 </style>

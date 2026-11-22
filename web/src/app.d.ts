@@ -5,6 +5,7 @@ declare global {
 		interface PageState {
 			panel?: 'detail' | 'settings';
 			drawer?: number;
+			tags?: number;
 		}
 	}
 

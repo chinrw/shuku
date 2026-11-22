@@ -11,7 +11,7 @@
 	import TagTable from '#lib/TagTable.svelte';
 	import { tagRows } from '#lib/tags.ts';
 
-	// 书库里点标题或标签行，从右侧滑出这本书的详情。电脑上不加遮罩，
+	// 书库里点标题，从右侧滑出这本书的详情。电脑上不加遮罩，
 	// 抽屉开着也能点别的书换一本；手机上抽屉占满屏幕宽，点遮罩关闭。
 	let {
 		item,

@@ -122,6 +122,7 @@
 	let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 	onDestroy(() => {
 		clearTimeout(reloadTimer);
+		clearTimeout(hoverTimer);
 		prefs.ungroupForBatch = false;
 	});
 
@@ -129,6 +130,7 @@
 	let startingBatch = $state(false);
 	async function startBatch() {
 		if (startingBatch) return;
+		closeTags();
 		if (data.group) {
 			startingBatch = true;
 			prefs.ungroupForBatch = true;
@@ -393,51 +395,83 @@
 	}
 
 	function toggleView() {
+		closeTags();
 		prefs.view = prefs.view === 'grid' ? 'list' : 'grid';
 		prefs.save();
 	}
 
-	// 标签弹窗：鼠标悬停时打开，移开后稍等再关，让鼠标能移进弹窗里点标签；触屏点一下打开。
+	// 标签弹窗：鼠标悬停时打开，移开后稍等再关，让鼠标能移进弹窗里点标签；
+	// 触屏或键盘点底部标签行打开（窄屏是加进历史记录的底部面板，宽屏是贴着标签行的浮层）。
 	const HOVER_DELAY = 150;
 	let tagView = $state<{ item: ArchiveItem; anchor: DOMRect; sheet: boolean } | null>(null);
 	let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+	let tagPointer = '';
 
-	function openTags(item: ArchiveItem, target: HTMLElement) {
+	function openTags(item: ArchiveItem, target: HTMLElement, sheet: boolean) {
 		clearTimeout(hoverTimer);
-		tagView = { item, anchor: target.getBoundingClientRect(), sheet: window.innerWidth < 600 };
+		if (sheet) {
+			const hadHistory = route.state.drawer !== undefined || route.state.tags !== undefined;
+			drawer = null;
+			tagView = { item, anchor: target.getBoundingClientRect(), sheet: true };
+			if (hadHistory) replaceState('', { tags: item.id });
+			else pushState('', { tags: item.id });
+		} else {
+			tagView = { item, anchor: target.getBoundingClientRect(), sheet: false };
+		}
 	}
 
 	function closeTags() {
 		clearTimeout(hoverTimer);
+		if (!tagView) return;
+		const wasSheet = tagView.sheet;
 		tagView = null;
+		if (wasSheet && route.state.tags !== undefined) history.back();
+	}
+
+	function clickTags(event: MouseEvent, item: ArchiveItem) {
+		const pointer = tagPointer;
+		tagPointer = '';
+		const target = event.currentTarget as HTMLElement;
+		const sheet = window.innerWidth < 600;
+		// 触屏或键盘再次点同一张卡的标签行时收起；鼠标因悬停已提前打开浮层，点击时不反手关掉。
+		if (pointer !== 'mouse' && tagView?.item.id === item.id) {
+			closeTags();
+			return;
+		}
+		openTags(item, target, sheet);
 	}
 
 	function hoverIn(event: PointerEvent, item?: ArchiveItem) {
-		if (event.pointerType !== 'mouse') return;
+		if (event.pointerType !== 'mouse' || selecting || tagView?.sheet) return;
 		clearTimeout(hoverTimer);
 		const target = event.currentTarget as HTMLElement;
-		if (item) hoverTimer = setTimeout(() => openTags(item, target), HOVER_DELAY);
+		if (item) hoverTimer = setTimeout(() => openTags(item, target, false), HOVER_DELAY);
 	}
 
 	function hoverOut(event: PointerEvent) {
-		if (event.pointerType !== 'mouse') return;
+		if (event.pointerType !== 'mouse' || tagView?.sheet) return;
 		clearTimeout(hoverTimer);
 		hoverTimer = setTimeout(() => (tagView = null), HOVER_DELAY);
 	}
 
-	// 点标题或标签行打开详情抽屉；鼠标悬停在标签行上仍然弹出标签浮层。
+	// 点标题打开详情抽屉；鼠标悬停或点底部标签行打开标签浮层或底部面板。
 	let drawer = $state.raw<ArchiveItem | null>(null);
-	// 抽屉里的标签链接会换一个搜索，留在原页面上的抽屉会挡住新结果；后退回到抽屉开着的
+	// 抽屉和标签面板里的标签链接会换一个搜索，留在原页面上的面板会挡住新结果；后退回到开着的
 	// 那条记录时再找回那本书。
 	afterNavigate(() => {
-		const id = route.state.drawer;
-		drawerInHistory = id;
+		const drawerId = route.state.drawer;
+		const tagsId = route.state.tags;
+		drawerInHistory = drawerId;
+		tagsInHistory = tagsId;
 		movesSeen = moves;
-		drawer = id === undefined ? null : findBook(id);
+		clearTimeout(hoverTimer);
+		drawer = drawerId === undefined ? null : findBook(drawerId);
+		const tagItem = tagsId === undefined ? null : findBook(tagsId);
+		tagView = tagItem ? { item: tagItem, anchor: new DOMRect(), sheet: true } : null;
 	});
 
 	// refreshAll 在重新加载期间不管别的，加载完把 page.state 换回开始时的值，加载中打开或关上的
-	// 抽屉会被它改回去。只有前进后退或换页以后 page.state 的变化才算数，其余的按眼下的抽屉写回去。
+	// 抽屉或底部标签面板会被它改回去。只有前进后退或换页以后 page.state 的变化才算数，其余的按眼下的写回去。
 	let moves = 0;
 	let movesSeen = 0;
 	beforeNavigate(() => {
@@ -449,12 +483,16 @@
 		return () => window.removeEventListener('popstate', onPopState);
 	});
 
-	// 列表刷新（例如批量改标签后的延迟刷新）时抽屉保持开着，换成同一本书的新数据。
+	// 列表刷新（例如批量改标签后的延迟刷新）时抽屉和标签弹窗保持开着，换成同一本书的新数据。
 	$effect(() => {
 		void items;
 		void data.recent;
 		untrack(() => {
 			if (drawer) drawer = findBook(drawer.id) ?? drawer;
+			if (tagView) {
+				const updated = findBook(tagView.item.id);
+				if (updated) tagView = { ...tagView, item: updated };
+			}
 		});
 	});
 
@@ -464,11 +502,14 @@
 	}
 
 	// 打开抽屉时加一条历史记录，手机的返回手势和浏览器的后退只关抽屉，不离开书库。
+	// 如果已经开着窄屏底部标签面板，直接替换那条历史记录，免得和 history.back() 竞争。
 	function openDrawer(item: ArchiveItem) {
-		closeTags();
-		if (drawer === null) pushState('', { drawer: item.id });
-		else replaceState('', { drawer: item.id });
+		clearTimeout(hoverTimer);
+		const hadHistory = route.state.drawer !== undefined || route.state.tags !== undefined;
+		tagView = null;
 		drawer = item;
+		if (hadHistory) replaceState('', { drawer: item.id });
+		else pushState('', { drawer: item.id });
 	}
 
 	function closeDrawer() {
@@ -477,19 +518,28 @@
 		if (route.state.drawer !== undefined) history.back();
 	}
 
-	// 抽屉跟着历史记录走：后退弹掉那条记录时关上，前进回来时在当前列表里找回那本再打开。
+	// 抽屉和窄屏底部标签面板跟着历史记录走：后退弹掉那条记录时关上，前进回来时在当前列表里找回那本再打开。
 	let drawerInHistory: number | undefined = undefined;
+	let tagsInHistory: number | undefined = undefined;
 	$effect(() => {
-		const id = route.state.drawer;
-		if (id === drawerInHistory) return;
+		const drawerId = route.state.drawer;
+		const tagsId = route.state.tags;
+		if (drawerId === drawerInHistory && tagsId === tagsInHistory) return;
 		untrack(() => {
-			if (moves === movesSeen && id !== drawer?.id) {
-				replaceState('', drawer ? { drawer: drawer.id } : {});
+			const currentTags = tagView?.sheet ? tagView.item.id : undefined;
+			if (moves === movesSeen && (drawerId !== drawer?.id || tagsId !== currentTags)) {
+				replaceState(
+					'',
+					drawer ? { drawer: drawer.id } : currentTags !== undefined ? { tags: currentTags } : {}
+				);
 				return;
 			}
 			movesSeen = moves;
-			drawerInHistory = id;
-			drawer = id === undefined ? null : findBook(id);
+			drawerInHistory = drawerId;
+			tagsInHistory = tagsId;
+			drawer = drawerId === undefined ? null : findBook(drawerId);
+			const tagItem = tagsId === undefined ? null : findBook(tagsId);
+			tagView = tagItem ? { item: tagItem, anchor: new DOMRect(), sheet: true } : null;
 		});
 	});
 </script>
@@ -749,7 +799,8 @@
 						class="tags"
 						aria-label="查看全部标签"
 						aria-expanded={tagView?.item.id === item.id}
-						onclick={() => openDrawer(item)}
+						onpointerdown={(event) => (tagPointer = event.pointerType)}
+						onclick={(event) => clickTags(event, item)}
 						onpointerenter={(event) => hoverIn(event, item)}
 						onpointerleave={hoverOut}
 					>
@@ -824,11 +875,14 @@
 {/if}
 
 {#if tagView}
+	{@const view = tagView}
 	<TagPopover
-		item={tagView.item}
-		anchor={tagView.anchor}
-		sheet={tagView.sheet}
+		item={view.item}
+		series={seriesOf(view.item)}
+		anchor={view.anchor}
+		sheet={view.sheet}
 		onclose={closeTags}
+		ondetail={() => openDrawer(view.item)}
 		onpointerenter={(event) => hoverIn(event)}
 		onpointerleave={hoverOut}
 	/>
@@ -837,8 +891,8 @@
 <svelte:window
 	onkeydown={(event) => {
 		if (event.key !== 'Escape') return;
-		closeTags();
-		closeDrawer();
+		if (tagView) closeTags();
+		else closeDrawer();
 	}}
 	onscroll={() => tagView && !tagView.sheet && closeTags()}
 	onpointerdown={(event) => {
@@ -1272,6 +1326,9 @@
 	}
 
 	.tags {
+		flex: 1;
+		display: flex;
+		align-items: flex-start;
 		-webkit-tap-highlight-color: transparent;
 		padding: 0;
 		border: none;
@@ -1280,8 +1337,17 @@
 		cursor: pointer;
 	}
 
-	.tags:hover :global(.tagline) {
+	.tags:hover :global(.tagline),
+	.tags:active :global(.tagline) {
 		color: var(--fg);
+	}
+
+	@media (pointer: coarse) {
+		.tags {
+			min-height: 2rem;
+			margin-bottom: -0.4rem;
+			padding-bottom: 0.4rem;
+		}
 	}
 
 	.cover img {
