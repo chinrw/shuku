@@ -216,11 +216,21 @@ jobs:
           test -n "$apk"
           if [ "$PUBLISH" = true ]; then
             tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-            cert=$("$tools/apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            "$tools/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/apk-certs"
+            # v3 签名的标题可以带适用的 SDK 范围；同一证书出现在多个范围时只计一次。
+            cert=$(sed -n 's/^Signer .* certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-certs" | sort -u)
+            printf 'APK signer SHA-256: %s\n' "$cert"
             test "$cert" = e920b8aac11cae58c8dc9d4aa76d3cf11bc8946b57ffe24bde226705661589d6
+
+            analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
             version=$(jq -r .version tauri.conf.json)
-            "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/apk-badging"
-            grep -F "package: name='io.github.chinrw.shuku' versionCode='${version##*+}' versionName='$version'" "$RUNNER_TEMP/apk-badging"
+            package_id=$("$analyzer" manifest application-id "$apk")
+            code=$("$analyzer" manifest version-code "$apk")
+            name=$("$analyzer" manifest version-name "$apk")
+            printf 'APK: %s, versionCode=%s, versionName=%s\n' "$package_id" "$code" "$name"
+            test "$package_id" = io.github.chinrw.shuku
+            test "$code" = "${version##*+}"
+            test "$name" = "$version"
           fi
           cp "$apk" "$GITHUB_WORKSPACE/dist/shuku-android-arm64.apk"
 
