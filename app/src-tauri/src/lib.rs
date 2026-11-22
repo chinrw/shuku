@@ -16,6 +16,15 @@ const HOME: &str = "tauri://localhost/index.html";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(
+        tauri::plugin::Builder::<_, ()>::new("lan")
+            .setup(|_, api| {
+                api.register_android_plugin("io.github.chinrw.shuku", "LocalNetworkPlugin")?;
+                Ok(())
+            })
+            .build(),
+    );
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
@@ -34,7 +43,10 @@ pub fn run() {
         .setup(|app| {
             // 服务器的网页端看到 `window.shukuApp` 就知道自己在客户端里，左上角的书库名改成
             // 回到服务器列表。脚本在每次加载页面前运行，服务器的页面也有它。
-            let script = format!("window.shukuApp = Object.freeze({{ home: {HOME:?} }});");
+            let android = cfg!(target_os = "android");
+            let script = format!(
+                "window.shukuApp = Object.freeze({{ home: {HOME:?}, android: {android} }});"
+            );
             let handle = app.handle().clone();
             let builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

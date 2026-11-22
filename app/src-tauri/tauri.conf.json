@@ -29,7 +29,7 @@
       "signingIdentity": "-"
     }
   },
-  "version": "0.1.1+1001",
+  "version": "0.1.1+1002",
   "plugins": {
     "updater": {
       "pubkey": "",

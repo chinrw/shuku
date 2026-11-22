@@ -54,3 +54,35 @@ test('fetchInfo explains failures', async () => {
 		/连不上/
 	);
 });
+
+test('fetchInfo retries the same server after Android grants LAN access', async () => {
+	const info = { name: '书库', version: '0.1.0', archives: 3, require_token: false };
+	const calls = [];
+	let granted = false;
+	const fetcher = async (url) => {
+		calls.push(url);
+		if (!granted) throw new TypeError('Failed to fetch');
+		return Response.json(info);
+	};
+	const grant = async () => { calls.push('permission'); granted = true; return true; };
+	assert.deepEqual(await fetchInfo('http://192.168.0.231:3002', fetcher, grant), info);
+	assert.deepEqual(calls, ['http://192.168.0.231:3002/api/info', 'permission', 'http://192.168.0.231:3002/api/info']);
+});
+
+test('fetchInfo does not prompt for a working public server or an HTTP error', async () => {
+	const unexpected = () => assert.fail('不应申请局域网权限');
+	const ok = { name: '公网书库', version: '0.1.0', archives: 1, require_token: true };
+	assert.deepEqual(await fetchInfo('https://example.org', async () => Response.json(ok), unexpected), ok);
+	await assert.rejects(fetchInfo('https://example.org', async () => new Response(null, {status: 403}), unexpected), /403/);
+});
+
+test('fetchInfo preserves a permission denial and does not retry an offline server indefinitely', async () => {
+	let requests = 0;
+	const offline = async () => { requests++; throw new TypeError('Failed to fetch'); };
+	await assert.rejects(fetchInfo('http://nas', offline, async () => { throw new Error('未获局域网权限'); }), /未获局域网权限/);
+	assert.equal(requests, 1);
+	await assert.rejects(fetchInfo('http://nas', offline, async () => false), /连不上/);
+	assert.equal(requests, 2);
+	await assert.rejects(fetchInfo('http://nas', offline, async () => true), /连不上/);
+	assert.equal(requests, 4);
+});

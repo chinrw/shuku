@@ -5,6 +5,11 @@ fn main() {
         "check_client_update",
         "install_client_update",
     ]);
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
-        .expect("生成客户端权限失败");
+    let lan = tauri_build::InlinedPlugin::new().commands(&["after_failure"]);
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(commands)
+            .plugin("lan", lan),
+    )
+    .expect("生成客户端权限失败");
 }

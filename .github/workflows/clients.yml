@@ -223,6 +223,8 @@ jobs:
             test "$cert" = e920b8aac11cae58c8dc9d4aa76d3cf11bc8946b57ffe24bde226705661589d6
 
             analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+            "$analyzer" manifest permissions "$apk" > "$RUNNER_TEMP/apk-permissions"
+            grep -Fx android.permission.ACCESS_LOCAL_NETWORK "$RUNNER_TEMP/apk-permissions"
             version=$(jq -r .version tauri.conf.json)
             package_id=$("$analyzer" manifest application-id "$apk")
             code=$("$analyzer" manifest version-code "$apk")

@@ -1,0 +1,7 @@
+{
+  "identifier": "android-lan",
+  "description": "服务器列表连接失败时可以请求 Android 局域网权限。",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["lan:allow-after-failure"]
+}

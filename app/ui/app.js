@@ -25,6 +25,23 @@ let checked = null;
  */
 let pendingOpen = null;
 
+// 表单的地址变更和提交可能同时等授权，两者共用一次系统对话框。
+let permissionRequest;
+function serverInfo(origin, interactive = false) {
+	if (!window.shukuApp?.android) return fetchInfo(origin);
+	return fetchInfo(origin, fetch, async () => {
+		const ask = () => window.__TAURI__.core.invoke('plugin:lan|after_failure', { interactive });
+		try {
+			const result = interactive
+				? await (permissionRequest ??= ask().finally(() => { permissionRequest = null; }))
+				: await ask();
+			return result.retry;
+		} catch (error) {
+			throw new Error(typeof error === 'string' ? error : error.message);
+		}
+	});
+}
+
 function persist() {
 	localStorage.setItem(SERVERS_KEY, JSON.stringify(servers));
 	if (current) localStorage.setItem(CURRENT_KEY, current);
@@ -65,7 +82,7 @@ function serverItem(server) {
 		if (editing) return showForm(server);
 		pendingOpen = server;
 		button.disabled = true;
-		probe(server, state).then((online) => {
+		probe(server, state, true).then((online) => {
 			button.disabled = false;
 			if (online && pendingOpen === server) open(server);
 		});
@@ -76,9 +93,9 @@ function serverItem(server) {
 }
 
 /** 读服务器信息并显示在线状态，返回是否在线。 */
-async function probe(server, state) {
+async function probe(server, state, interactive = false) {
 	try {
-		const info = await fetchInfo(server.url);
+		const info = await serverInfo(server.url, interactive);
 		state.className = 'state online';
 		state.textContent = `在线 · ${info.archives.toLocaleString('zh-CN')} 本`;
 		return true;
@@ -122,7 +139,7 @@ function showForm(server) {
 }
 
 /** 按表单里的地址读服务器信息，显示状态，需要令牌时露出令牌一栏。 */
-async function check() {
+async function check(interactive = false) {
 	let origin;
 	try {
 		origin = normalizeUrl(/** @type {HTMLInputElement} */ ($('url')).value);
@@ -134,7 +151,7 @@ async function check() {
 	if (checked?.origin === origin) return checked;
 	setStatus(false, '正在连接…', '');
 	try {
-		const info = await fetchInfo(origin);
+		const info = await serverInfo(origin, interactive);
 		checked = { origin, info };
 		setStatus(
 			false,
@@ -171,7 +188,7 @@ async function save(event) {
 	// 免得把另一台的令牌和这一台的地址存在一起。
 	const target = formServer;
 	try {
-		const result = await check();
+		const result = await check(true);
 		if (!result || formServer !== target || $('form').hidden) return;
 		const token = /** @type {HTMLInputElement} */ ($('token')).value.trim() || null;
 		if (result.info.require_token && !token) {
@@ -231,7 +248,7 @@ function start() {
 		// 先确认服务器在线。不在线时停在列表上，不然窗口里只剩一张出错的页面，回不到这里。
 		showList();
 		pendingOpen = last;
-		fetchInfo(last.url).then(
+		serverInfo(last.url).then(
 			() => {
 				if (pendingOpen === last) open(last);
 			},
@@ -249,7 +266,7 @@ $('toggle-edit').addEventListener('click', () => {
 });
 $('add').addEventListener('click', () => showForm(null));
 $('back').addEventListener('click', showList);
-$('url').addEventListener('change', () => void check());
+$('url').addEventListener('change', () => void check(true));
 $('server-form').addEventListener('submit', save);
 $('remove').addEventListener('click', remove);
 void setupUpdates(() => { pendingOpen = null; });

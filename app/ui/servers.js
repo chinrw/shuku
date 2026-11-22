@@ -74,14 +74,21 @@ export function upsert(servers, server) {
  * 读 `/api/info`。服务器不在线或者不是 Shuku 时抛出错误，消息给人看。
  * @param {string} origin
  * @param {typeof fetch} [fetcher]
+ * @param {(() => Promise<boolean>) | undefined} retryAfterPermission
  * @returns {Promise<ServerInfo>}
  */
-export async function fetchInfo(origin, fetcher = fetch) {
+export async function fetchInfo(origin, fetcher = fetch, retryAfterPermission) {
+	const request = () => fetcher(`${origin}/api/info`, { signal: AbortSignal.timeout(5000) });
 	let response;
 	try {
-		response = await fetcher(`${origin}/api/info`, { signal: AbortSignal.timeout(5000) });
+		response = await request();
 	} catch {
-		throw new Error('连不上这个地址');
+		if (!retryAfterPermission || !(await retryAfterPermission())) throw new Error('连不上这个地址');
+		try {
+			response = await request();
+		} catch {
+			throw new Error('连不上这个地址');
+		}
 	}
 	if (!response.ok) throw new Error(`服务器返回 ${response.status}，可能不是 Shuku 或者版本太旧`);
 	const info = await response.json().catch(() => null);
