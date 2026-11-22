@@ -13,6 +13,7 @@ pub struct ScanEntry {
     pub file_size: u64,
     pub mtime: i64,
     pub quick_hash: String,
+    pub missing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +85,7 @@ pub struct LrrTankoubon {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Archive {
     pub id: i64,
+    pub missing: bool,
     pub metadata: ArchiveMetadata,
     pub page_count: u32,
     pub tags: Vec<Tag>,
@@ -193,8 +195,16 @@ pub struct LibraryStats {
     pub lrr_pending: u64,
     /// 有坏页的归档数。
     pub with_broken_pages: u64,
+    pub missing: u64,
     pub categories: u64,
     pub tankoubons: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MissingArchive {
+    pub id: i64,
+    pub path: String,
+    pub title: String,
 }
 
 /// 有坏页的归档，见 [`crate::Reader::broken_archives`]。

@@ -170,6 +170,7 @@ impl Snapshot {
         let mut read: Vec<(i64, i64)> = self
             .progress
             .iter()
+            .filter(|(id, _)| self.item(**id).is_some())
             .map(|(&id, progress)| (progress.client_time, id))
             .collect();
         // 时间相同时按 ID 从大到小，结果不随 HashMap 的遍历顺序变化。

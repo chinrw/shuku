@@ -97,9 +97,13 @@
 </nav>
 
 <main>
-	<a class="cover" href="/a/{book.id}/read?page={resumePage}">
-		<img src={book.cover_url} alt="" />
-	</a>
+	{#if book.missing}
+		<div class="cover"><img src="/missing-cover.webp" alt="文件缺失" width="512" height="768" /></div>
+	{:else}
+		<a class="cover" href="/a/{book.id}/read?page={resumePage}">
+			<img src={book.cover_url} alt="" />
+		</a>
+	{/if}
 
 	<section class="head">
 		<h1>{book.title}</h1>
@@ -114,16 +118,18 @@
 			{/if}
 		</p>
 		<div class="actions">
-			{#if book.progress}
-				<a class="primary" href="/a/{book.id}/read?page={resumePage}">继续阅读</a>
-				<a href="/a/{book.id}/read?page=0">从头</a>
-			{:else}
-				<a class="primary" href="/a/{book.id}/read?page=0">开始阅读</a>
+			{#if !book.missing}
+				{#if book.progress}
+					<a class="primary" href="/a/{book.id}/read?page={resumePage}">继续阅读</a>
+					<a href="/a/{book.id}/read?page=0">从头</a>
+				{:else}
+					<a class="primary" href="/a/{book.id}/read?page=0">开始阅读</a>
+				{/if}
+				{#if book.series?.next != null}
+					<a href="/a/{book.series.next}/read">下一卷</a>
+				{/if}
+				<a href={downloadUrl(book.id)} download>下载</a>
 			{/if}
-			{#if book.series?.next != null}
-				<a href="/a/{book.series.next}/read">下一卷</a>
-			{/if}
-			<a href={downloadUrl(book.id)} download>下载</a>
 			{#if editing?.id !== book.id}
 				<button onclick={() => (editing = { id: book.id })}>编辑</button>
 			{/if}
@@ -167,7 +173,7 @@
 		{/if}
 	{/if}
 
-	{#if data.pages.length}
+	{#if !book.missing && data.pages.length}
 		<div class="pages">
 			<PageGrid archive={book.id} pages={data.pages} current={book.progress ? resumePage : null} />
 		</div>
@@ -226,6 +232,7 @@
 	}
 
 	.cover img {
+		height: auto;
 		width: 100%;
 		border-radius: 8px;
 		background: var(--chip);

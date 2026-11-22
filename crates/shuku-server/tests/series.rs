@@ -82,6 +82,35 @@ async fn volumes_are_grouped_into_series_and_collapse_in_the_library() {
 }
 
 #[tokio::test]
+async fn missing_volumes_are_not_series_members_or_reading_destinations() {
+    let fixture = Fixture::new();
+    for volume in 1..=3 {
+        fixture.archive_with_pages(&format!("作品/0{volume}.zip"), volume);
+    }
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let router = app.router();
+    let work = fixture.config.content_dir.join("作品");
+    std::fs::remove_file(work.join("02.zip")).unwrap();
+    app.scan().await.unwrap();
+    let listed = json(&router, "/api/search?group=series").await;
+    let first = &listed["items"][0];
+    assert_eq!(first["series"]["volumes"], 2);
+    let volumes = json(&router, &format!("/api/series/{}", first["series"]["id"])).await;
+    assert_eq!(titles(&volumes), ["作品 01", "作品 03"]);
+    let detail_url = format!("/api/archives/{}", first["id"]);
+    assert_eq!(
+        json(&router, &detail_url).await["series"]["next"],
+        volumes["items"][1]["id"]
+    );
+
+    std::fs::remove_file(work.join("03.zip")).unwrap();
+    app.scan().await.unwrap();
+    assert!(json(&router, &detail_url).await["series"].is_null());
+    assert!(json(&router, "/api/search?group=series").await["items"][0]["series"].is_null());
+}
+
+#[tokio::test]
 async fn filename_parsing_still_sees_the_original_name_of_a_volume() {
     let fixture = Fixture::new();
     fixture.archive_with_pages("作品/VOL_1.zip", 1);

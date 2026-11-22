@@ -8,7 +8,7 @@ use shuku_store::{Error, Store, open_connection};
 fn rejects_newer_schema_versions_without_changing_them() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    for version in [13, 15] {
+    for version in [14, 15] {
         let connection = Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "user_version", version)
@@ -60,7 +60,7 @@ fn opens_configured_database_and_preserves_data_when_reopened() {
             .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(pragma("user_version"), 12);
+    assert_eq!(pragma("user_version"), 13);
     assert_eq!(pragma("synchronous"), 1);
     assert_eq!(pragma("foreign_keys"), 1);
     assert_eq!(pragma("mmap_size"), 0x7fff_0000);
@@ -310,20 +310,30 @@ fn device_tokens_are_found_by_hash_touched_and_revoked() {
 fn migration_marks_progress_at_the_last_page_as_finished() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("shuku.sqlite");
-    // 先建到迁移 011 为止的库，再放三本书的进度：停在最后一页、停在中间、页数为 0。
-    drop(open_connection(&path).unwrap());
+    // 从实际的 011 表结构升级，进度分别停在最后一页和中间。
     let connection = Connection::open(&path).unwrap();
     connection
-        .execute_batch(
-            "ALTER TABLE progress DROP COLUMN finished;
-             PRAGMA user_version = 11;
+        .execute_batch(concat!(
+            include_str!("../src/migrations/001_initial.sql"),
+            include_str!("../src/migrations/002_lrr_ids.sql"),
+            include_str!("../src/migrations/003_page_list.sql"),
+            "DROP TABLE page;",
+            include_str!("../src/migrations/004_lrr_pending.sql"),
+            include_str!("../src/migrations/005_category_ids.sql"),
+            include_str!("../src/migrations/006_broken_pages.sql"),
+            include_str!("../src/migrations/007_settings.sql"),
+            include_str!("../src/migrations/008_metadata_queue.sql"),
+            include_str!("../src/migrations/009_series.sql"),
+            include_str!("../src/migrations/010_metadata_sources.sql"),
+            include_str!("../src/migrations/011_device_tokens.sql"),
+            "PRAGMA user_version = 11;
              INSERT INTO archive (id, path, title, summary, page_count, file_size, mtime,
                  quick_hash, content_hash, is_new, date_added, source_url)
                  VALUES (1, 'a.cbz', 'A', '', 3, 1, 0, 'h', NULL, 0, 0, NULL),
                         (2, 'b.cbz', 'B', '', 3, 1, 0, 'h', NULL, 0, 0, NULL);
              INSERT INTO progress (archive_id, page, client_time, updated_at)
-                 VALUES (1, 2, 1, 1), (2, 1, 1, 1);",
-        )
+                 VALUES (1, 2, 1, 1), (2, 1, 1, 1);"
+        ))
         .unwrap();
     drop(connection);
 

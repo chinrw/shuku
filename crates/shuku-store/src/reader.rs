@@ -53,7 +53,9 @@ impl Reader {
     pub fn scan_entries(&self) -> Result<Vec<ScanEntry>> {
         Ok(self
             .connection
-            .prepare("SELECT id, path, file_size, mtime, quick_hash FROM archive ORDER BY id")?
+            .prepare(
+                "SELECT id, path, file_size, mtime, quick_hash, missing FROM archive ORDER BY id",
+            )?
             .query_map([], |row| {
                 Ok(ScanEntry {
                     id: row.get(0)?,
@@ -61,6 +63,7 @@ impl Reader {
                     file_size: row.get(2)?,
                     mtime: row.get(3)?,
                     quick_hash: row.get(4)?,
+                    missing: row.get(5)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
@@ -72,7 +75,7 @@ impl Reader {
         Ok(self
             .connection
             .prepare(
-                "SELECT id, path, file_size, mtime, quick_hash FROM archive
+                "SELECT id, path, file_size, mtime, quick_hash, missing FROM archive
                  WHERE content_hash IS NULL AND id > ?1 ORDER BY id LIMIT ?2",
             )?
             .query_map(params![after, limit as i64], |row| {
@@ -82,6 +85,7 @@ impl Reader {
                     file_size: row.get(2)?,
                     mtime: row.get(3)?,
                     quick_hash: row.get(4)?,
+                    missing: row.get(5)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
@@ -179,7 +183,7 @@ impl Reader {
             .prepare(
                 "SELECT id, title, page_count, quick_hash, is_new, date_added, source_url,
                     series_id, volume
-                 FROM archive ORDER BY id",
+                 FROM archive WHERE missing = 0 ORDER BY id",
             )?
             .query_map([], |row| {
                 let series = row.get::<_, Option<i64>>(7)?;
@@ -253,7 +257,7 @@ impl Reader {
     pub fn archive_series(&self, id: i64) -> Result<Option<Series>> {
         let series = self
             .connection
-            .prepare_cached("SELECT series_id FROM archive WHERE id = ?1")?
+            .prepare_cached("SELECT series_id FROM archive WHERE id = ?1 AND missing = 0")?
             .query_row([id], |row| row.get::<_, Option<i64>>(0))
             .optional()?
             .flatten();
@@ -267,7 +271,9 @@ impl Reader {
         )?;
         let volumes = self
             .connection
-            .prepare_cached("SELECT id FROM archive WHERE series_id = ?1 ORDER BY volume, id")?
+            .prepare_cached(
+                "SELECT id FROM archive WHERE series_id = ?1 AND missing = 0 ORDER BY volume, id",
+            )?
             .query_map([series], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<i64>>>()?;
         Ok((volumes.len() >= 2).then_some(Series {
@@ -312,7 +318,8 @@ impl Reader {
                     (SELECT count(*) FROM lrr_pending),
                     (SELECT count(*) FROM category),
                     (SELECT count(*) FROM tankoubon),
-                    (SELECT count(*) FROM archive WHERE broken_pages > 0)",
+                    (SELECT count(*) FROM archive WHERE broken_pages > 0),
+                    (SELECT count(*) FROM archive WHERE missing = 1)",
             [],
             |row| {
                 Ok(LibraryStats {
@@ -326,9 +333,31 @@ impl Reader {
                     categories: row.get(7)?,
                     tankoubons: row.get(8)?,
                     with_broken_pages: row.get(9)?,
+                    missing: row.get(10)?,
                 })
             },
         )?)
+    }
+
+    pub fn missing_archives(&self, limit: usize) -> Result<(u64, Vec<crate::MissingArchive>)> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let total = transaction.query_row(
+            "SELECT count(*) FROM archive WHERE missing = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        let items = transaction
+            .prepare("SELECT id, path, title FROM archive WHERE missing = 1 ORDER BY id LIMIT ?1")?
+            .query_map([limit as i64], |row| {
+                Ok(crate::MissingArchive {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    title: row.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        transaction.commit()?;
+        Ok((total, items))
     }
 
     /// 有坏页的归档，按路径排序。返回总数和前 `limit` 本，每本带坏页的条目名。
@@ -410,7 +439,7 @@ fn read_series_names(connection: &Connection) -> Result<HashMap<i64, String>> {
     Ok(connection
         .prepare(
             "SELECT series.id, series.name FROM series
-             JOIN archive ON archive.series_id = series.id
+             JOIN archive ON archive.series_id = series.id AND archive.missing = 0
              GROUP BY series.id HAVING count(*) >= 2",
         )?
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -481,6 +510,7 @@ pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Ar
         .query_row("SELECT * FROM archive WHERE id = ?1", [id], |row| {
             Ok(Archive {
                 id: row.get("id")?,
+                missing: row.get("missing")?,
                 metadata: ArchiveMetadata {
                     path: row.get("path")?,
                     title: row.get("title")?,

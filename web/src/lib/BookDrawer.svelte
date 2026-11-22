@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { archive as loadArchive, downloadUrl, type ArchiveItem, type Category } from '#lib/api.ts';
+	import { archive as loadArchive, downloadUrl, type ArchiveDetail, type ArchiveItem, type Category } from '#lib/api.ts';
 	import BookmarkButton from '#lib/BookmarkButton.svelte';
 	import CategoryPicker from '#lib/CategoryPicker.svelte';
 	import FinishedButton from '#lib/FinishedButton.svelte';
@@ -27,8 +27,8 @@
 	});
 	let book = $derived(item ?? lastItem);
 
-	// 分类成员和简介只在详情接口里有，换书时重新取。
-	let detail = $state<{ id: number; members: number[]; summary: string } | null>(null);
+	// 文件是否缺失、当前分类和简介从详情接口读取。
+	let detail = $state.raw<ArchiveDetail | null>(null);
 	let detailError = $state('');
 	// 换书或关掉抽屉后，晚到的回复丢掉；关掉后 item 已经不可用，回调里不能再读它。
 	$effect(() => {
@@ -38,7 +38,7 @@
 		detailError = '';
 		loadArchive(fetch, id).then(
 			(book) => {
-				if (current) detail = { id, members: book.categories, summary: book.summary };
+				if (current) detail = book;
 			},
 			(error) => {
 				if (current) detailError = error instanceof Error ? error.message : String(error);
@@ -49,6 +49,7 @@
 		};
 	});
 
+	let missing = $derived(detail?.id === book.id && detail.missing);
 	// 列表项的进度来自快照，可能比服务端旧，所以继续阅读的链接不带页码，由阅读器取最新进度。
 	let resume = $derived(book.progress?.page ?? 0);
 </script>
@@ -65,17 +66,25 @@
 		<button class="icon-button" onclick={onclose} aria-label="关闭详情"><Icon name="close" /></button>
 	</div>
 	<div class="book">
-		<a class="cover" href="/a/{book.id}/read">
-			<img src={book.cover_url} alt="" />
-		</a>
+		{#if missing}
+			<div class="cover"><img src="/missing-cover.webp" alt="文件缺失" /></div>
+		{:else}
+			<a class="cover" href="/a/{book.id}/read">
+				<img src={book.cover_url} alt="" />
+			</a>
+		{/if}
 		<div class="info">
 			<h2>{book.title}</h2>
 			<p class="meta">{book.page_count} 页</p>
-			<a class="primary" href="/a/{book.id}/read">{book.progress ? '继续阅读' : '开始阅读'}</a>
-			<div class="reading-links">
-				{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
-				<a href="/a/{book.id}/read?panel=detail">详情</a>
-			</div>
+			{#if missing}
+				<a href="/a/{book.id}">查看缺失记录</a>
+			{:else}
+				<a class="primary" href="/a/{book.id}/read">{book.progress ? '继续阅读' : '开始阅读'}</a>
+				<div class="reading-links">
+					{#if book.progress}<a href="/a/{book.id}/read?page=0">从头</a>{/if}
+					<a href="/a/{book.id}/read?panel=detail">详情</a>
+				</div>
+			{/if}
 		</div>
 	</div>
 	<div class="reading-state">
@@ -86,9 +95,9 @@
 		<section class="section" aria-label="分类">
 			<div class="section-head">
 				<h3>分类</h3>
-				<BookmarkButton archive={book.id} members={detail.members} bind:categories />
+				<BookmarkButton archive={book.id} members={detail.categories} bind:categories />
 			</div>
-			<CategoryPicker archive={book.id} bind:categories members={detail.members} />
+			<CategoryPicker archive={book.id} bind:categories members={detail.categories} />
 		</section>
 	{:else if detailError}
 		<p class="error">分类和简介没有加载出来：{detailError}</p>
@@ -99,7 +108,7 @@
 	</section>
 	{#if detail?.id === book.id && detail.summary}<p class="summary">{detail.summary}</p>{/if}
 	<div class="secondary-actions">
-		<a href={downloadUrl(book.id)} download>下载</a>
+		{#if !missing}<a href={downloadUrl(book.id)} download>下载</a>{/if}
 		<a href="/a/{book.id}?edit">编辑资料</a>
 	</div>
 	{#key book.id}
