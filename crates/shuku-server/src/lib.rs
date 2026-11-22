@@ -18,6 +18,7 @@ mod info;
 mod logs;
 mod mcp;
 mod metadata;
+mod preflight;
 mod saved_tags;
 mod scan;
 mod series;

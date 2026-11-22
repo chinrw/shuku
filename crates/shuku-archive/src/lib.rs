@@ -4,6 +4,8 @@ mod fingerprint;
 mod folder;
 mod header;
 mod jpeg;
+mod page_fingerprint;
+pub use page_fingerprint::{page_set_signature, verified_page_set};
 
 pub use fingerprint::{content_hash, content_hash_file, quick_hash, quick_hash_file};
 pub use folder::{

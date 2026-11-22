@@ -9,6 +9,7 @@ description = "ZIP page access and fingerprints for Shuku"
 [dependencies]
 blake3 = "1"
 flate2 = "1"
+sha2 = "0.10"
 imagesize = "0.15"
 thiserror.workspace = true
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }

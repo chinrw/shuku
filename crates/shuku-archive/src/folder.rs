@@ -171,7 +171,11 @@ pub fn folder_quick_hash(dir: impl AsRef<Path>) -> Result<String> {
 
 /// 依次读完每张图片的完整指纹，文件名和长度也算进去，页面换了顺序或改了名指纹就不同。
 pub fn folder_content_hash(dir: impl AsRef<Path>) -> Result<String> {
-    let dir = dir.as_ref();
+    hash_folder(dir.as_ref(), None)
+}
+
+/// 查重补算需要同时验证旧的目录指纹。用同一份文件顺序和字节流计算两种摘要。
+pub(super) fn hash_folder(dir: &Path, mut pages: Option<&mut Vec<[u8; 32]>>) -> Result<String> {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"shuku-folder-v1");
     for (name, _) in images(dir)? {
@@ -180,7 +184,16 @@ pub fn folder_content_hash(dir: impl AsRef<Path>) -> Result<String> {
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name.as_bytes());
         hasher.update(&size.to_le_bytes());
-        hasher.update_reader((&mut file).take(size))?;
+        if let Some(digests) = pages.as_mut() {
+            digests.push(crate::page_fingerprint::hash_page(
+                file,
+                &name,
+                size,
+                Some(&mut hasher),
+            )?);
+        } else {
+            hasher.update_reader((&mut file).take(size))?;
+        }
     }
     Ok(hasher.finalize().to_hex().to_string())
 }

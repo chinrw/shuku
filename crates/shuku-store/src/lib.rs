@@ -3,6 +3,7 @@
 mod copies;
 mod metadata;
 mod models;
+mod page_fingerprint;
 mod pool;
 mod reader;
 mod store;
@@ -54,6 +55,7 @@ const MIGRATIONS: &[Migration] = &[
     (include_str!("migrations/012_progress_finished.sql"), None),
     (include_str!("migrations/013_missing.sql"), None),
     (include_str!("migrations/014_archive_copies.sql"), None),
+    (include_str!("migrations/015_page_fingerprint.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]

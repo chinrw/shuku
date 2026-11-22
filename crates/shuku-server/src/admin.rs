@@ -32,6 +32,7 @@ pub(crate) struct Tasks {
 
 #[derive(Default)]
 pub(crate) struct ScanTask {
+    generation: u64,
     running: bool,
     started_at: Option<i64>,
     finished_at: Option<i64>,
@@ -99,6 +100,14 @@ pub(crate) struct CacheUsage {
 }
 
 impl ScanTask {
+    pub(crate) fn complete_inventory(&self) -> Option<u64> {
+        (self.finished_at.is_some()
+            && !self.running
+            && self.error.is_none()
+            && self.report.failed == 0)
+            .then_some(self.generation)
+    }
+
     /// 没有扫描在跑时先占住，返回是否占到。占住以后再在后台开始扫描，
     /// 两个来源（控制台、文件监视）同时要扫时只有一个能开始。
     pub(crate) fn claim(&mut self) -> bool {
@@ -112,6 +121,7 @@ impl ScanTask {
 
     pub(crate) fn start(&mut self) {
         *self = Self {
+            generation: self.generation + 1,
             running: true,
             started_at: Some(now_ms()),
             ..Self::default()

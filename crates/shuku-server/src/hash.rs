@@ -93,6 +93,7 @@ impl App {
             return Err(db::queue_stopped());
         }
         self.group_hashed_copies()?;
+        self.backfill_page_fingerprints()?;
         tracing::info!(?report, "完整指纹计算结束");
         Ok(report)
     }
