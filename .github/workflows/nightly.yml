@@ -1,4 +1,4 @@
-name: Publish nightly clients
+name: Publish nightly
 
 on:
   workflow_run:
@@ -9,12 +9,21 @@ on:
 permissions: {}
 
 jobs:
-  publish:
+  server:
     # 只发布本仓库 main 的独立构建，不接收 PR 或正式版工作流的产物。
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/server-binary.yml
+    with:
+      revision: ${{ github.event.workflow_run.head_sha }}
+      label: nightly
+
+  publish:
+    needs: server
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -34,10 +43,17 @@ jobs:
           merge-multiple: true
           path: bundles
 
+      - uses: actions/download-artifact@v7
+        with:
+          name: release
+          path: server
+
       - name: Prepare downloads
         run: |
           mkdir dist
-          for suffix in android-arm64.apk windows-x86_64.setup.exe macos-universal.dmg linux-x86_64.AppImage linux-x86_64.deb; do
+          (cd server && sha256sum --check shuku-nightly-x86_64-linux.tar.gz.sha256)
+          mv server/shuku-nightly-x86_64-linux.tar.gz dist/
+          for suffix in android-arm64.apk windows-x86_64.setup.exe macos-universal.dmg; do
             mv "bundles/shuku-app-$SOURCE_SHA-$suffix" "dist/shuku-$suffix"
           done
           (cd dist && sha256sum shuku-* > SHA256SUMS)
@@ -45,8 +61,11 @@ jobs:
       - name: Publish development builds
         run: |
           tag=nightly
-          title='Nightly · 客户端开发版'
-          notes="来自 main 提交 [$SOURCE_SHA]($GITHUB_SERVER_URL/$GH_REPO/commit/$SOURCE_SHA)。[构建记录]($BUILD_URL)"
+          title='Shuku Nightly'
+          notes="Linux x86_64: download \`shuku-nightly-x86_64-linux.tar.gz\` for the static Shuku server binaries and web interface.
+          Client installers are available for Android, Windows, and macOS.
+
+          [Source commit]($GITHUB_SERVER_URL/$GH_REPO/commit/$SOURCE_SHA) · [Server build]($GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID) · [Client builds]($BUILD_URL)"
           if ! gh release view "$tag" > /dev/null; then
             gh release create "$tag" --target "$SOURCE_SHA" --prerelease --latest=false \
               --title "$title" --notes "$notes" dist/*
@@ -58,9 +77,15 @@ jobs:
           case "$status" in
             behind) exit 0 ;;
             identical|ahead) ;;
-            *) echo "::error::nightly 与构建提交不在同一条历史上"; exit 1 ;;
+            *) echo "::error::The nightly tag and the source commit have diverged"; exit 1 ;;
           esac
           gh release upload "$tag" --clobber dist/shuku-*
           gh release upload "$tag" --clobber dist/SHA256SUMS
+          assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+          for old in shuku-linux-x86_64.AppImage shuku-linux-x86_64.deb; do
+            if grep -Fxq "$old" <<< "$assets"; then
+              gh release delete-asset "$tag" "$old" --yes
+            fi
+          done
           gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$SOURCE_SHA" --silent
           gh release edit "$tag" --prerelease --latest=false --title "$title" --notes "$notes"

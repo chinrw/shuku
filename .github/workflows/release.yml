@@ -9,14 +9,10 @@ on:
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  TARGET: x86_64-unknown-linux-musl
-
 jobs:
-  build:
+  tag:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.tag.outputs.version }}
     steps:
@@ -32,61 +28,23 @@ jobs:
           fi
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7
+  server:
+    needs: tag
+    uses: ./.github/workflows/server-binary.yml
+    with:
+      revision: ${{ github.sha }}
+      label: ${{ github.ref_name }}
 
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-
-      # 网页端用 flake 里的 Node 和 pnpm 构建，与本地一致。
-      - name: Build web client
-        working-directory: web
-        run: nix develop -c sh -c 'pnpm install --frozen-lockfile && pnpm build'
-
-      # flake 里的 rustc 只带宿主的标准库，没有 musl 目标，所以用 runner 自带的 rustup
-      # 安装与 flake 相同版本的 rustc 和 musl 标准库。部署机是 NixOS，没有通用的 glibc
-      # 动态加载器，因此发布静态二进制。
-      - name: Install Rust matching the flake
-        run: |
-          version=$(nix develop -c rustc --version | awk '{print $2}')
-          rustup toolchain install "$version" --profile minimal --target "$TARGET"
-          rustup default "$version"
-
-      # rusqlite 的 bundled SQLite 用 musl-gcc 编译，AVIF 解码器的汇编需要 NASM。
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools nasm
-
-      - name: Build binaries
-        run: cargo build --release --locked --target "$TARGET" --bin shuku --bin shuku-migrate-lrr
-
-      # 解压后在包目录里直接运行 ./shuku，默认的 --web-dir web/build 就能找到网页端。
-      - name: Package
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          name="shuku-${TAG}-x86_64-linux"
-          mkdir -p "dist/$name/web"
-          cp "target/$TARGET/release/shuku" "target/$TARGET/release/shuku-migrate-lrr" LICENSE "dist/$name/"
-          cp -r web/build "dist/$name/web/build"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release
-          path: |
-            dist/*.tar.gz
-            dist/*.tar.gz.sha256
-          retention-days: 1
-
-  # 桌面和 Android 客户端。等 build 检查完标签格式再开始，版本号去掉开头的 v。
+  # 桌面和 Android 客户端。等 tag 检查完标签格式再开始，版本号去掉开头的 v。
   clients:
-    needs: build
+    needs: tag
     uses: ./.github/workflows/clients.yml
     with:
-      version: ${{ needs.build.outputs.version }}
+      version: ${{ needs.tag.outputs.version }}
     secrets: inherit
 
   publish:
-    needs: [build, clients]
+    needs: [server, clients]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

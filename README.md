@@ -8,7 +8,7 @@ Shuku（拼音“书库”）是一个自托管的漫画书库服务：把一个
 - 一个存放漫画的内容目录。目前支持 ZIP 和 CBZ 归档，Shuku 从不修改或重新打包其中的文件，只在你从网页端删除一本书时删掉它；可以只读挂载。
 - 一个独立的数据目录，用来存数据库和图片缓存。
 
-客户端下载（[Nightly 开发版](https://github.com/chinrw/shuku/releases/tag/nightly)）：[Android APK](https://github.com/chinrw/shuku/releases/download/nightly/shuku-android-arm64.apk) · [Windows 安装包](https://github.com/chinrw/shuku/releases/download/nightly/shuku-windows-x86_64.setup.exe) · [macOS 通用 DMG](https://github.com/chinrw/shuku/releases/download/nightly/shuku-macos-universal.dmg) · [Linux AppImage](https://github.com/chinrw/shuku/releases/download/nightly/shuku-linux-x86_64.AppImage) · [Debian 包](https://github.com/chinrw/shuku/releases/download/nightly/shuku-linux-x86_64.deb)。
+[Nightly 下载](https://github.com/chinrw/shuku/releases/tag/nightly)：[Linux x86_64 服务端（静态二进制及网页端）](https://github.com/chinrw/shuku/releases/download/nightly/shuku-nightly-x86_64-linux.tar.gz)。客户端：[Android APK](https://github.com/chinrw/shuku/releases/download/nightly/shuku-android-arm64.apk) · [Windows 安装包](https://github.com/chinrw/shuku/releases/download/nightly/shuku-windows-x86_64.setup.exe) · [macOS 通用 DMG](https://github.com/chinrw/shuku/releases/download/nightly/shuku-macos-universal.dmg)。
 
 ## 能做什么
 

@@ -54,9 +54,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # AppImage 和 deb 在较旧的 Ubuntu 上构建，glibc 版本低，新系统也能运行。
+          # Linux 桌面端只验证能编译和链接，不发布安装包。
           - os: ubuntu-22.04
-            bundles: appimage,deb
             name: linux-x86_64
           - os: windows-latest
             bundles: nsis
@@ -78,7 +77,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev librsvg2-dev
 
       # 通用二进制要同时编译 Intel 和 Apple Silicon 两个目标。
       - name: Install Rust
@@ -93,18 +92,24 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          args=(--ci --bundles "${{ matrix.bundles }}")
+          args=(--ci)
+          if [ "$RUNNER_OS" = Linux ]; then
+            args+=(--no-bundle)
+          else
+            args+=(--bundles "${{ matrix.bundles }}")
+          fi
           if [ -n "${{ matrix.target }}" ]; then args+=(--target "${{ matrix.target }}"); fi
           if [ -n "$VERSION" ]; then args+=(--config "{\"version\":\"$VERSION\"}"); fi
           npx --yes "$TAURI_CLI" build "${args[@]}"
 
       - name: Collect bundles
+        if: runner.os != 'Linux'
         env:
           NAME: shuku-app-${{ inputs.version || github.sha }}-${{ matrix.name }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/dist"
           bundle=target/${{ matrix.target || '.' }}/release/bundle
-          for file in "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/nsis/*.exe "$bundle"/dmg/*.dmg; do
+          for file in "$bundle"/nsis/*.exe "$bundle"/dmg/*.dmg; do
             [ -e "$file" ] || continue
             extension=${file##*.}
             [ "$extension" = exe ] && extension=setup.exe
@@ -113,6 +118,7 @@ jobs:
           ls -l "$GITHUB_WORKSPACE/dist"
 
       - uses: actions/upload-artifact@v7
+        if: runner.os != 'Linux'
         with:
           name: client-${{ matrix.name }}
           path: dist/*

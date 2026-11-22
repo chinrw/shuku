@@ -13,7 +13,7 @@
 
 | 平台 | 文件 |
 | --- | --- |
-| Linux | [AppImage](https://github.com/chinrw/shuku/releases/download/nightly/shuku-linux-x86_64.AppImage)（加执行权限后直接运行）或 [deb](https://github.com/chinrw/shuku/releases/download/nightly/shuku-linux-x86_64.deb) |
+| Linux | 用浏览器访问服务器，或按下文从源码构建桌面端。Release 不提供 Linux 桌面安装包。 |
 | Windows | [下载 Windows x64 安装包](https://github.com/chinrw/shuku/releases/download/nightly/shuku-windows-x86_64.setup.exe) |
 | macOS | [下载通用 DMG](https://github.com/chinrw/shuku/releases/download/nightly/shuku-macos-universal.dmg)，Intel 和 Apple Silicon 通用 |
 | Android | [下载 arm64 APK](https://github.com/chinrw/shuku/releases/download/nightly/shuku-android-arm64.apk) |
@@ -65,7 +65,7 @@ node --test '../test/*.test.js'
 
 ### CI 和发布
 
-`.github/workflows/clients.yml` 在 `app/` 或客户端工作流有变化时构建四个平台。PR 检查调用同一工作流，不传发布签名密钥。推到 main 后也会构建，产物在那次运行的 Artifacts 里，保留 14 天。main 上成功的推送构建和手动运行的 Clients 还会把同一批安装包发布到 Nightly，不需要等到晚上或重新编译。推送 `v*` 标签时 `release.yml` 带着版本号调用它，把安装包和 `SHA256SUMS` 附加到 Release 上。
+`.github/workflows/clients.yml` 在 `app/` 或客户端工作流有变化时检查 Linux 桌面端能编译和链接，为 Windows、macOS 和 Android 构建安装包。PR 检查调用同一工作流，不传发布签名密钥。推到 main 后也会构建，产物在那次运行的 Artifacts 里，保留 14 天。main 上成功的推送构建和手动运行的 Clients 还会把同一批安装包与该提交的 Linux 服务端一起发布到 Nightly，不需要等到晚上或重新编译。推送 `v*` 标签时 `release.yml` 带着版本号调用它，把安装包和 `SHA256SUMS` 附加到 Release 上。
 
 Android 的发布签名从仓库的 Actions secrets 读取。没有配置时 APK 用构建机临时的调试密钥签名，每次构建的签名都不同，装新版本前要先卸载旧的，服务器列表也会随之丢失。已有发布密钥时沿用它；首次配置时，在自己的电脑、仓库外的私密目录中生成密钥。以下命令需要 JDK 的 `keytool` 和已登录 GitHub 的 `gh`：
 

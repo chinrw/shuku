@@ -147,6 +147,8 @@ E-Hentai 和 ExHentai 要登录 cookie：在浏览器里登录后，从开发者
 
 ## 使用发布包
 
+[Linux x86_64 Nightly 服务端](https://github.com/chinrw/shuku/releases/download/nightly/shuku-nightly-x86_64-linux.tar.gz)和正式版使用相同的打包方式。Nightly 跟随 main 上成功的 Clients 构建；只有服务端改动时，也可以手动运行 Clients 发布当前 main 的开发版。校验文件为同一 Release 的 `SHA256SUMS`。
+
 推送 `vX.Y.Z` 或 `vX.Y.Z-后缀` 形式的标签（例如 `git tag v0.1.0 && git push origin v0.1.0`）后，GitHub Actions 构建并发布 `shuku-<标签>-x86_64-linux.tar.gz` 和它的 SHA-256 校验文件，同一个 Release 里还有桌面和 Android 客户端的安装包（见 [clients.md](clients.md)），在仓库的 Releases 页面下载。包里有静态链接（musl）的 `shuku` 和 `shuku-migrate-lrr`，不依赖系统库，NixOS 上也能直接运行；网页端构建产物在 `web/build`。
 
 在解压出的目录里运行 `./shuku`，默认的 `--web-dir web/build` 就能找到网页端；从别的目录运行时用 `--web-dir` 指向它。其余参数与上文相同。
