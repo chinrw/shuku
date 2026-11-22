@@ -8,6 +8,7 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 	const [book, list, categoryList] = await orNotFound(
 		Promise.all([archive(fetch, id), pages(fetch, id), categories(fetch)])
 	);
+	if (book.id !== id) redirect(307, `/a/${book.id}/read${url.search}`);
 	if (book.missing) redirect(307, `/a/${id}`);
 	const requested = Number(url.searchParams.get('page') ?? book.progress?.page ?? 0);
 	const last = Math.max(list.pages.length - 1, 0);

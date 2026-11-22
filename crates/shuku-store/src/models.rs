@@ -8,6 +8,8 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, 
 /// 扫描只需文件身份，不加载标签、进度和页面清单。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanEntry {
+    pub copy_stamp: Option<i64>,
+    pub content_hash: Option<String>,
     pub id: i64,
     pub path: String,
     pub file_size: u64,
@@ -84,6 +86,9 @@ pub struct LrrTankoubon {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Archive {
+    /// 已通过完整指纹确认的其他文件，路径和修改时间都独立于主文件。
+    pub copies: Vec<(String, i64, Option<i64>)>,
+    pub copy_stamp: Option<i64>,
     pub id: i64,
     pub missing: bool,
     pub metadata: ArchiveMetadata,
@@ -220,6 +225,7 @@ pub struct BrokenArchive {
 /// 见 [`crate::Reader::duplicates`]。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DuplicateFile {
+    pub content_hash: String,
     pub id: i64,
     pub path: String,
     pub title: String,

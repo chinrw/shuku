@@ -50,11 +50,17 @@ impl Reader {
         Ok(Self::wrap(connection))
     }
 
+    pub fn has_archives(&self) -> Result<bool> {
+        Ok(self
+            .connection
+            .query_row("SELECT EXISTS(SELECT 1 FROM archive)", [], |r| r.get(0))?)
+    }
+
     pub fn scan_entries(&self) -> Result<Vec<ScanEntry>> {
         Ok(self
             .connection
             .prepare(
-                "SELECT id, path, file_size, mtime, quick_hash, missing FROM archive ORDER BY id",
+                "SELECT id, path, file_size, mtime, quick_hash, missing, content_hash,copy_stamp FROM archive ORDER BY id",
             )?
             .query_map([], |row| {
                 Ok(ScanEntry {
@@ -64,6 +70,8 @@ impl Reader {
                     mtime: row.get(3)?,
                     quick_hash: row.get(4)?,
                     missing: row.get(5)?,
+                    content_hash: row.get(6)?,
+                    copy_stamp:row.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
@@ -75,7 +83,7 @@ impl Reader {
         Ok(self
             .connection
             .prepare(
-                "SELECT id, path, file_size, mtime, quick_hash, missing FROM archive
+                "SELECT id, path, file_size, mtime, quick_hash, missing, content_hash,copy_stamp FROM archive
                  WHERE content_hash IS NULL AND id > ?1 ORDER BY id LIMIT ?2",
             )?
             .query_map(params![after, limit as i64], |row| {
@@ -86,6 +94,8 @@ impl Reader {
                     mtime: row.get(3)?,
                     quick_hash: row.get(4)?,
                     missing: row.get(5)?,
+                    content_hash: row.get(6)?,
+                    copy_stamp:row.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
@@ -393,30 +403,34 @@ impl Reader {
         Ok((total, archives))
     }
 
-    /// 完整指纹相同的归档，每组按路径排序，组按指纹排序。返回组的总数和前 `limit` 组。
-    /// 没有指纹索引，每次全表分组；只在控制台的问题页按需请求。
+    /// 控制台优先列出仍有多个归档 ID 的组。已经合并的组也可以查看它的全部路径。
     pub fn duplicates(&self, limit: usize) -> Result<(u64, Vec<Vec<DuplicateFile>>)> {
-        let total: u64 = self.connection.query_row(
-            "SELECT count(*) FROM (SELECT 1 FROM archive WHERE content_hash IS NOT NULL
-                GROUP BY content_hash HAVING count(*) > 1)",
+        const FILES: &str = "WITH files AS (
+            SELECT content_hash, id, path, title, file_size FROM archive WHERE content_hash IS NOT NULL
+            UNION ALL
+            SELECT a.content_hash, a.id, c.path, a.title, a.file_size
+            FROM archive_copy c JOIN archive a ON a.id = c.archive_id
+        ), groups AS (
+            SELECT content_hash, min(id) != max(id) AS pending
+            FROM files GROUP BY content_hash HAVING count(*) > 1
+        )";
+        let total = self.connection.query_row(
+            &format!("{FILES} SELECT count(*) FROM groups"),
             [],
             |row| row.get(0),
         )?;
-        let mut statement = self.connection.prepare(
-            "WITH groups AS (
-                SELECT content_hash FROM archive WHERE content_hash IS NOT NULL
-                GROUP BY content_hash HAVING count(*) > 1 ORDER BY content_hash LIMIT ?1
-             )
-             SELECT archive.content_hash, archive.id, archive.path, archive.title, archive.file_size
-             FROM archive JOIN groups ON archive.content_hash = groups.content_hash
-             ORDER BY archive.content_hash, archive.path",
-        )?;
+        let mut statement = self.connection.prepare(&format!(
+            "{FILES} SELECT content_hash, id, path, title, file_size FROM files
+             WHERE content_hash IN (SELECT content_hash FROM groups ORDER BY pending DESC, content_hash LIMIT ?1)
+             ORDER BY content_hash, path"
+        ))?;
         let mut rows = statement.query([limit as i64])?;
         let mut groups: Vec<Vec<DuplicateFile>> = Vec::new();
         let mut current: Option<String> = None;
         while let Some(row) = rows.next()? {
             let hash: String = row.get(0)?;
             let file = DuplicateFile {
+                content_hash: hash.clone(),
                 id: row.get(1)?,
                 path: row.get(2)?,
                 title: row.get(3)?,
@@ -509,6 +523,8 @@ pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Ar
     let archive = connection
         .query_row("SELECT * FROM archive WHERE id = ?1", [id], |row| {
             Ok(Archive {
+                copies: Vec::new(),
+                copy_stamp: row.get("copy_stamp")?,
                 id: row.get("id")?,
                 missing: row.get("missing")?,
                 metadata: ArchiveMetadata {
@@ -533,6 +549,12 @@ pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Ar
     let Some(mut archive) = archive else {
         return Ok(None);
     };
+    archive.copies = connection
+        .prepare_cached(
+            "SELECT path, mtime, stamp FROM archive_copy WHERE archive_id = ?1 ORDER BY path",
+        )?
+        .query_map([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
     archive.tags = connection.prepare_cached(
         "SELECT tag.namespace, tag.value FROM tag JOIN archive_tag ON tag.id = archive_tag.tag_id
          WHERE archive_tag.archive_id = ?1 ORDER BY tag.full"
@@ -550,7 +572,7 @@ pub(crate) fn read_archive(connection: &Connection, id: i64) -> Result<Option<Ar
 
 pub(crate) fn find_by_path(connection: &Connection, path: &str) -> Result<Option<i64>> {
     Ok(connection
-        .query_row("SELECT id FROM archive WHERE path = ?1", [path], |row| {
+        .query_row("SELECT id FROM archive WHERE path = ?1 UNION ALL SELECT archive_id FROM archive_copy WHERE path = ?1", [path], |row| {
             row.get(0)
         })
         .optional()?)

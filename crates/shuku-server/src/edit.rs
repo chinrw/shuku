@@ -140,9 +140,12 @@ impl App {
                         None => Deletion::NotFound,
                         // 读不了的目录里的文件无法确认不在，按还在处理。
                         Some(archive) => {
-                            match files::try_exists(&content.join(&archive.metadata.path)) {
-                                Ok(false) => Deletion::Deleted,
-                                Ok(true) | Err(_) => Deletion::FilePresent,
+                            if archive.file_paths().all(|(path, ..)| {
+                                matches!(files::try_exists(&content.join(path)), Ok(false))
+                            }) {
+                                Deletion::Deleted
+                            } else {
+                                Deletion::FilePresent
                             }
                         }
                     })
@@ -195,15 +198,38 @@ impl App {
     /// 从磁盘上删除原文件，再删记录，阻塞调用。文件已经不在时只删记录。先删文件：
     /// 删完文件后记录没删掉时，它照样作为失踪记录出现在问题页上，还能再删；反过来的话，
     /// 留下的文件下次扫描会作为新书重新入库。持有扫描锁，理由同 [`App::delete_missing`]。
-    pub(crate) fn delete_with_file(&self, id: i64) -> Result<Deletion> {
+    pub(crate) fn delete_with_file(&self, id: i64, selected: Option<&str>) -> Result<Deletion> {
         let _scan = self.scan_lock_for_delete()?;
         let Some((archive, pages)) = self.reader()?.archive_with_pages(id)? else {
             return Ok(Deletion::NotFound);
         };
         let content = &self.0.config.content_dir;
-        let path = content.join(&archive.metadata.path);
+        if !archive.copies.is_empty() && selected.is_none() {
+            return Err(conflict("这本书有多个文件，请指定要删除的路径"));
+        }
+        if archive.copies.is_empty() && selected.is_some() {
+            return Err(conflict("只剩一个文件，请刷新详情后再确认是否删除整本书"));
+        }
+        let name = selected.unwrap_or(&archive.metadata.path);
+        let (_, mtime, _) = archive
+            .file_paths()
+            .find(|(path, ..)| *path == name)
+            .ok_or_else(|| conflict("所选路径已不属于这本书"))?;
+        let path = content.join(name);
+        let mut metadata = archive.metadata.clone();
+        name.clone_into(&mut metadata.path);
+        metadata.mtime = mtime;
         match std::fs::symlink_metadata(&path) {
-            Ok(_) => files::remove_book(content, &path, &archive.metadata, &pages)?,
+            Ok(kind) => {
+                if !archive.copies.is_empty()
+                    && (!kind.is_file()
+                        || Some(shuku_archive::content_hash(&path)?).as_ref()
+                            != metadata.content_hash.as_ref())
+                {
+                    return Err(conflict("所选文件已不是这本书的副本，请重新扫描"));
+                }
+                files::remove_book(content, &path, &metadata, &pages)?;
+            }
             Err(error)
                 if matches!(
                     error.kind(),
@@ -214,8 +240,25 @@ impl App {
             }
             Err(error) => return Err(error.into()),
         }
-        self.write(|writer| Ok(writer.delete_archive(id)?))?;
-        tracing::info!(id, path = %archive.metadata.path, "删除了原文件和记录");
+        self.write(|writer| {
+            if archive.copies.is_empty() {
+                writer.delete_archive(id)?;
+            } else if name == archive.metadata.path {
+                let (next, t, stamp) = archive
+                    .copies
+                    .iter()
+                    .find(|(name, ..)| content.join(name).is_file())
+                    .unwrap_or(&archive.copies[0]);
+                writer.set_primary_file(id, next, *t, *stamp)?;
+                if matches!(files::try_exists(&content.join(next)), Ok(false)) {
+                    writer.set_missing(id, true)?;
+                }
+            } else {
+                writer.remove_copy(id, name)?;
+            }
+            Ok(())
+        })?;
+        tracing::info!(id, path = %name, "移除了归档文件路径");
         self.refresh_after_delete();
         Ok(Deletion::Deleted)
     }
@@ -379,6 +422,7 @@ struct DeleteQuery {
     /// 连同原文件一起删除。不给时只删文件已经不在的记录。
     #[serde(default)]
     file: bool,
+    path: Option<String>,
 }
 
 async fn delete(
@@ -388,12 +432,17 @@ async fn delete(
 ) -> Result<StatusCode> {
     let Path(id) = id.map_err(Error::bad_request)?;
     let Query(query) = query.map_err(Error::bad_request)?;
+    if !query.file && query.path.is_some() {
+        return Err(Error::bad_request("只有删除文件时才能指定路径"));
+    }
     if query.file {
         return app
-            .blocking(move |app| match app.delete_with_file(id)? {
-                Deletion::NotFound => Err(Error::not_found()),
-                _ => Ok(StatusCode::NO_CONTENT),
-            })
+            .blocking(
+                move |app| match app.delete_with_file(id, query.path.as_deref())? {
+                    Deletion::NotFound => Err(Error::not_found()),
+                    _ => Ok(StatusCode::NO_CONTENT),
+                },
+            )
             .await;
     }
     app.blocking(move |app| match app.delete_missing(&[id])?[..] {

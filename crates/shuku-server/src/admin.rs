@@ -214,6 +214,7 @@ impl App {
         Router::new()
             .route("/api/admin/status", get(status))
             .route("/api/admin/issues", get(issues))
+            .route("/api/admin/duplicates/merge", post(crate::copies::merge))
             .route("/api/admin/duplicates", get(duplicates))
             .route("/api/admin/namespaces", get(namespaces))
             .route("/api/admin/logs", get(logs))
@@ -439,6 +440,7 @@ async fn duplicates(
         let groups: Vec<_> = groups
             .into_iter()
             .map(|files| {
+                let hash = files[0].content_hash.clone();
                 let files: Vec<_> = files
                     .into_iter()
                     .map(|file| {
@@ -446,7 +448,7 @@ async fn duplicates(
                             "file_size": file.file_size})
                     })
                     .collect();
-                json!({ "files": files })
+                json!({ "hash":hash, "files": files })
             })
             .collect();
         Ok(Json(json!({"total": total, "groups": groups})))

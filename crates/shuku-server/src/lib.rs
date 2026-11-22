@@ -5,6 +5,7 @@ mod api;
 mod auth;
 mod batch;
 mod categories;
+mod copies;
 mod db;
 mod decode;
 mod download;

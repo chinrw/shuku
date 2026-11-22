@@ -150,9 +150,14 @@ export const updateServerSettings = (patch: Partial<ServerSettings>) =>
 	put<ServerSettings>('/api/admin/settings/server', patch);
 export const issues = () => call<Issues>('/api/admin/issues');
 export const duplicates = (limit = 100) =>
-	call<{ total: number; groups: { files: DuplicateFile[] }[] }>(
+	call<{ total: number; groups: { hash: string; files: DuplicateFile[] }[] }>(
 		`/api/admin/duplicates?limit=${limit}`
 	);
+export const mergeDuplicates = (keep: number, others: number[], hash: string) =>
+	call<{ id: number }>('/api/admin/duplicates/merge', {
+		method: 'POST', headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ keep, others, hash })
+	});
 export const namespaces = async () =>
 	(await call<{ namespaces: NamespaceCount[] }>('/api/admin/namespaces')).namespaces;
 /** `started_at` 标识服务端进程，序号每次启动从 1 开始。 */

@@ -299,7 +299,11 @@ impl App {
     fn run_local(&self, id: i64, provider: Provider) -> Result<Metadata> {
         let settings = self.metadata_settings();
         let archive = crate::api::require_archive(&*self.reader()?, id)?;
-        let path = self.0.config.content_dir.join(&archive.metadata.path);
+        let path = self
+            .0
+            .config
+            .content_dir
+            .join(self.source_file(&archive)?.0);
         let metadata = match provider {
             Provider::Filename => FilenameParser::new(&settings.filename.options)?
                 .parse(&book_name(&path))

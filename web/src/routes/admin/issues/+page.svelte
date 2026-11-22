@@ -2,6 +2,7 @@
 	import {
 		deleteMissing,
 		duplicates,
+		mergeDuplicates,
 		issues,
 		type DuplicateFile,
 		type Issues
@@ -12,7 +13,7 @@
 	type Tab = 'failed' | 'broken' | 'unreadable' | 'missing' | 'duplicates';
 
 	let data = $state<Issues | null>(null);
-	let groups = $state<{ total: number; groups: { files: DuplicateFile[] }[] } | null>(null);
+	let groups = $state<{ total: number; groups: { hash: string; files: DuplicateFile[] }[] } | null>(null);
 	let tab = $state<Tab>('failed');
 	let error = $state<string | null>(null);
 	let loading = $state(false);
@@ -79,6 +80,22 @@
 			deleteNote = `没有删除：${cause instanceof Error ? cause.message : String(cause)}`;
 		} finally {
 			deleting = false;
+		}
+	}
+
+	let merging = $state(false);
+
+	async function merge(keep: DuplicateFile, group: { hash: string; files: DuplicateFile[] }) {
+		const others = [...new Set(group.files.map((f) => f.id))].filter((id) => id !== keep.id);
+		if (merging || !confirm(`保留《${keep.title}》(#${keep.id})，将 ${others.map(id => '#'+id).join('、')} 并入？所有文件留在原处；标签和分类合并，进度取最近一次，旧链接转到保留的书。`)) return;
+		merging = true;
+		try {
+			await mergeDuplicates(keep.id, others, group.hash);
+			await load();
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			merging = false;
 		}
 	}
 
@@ -224,14 +241,16 @@
 
 			{:else if groups}
 				<table class="adm-table">
-					<thead><tr><th>组</th><th>路径</th><th class="num">大小</th></tr></thead>
+					<thead><tr><th>组</th><th>路径</th><th class="num">大小</th><th>书库记录</th></tr></thead>
 					<tbody>
 						{#each groups.groups as group, index (group.files[0].id)}
-							{#each group.files as file, position (file.id)}
+							{@const merged = group.files.every((file) => file.id === group.files[0].id)}
+							{#each group.files as file, position (file.path)}
 								<tr class:first={position === 0}>
 									<td>{position === 0 ? `第 ${index + 1} 组` : ''}</td>
 									<td><a class="adm-mono" href="/a/{file.id}">{file.path}</a></td>
 									<td class="num">{bytes(file.file_size)}</td>
+									<td>{#if merged}同一本 #{file.id}{:else}<button class="adm-button" disabled={merging} onclick={() => merge(file, group)}>并入 #{file.id}</button>{/if}</td>
 								</tr>
 							{/each}
 						{/each}

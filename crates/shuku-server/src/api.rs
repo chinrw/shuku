@@ -100,6 +100,10 @@ impl App {
             })
             .layer(axum::middleware::from_fn_with_state(
                 self.clone(),
+                crate::copies::redirect_old_link,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                self.clone(),
                 crate::auth::authenticate,
             ))
             .layer(axum::middleware::from_fn_with_state(
@@ -155,6 +159,7 @@ async fn write_finished(
     let Json(body) = body.map_err(Error::bad_request)?;
     app.blocking(move |app| {
         let archive = app.write(|writer| {
+            let id = writer.progress_archive_id(id)?;
             writer.set_finished(id, body.finished)?;
             writer.archive(id)?.ok_or_else(Error::not_found)
         })?;
@@ -719,15 +724,26 @@ pub(crate) fn detail_json(app: &App, id: i64) -> Result<Value> {
         })
     });
     let tags = tag_groups(&archive.tags);
-    let path = app.0.config.content_dir.join(&archive.metadata.path);
-    let missing = archive.missing || matches!(crate::files::try_exists(&path), Ok(false));
+    let (source, _) = app
+        .source_file(&archive)
+        .unwrap_or((&archive.metadata.path, archive.metadata.mtime));
+    let path = app.0.config.content_dir.join(source);
+    let missing = (archive.missing && archive.copies.is_empty())
+        || matches!(crate::files::try_exists(&path), Ok(false));
+    let paths: Vec<_> = archive
+        .file_paths()
+        .map(|(name, ..)| {
+            let path = app.0.config.content_dir.join(name);
+            json!({"path":name, "missing":matches!(crate::files::try_exists(&path),Ok(false)), "deletable":crate::files::can_delete(&path)})
+        })
+        .collect();
     let deletable = crate::files::can_delete(&path);
     Ok(json!({
         "id": archive.id, "title": archive.metadata.title,
         "summary": archive.metadata.summary, "page_count": archive.page_count,
         "is_new": archive.metadata.is_new, "date_added": archive.metadata.date_added,
         "source_url": archive.metadata.source_url, "file_size": archive.metadata.file_size,
-        "path": archive.metadata.path, "missing": missing, "deletable": deletable,
+        "path": source, "files":paths, "missing": missing, "deletable": deletable,
         "progress": progress(archive.progress.as_ref()), "tags": tags,
         "categories": categories, "cover_url": cover_url(id, &archive.metadata.quick_hash),
         "series": series,

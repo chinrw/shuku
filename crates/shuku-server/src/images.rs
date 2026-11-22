@@ -101,12 +101,13 @@ fn respond(
     };
     // 路径由扫描写入，是内容目录里的普通文件或散放图片的文件夹。内容被替换但还没重新扫描时，
     // 记录的偏移已经失效，按旧 URL 返回新内容会被浏览器永久缓存，所以先比对大小和修改时间。
-    let path = app.0.config.content_dir.join(&archive.metadata.path);
+    let (source, mtime) = app.source_file(&archive)?;
+    let path = app.0.config.content_dir.join(source);
     let identity = shuku_archive::identity(&path).map_err(|error| match error {
         shuku_archive::Error::Io(error) => file_error(error),
         error => error.into(),
     })?;
-    if identity.size != archive.metadata.file_size || identity.modified != archive.metadata.mtime {
+    if identity.size != archive.metadata.file_size || identity.modified != mtime {
         return Err(changed_file());
     }
     if thumbnail && page.width == 0 {

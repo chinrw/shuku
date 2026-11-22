@@ -17,7 +17,8 @@ pub(crate) async fn file(
     let relative = app
         .blocking(move |app| {
             let reader = app.reader()?;
-            Ok(require_archive(&reader, id)?.metadata.path)
+            let book = require_archive(&reader, id)?;
+            Ok(app.source_file(&book)?.0.to_owned())
         })
         .await?;
     // 路径由扫描写入，只会是内容目录里的普通文件。文件已经不在时按不存在的归档处理，

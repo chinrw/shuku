@@ -223,14 +223,12 @@ fn commit(database: &Database, requests: Vec<Request>, changed: &Notify) {
 }
 
 fn write_progress(writer: &mut Writer<'_>, request: &ProgressRequest) -> Result<ProgressReply> {
-    let archive = writer.archive(request.id)?.ok_or_else(Error::not_found)?;
+    let id = writer.progress_archive_id(request.id)?;
+    let archive = writer.archive(id)?.ok_or_else(Error::not_found)?;
     if request.page >= archive.page_count {
         return Err(Error::bad_request("page 超出归档页数"));
     }
-    let accepted = writer.write_progress(request.id, request.page, request.client_time)?;
-    let progress = writer
-        .archive(request.id)?
-        .ok_or_else(Error::not_found)?
-        .progress;
+    let accepted = writer.write_progress(id, request.page, request.client_time)?;
+    let progress = writer.archive(id)?.ok_or_else(Error::not_found)?.progress;
     Ok(ProgressReply { accepted, progress })
 }

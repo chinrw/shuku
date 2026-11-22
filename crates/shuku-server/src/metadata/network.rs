@@ -229,12 +229,11 @@ impl App {
         archive: &shuku_store::Archive,
         page: &shuku_store::Page,
     ) -> Result<String> {
-        let path = self.0.config.content_dir.join(&archive.metadata.path);
+        let (source, mtime) = self.source_file(archive)?;
+        let path = self.0.config.content_dir.join(source);
         // 和扫描、读页用同一个身份：散图文件夹的大小和修改时间是按里面的图算的。
         let identity = shuku_archive::identity(&path)?;
-        if identity.size != archive.metadata.file_size
-            || identity.modified != archive.metadata.mtime
-        {
+        if identity.size != archive.metadata.file_size || identity.modified != mtime {
             return Err(Error::File("文件在扫描后变了，重新扫描后再查".into()));
         }
         let bytes = shuku_archive::read_page(&path, &archive_page(page))?;

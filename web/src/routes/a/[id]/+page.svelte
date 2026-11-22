@@ -60,9 +60,11 @@
 		}
 	}
 
-	// 连文件一起删除后回到书库。删除返回前已经去了别的页面时，不把人拽回书库。
+	// 只删副本时留在详情页；整本删除后再回书库。
 	async function deleted(target: number) {
-		if (mounted && book.id === target) await goto('/', { replaceState: true, refreshAll: true });
+		if (!mounted || book.id !== target) return;
+		if (book.files && book.files.length > 1) await refreshAll();
+		else await goto('/', { replaceState: true, refreshAll: true });
 	}
 
 	afterNavigate(({ from, to, type }) => {
@@ -117,6 +119,12 @@
 					>{/each}
 			{/if}
 		</p>
+		{#if book.files && book.files.length > 1}
+			<details class="locations">
+				<summary>文件位置（{book.files.length}）</summary>
+				<ul>{#each book.files as file (file.path)}<li>{file.path}{file.missing ? '（路径已缺失）' : ''}</li>{/each}</ul>
+			</details>
+		{/if}
 		<div class="actions">
 			{#if !book.missing}
 				{#if book.progress}
@@ -261,6 +269,11 @@
 		color: var(--muted);
 		font-size: 0.85rem;
 		line-height: 1.6;
+	}
+
+	.locations {
+		margin-bottom: 0.6rem;
+		overflow-wrap: anywhere;
 	}
 
 	.actions {

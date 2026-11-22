@@ -1,5 +1,6 @@
 //! Shuku 的 SQLite 存储层。
 
+mod copies;
 mod metadata;
 mod models;
 mod pool;
@@ -52,6 +53,7 @@ const MIGRATIONS: &[Migration] = &[
     (include_str!("migrations/011_device_tokens.sql"), None),
     (include_str!("migrations/012_progress_finished.sql"), None),
     (include_str!("migrations/013_missing.sql"), None),
+    (include_str!("migrations/014_archive_copies.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]

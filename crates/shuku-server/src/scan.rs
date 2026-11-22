@@ -28,6 +28,8 @@ struct Prepared {
     /// 最新的修改时间，Unix 秒，新书的加入时间用它。
     newest: i64,
     quick_hash: String,
+    content_hash: Option<String>,
+    copy_stamp: Option<i64>,
     pages: Vec<Page>,
     /// 新文件里的 ComicInfo.xml，打开了它的自动运行时才读。
     comicinfo: Option<shuku_metadata::Metadata>,
@@ -51,10 +53,21 @@ impl App {
         result
     }
 
+    pub(crate) fn scan_file_failed(&self, path: &Path, error: &Error, report: &mut ScanReport) {
+        tracing::warn!(path=%path.display(),%error,"扫描文件失败");
+        self.tasks(|tasks| {
+            tasks
+                .scan
+                .issues
+                .failed
+                .push(issue(&self.0.config.content_dir, path, error))
+        });
+        report.failed += 1;
+    }
+
     fn scan_locked(&self) -> Result<ScanReport> {
         let content = &self.0.config.content_dir;
-        let entries = self.reader()?.scan_entries()?;
-        if !entries.is_empty() {
+        if self.reader()?.has_archives()? {
             self.content_mounted()?;
         }
         let plugins = self.scan_plugins()?;
@@ -102,13 +115,17 @@ impl App {
                 },
             }
         }
+        let unknown_copies = self.reconcile_copies(&mut files, &folders, &mut report)?;
+        let entries = self.reader()?.scan_entries()?;
         let mut missing: HashMap<String, VecDeque<&ScanEntry>> = HashMap::new();
         let mut restored = Vec::new();
         let reader = self.reader()?;
         for entry in &entries {
             let path = content.join(&entry.path);
             // 读不了的目录里的记录无法判断还在不在，不当作失踪，免得被同内容的新文件顶替。
-            if unreadable.iter().any(|dir| path.starts_with(dir)) {
+            if unknown_copies.contains(&entry.id)
+                || unreadable.iter().any(|dir| path.starts_with(dir))
+            {
                 continue;
             }
             // 按设置跳过的路径（隐藏条目、额外跳过的名字）里的记录也无法判断，同样不动。
@@ -170,7 +187,13 @@ impl App {
                     let relative = relative.to_str().ok_or_else(|| {
                         Error::File(format!("路径不是 UTF-8：{}", path.display()))
                     })?;
-                    prepare(path, relative, existing.get(relative).copied(), &plugins)
+                    prepare(
+                        path,
+                        relative,
+                        existing.get(relative).copied(),
+                        &plugins,
+                        &missing,
+                    )
                 })
                 .collect();
             let mut saves = Vec::new();
@@ -178,16 +201,7 @@ impl App {
                 match prepared {
                     Ok(Some(prepared)) => saves.push(prepared),
                     Ok(None) => report.unchanged += 1,
-                    Err(error) => {
-                        tracing::warn!(path = %path.display(), %error, "扫描文件失败");
-                        self.tasks(|tasks| {
-                            tasks.scan.issues.failed.push(crate::admin::FileIssue {
-                                path: relative(content, path),
-                                error: error.to_string(),
-                            })
-                        });
-                        report.failed += 1;
-                    }
+                    Err(error) => self.scan_file_failed(path, &error, &mut report),
                 }
             }
             if saves.is_empty() {
@@ -198,11 +212,23 @@ impl App {
             let queued = self.write(|writer| {
                 let mut queued = false;
                 for prepared in saves {
-                    let existing_id = existing.get(prepared.path.as_str()).map(|entry| entry.id);
+                    let prior = existing.get(prepared.path.as_str());
+                    let existing_id = prior.map(|entry| entry.id);
                     let moved_id = if existing_id.is_none() {
                         missing
                             .get_mut(&prepared.quick_hash)
-                            .and_then(VecDeque::pop_front)
+                            .and_then(|candidates| {
+                                let position = candidates
+                                    .iter()
+                                    .position(|e| {
+                                        e.content_hash.is_some()
+                                            && e.content_hash == prepared.content_hash
+                                    })
+                                    .or_else(|| {
+                                        candidates.iter().position(|e| e.content_hash.is_none())
+                                    })?;
+                                candidates.remove(position)
+                            })
                             .map(|entry| {
                                 if entry.missing {
                                     restored.push(entry.id);
@@ -258,9 +284,14 @@ impl App {
                     metadata.mtime = prepared.mtime;
                     metadata.quick_hash = prepared.quick_hash;
                     // 完整指纹要读整个文件，由后台任务计算。内容变了，旧值也随之作废。
-                    metadata.content_hash = None;
+                    metadata.content_hash = prepared.content_hash;
                     let path = metadata.path.clone();
                     let saved = writer.save_archive(id, &metadata, &prepared.pages)?;
+                    if prepared.copy_stamp.is_some()
+                        || prior.is_some_and(|e| e.copy_stamp.is_some())
+                    {
+                        writer.set_copy_stamp(saved, prepared.copy_stamp)?;
+                    }
                     // 迁移工具先于扫描运行时，LRR 的元数据按路径暂存着，在同一个事务里套用。
                     // 只有真正新加入、不是从 LRR 迁移来的书才跑元数据功能，和 LRR 只对新上传的书
                     // 自动运行插件一样；迁移来的元数据已经是 LRR 里跑过插件的结果。
@@ -292,6 +323,9 @@ impl App {
                             }
                         }
                         Some(_) => {}
+                    }
+                    if fresh && !prepared.folder {
+                        writer.allow_auto_copy(saved)?;
                     }
                     if fresh {
                         // 新书的初始标题就是去掉扩展名的文件名（文件夹是整个文件夹名），
@@ -497,11 +531,15 @@ fn prepare(
     relative: &str,
     existing: Option<&ScanEntry>,
     plugins: &crate::metadata::ScanPlugins,
+    missing: &HashMap<String, VecDeque<&ScanEntry>>,
 ) -> Result<Option<Prepared>> {
     let folder = path.is_dir();
     let before = shuku_archive::identity(path)?;
-    if existing
-        .is_some_and(|entry| entry.file_size == before.size && entry.mtime == before.modified)
+    if let Some(entry) = existing
+        && entry.file_size == before.size
+        && entry.mtime == before.modified
+        && (entry.copy_stamp.is_none()
+            || Some(crate::copies::file_stamp(&path.symlink_metadata()?)?) == entry.copy_stamp)
     {
         return Ok(None);
     }
@@ -515,6 +553,28 @@ fn prepare(
             shuku_archive::quick_hash(path)?,
             shuku_archive::list_pages_with_broken(path)?,
         )
+    };
+    // 旧文件已经算过完整指纹时，不能只凭首尾相同把新文件认成它。
+    let (content_hash, copy_stamp) = if existing.is_none()
+        && missing
+            .get(&quick_hash)
+            .is_some_and(|q| q.iter().any(|e| e.content_hash.is_some()))
+    {
+        if folder {
+            (Some(shuku_archive::folder_content_hash(path)?), None)
+        } else {
+            let stamp = crate::copies::file_stamp(&path.symlink_metadata()?)?;
+            let hash = shuku_archive::content_hash(path)?;
+            if crate::copies::file_stamp(&path.symlink_metadata()?)? != stamp {
+                return Err(Error::File(format!(
+                    "核对指纹期间文件发生变化：{}",
+                    path.display()
+                )));
+            }
+            (Some(hash), Some(stamp))
+        }
+    } else {
+        (None, None)
     };
     for page in broken {
         tracing::warn!(path = %path.display(), entry = page.entry_name, reason = page.reason, "页面读不出尺寸，按坏页入库");
@@ -553,6 +613,8 @@ fn prepare(
         mtime: before.modified,
         newest: unix_seconds(before.newest)?,
         quick_hash,
+        content_hash,
+        copy_stamp,
         pages,
         comicinfo,
     }))
