@@ -168,18 +168,18 @@ impl App {
             Ok(())
         })?;
         tracing::info!(count = deleted.len(), ids = ?deleted, "删除了文件已不在的记录");
-        self.tasks(|tasks| tasks.scan.issues.missing.remove(&deleted));
         self.listing_changed();
         Ok(outcomes)
     }
 
     /// 内容目录在网络盘上、没挂载时看起来是空的，这时每本书都像是丢了。
-    fn content_mounted(&self) -> Result<()> {
+    pub(crate) fn content_mounted(&self) -> Result<()> {
         if std::fs::read_dir(&self.0.config.content_dir)?
             .next()
+            .transpose()?
             .is_none()
         {
-            return Err(conflict("内容目录是空的，可能没有挂载，不删除记录"));
+            return Err(conflict("内容目录是空的，可能没有挂载"));
         }
         Ok(())
     }
@@ -216,7 +216,6 @@ impl App {
         }
         self.write(|writer| Ok(writer.delete_archive(id)?))?;
         tracing::info!(id, path = %archive.metadata.path, "删除了原文件和记录");
-        self.tasks(|tasks| tasks.scan.issues.missing.remove(&[id]));
         // 很少删书，删完立即重建快照，回到书库时这本已经不在列表里。
         if let Err(error) = self.refresh_blocking() {
             tracing::error!(%error, "删除后重建快照失败，稍后重试");

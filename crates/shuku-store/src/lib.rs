@@ -9,7 +9,8 @@ mod store;
 pub use models::{
     Archive, ArchiveMetadata, BrokenArchive, Category, CompressionMethod, DeviceToken,
     DuplicateFile, Library, LibraryArchive, LibraryStats, LibraryTag, LrrArchive, LrrCategory,
-    LrrPending, LrrTankoubon, MetadataCandidate, Page, Progress, ScanEntry, Series, Tag,
+    LrrPending, LrrTankoubon, MetadataCandidate, MissingArchive, Page, Progress, ScanEntry, Series,
+    Tag,
 };
 pub use pool::{PooledReader, ReaderPool};
 pub use reader::Reader;
@@ -50,6 +51,7 @@ const MIGRATIONS: &[Migration] = &[
     (include_str!("migrations/010_metadata_sources.sql"), None),
     (include_str!("migrations/011_device_tokens.sql"), None),
     (include_str!("migrations/012_progress_finished.sql"), None),
+    (include_str!("migrations/013_missing.sql"), None),
 ];
 
 #[derive(Debug, thiserror::Error)]
