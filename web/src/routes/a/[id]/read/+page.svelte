@@ -804,25 +804,37 @@
 			</div>
 			{#if pages.length > 0}
 				<button
-					class="bar-button arrow ends"
+					class="bar-button ends"
 					onclick={() => jump(rtlPaged ? pages.length - 1 : 0)}
 					aria-label={rtlPaged ? '最后一页' : '第一页'}
+					title={rtlPaged ? '最后一页' : '第一页'}
 				>
 					<Icon name="chevrons-left" />
 				</button>
-				<button class="bar-button arrow" onclick={stepLeft} aria-label={rtlPaged ? '下一页' : '上一页'}>
+				<button
+					class="bar-button step"
+					onclick={stepLeft}
+					aria-label={rtlPaged ? '下一页' : '上一页'}
+					title={rtlPaged ? '下一页' : '上一页'}
+				>
 					<Icon name="chevron-left" />
 				</button>
 				<button class="counter" onclick={() => openPanel('detail')} aria-label="详情和页面">
 					{pageLabel} / {pages.length}
 				</button>
-				<button class="bar-button arrow" onclick={stepRight} aria-label={rtlPaged ? '上一页' : '下一页'}>
+				<button
+					class="bar-button step"
+					onclick={stepRight}
+					aria-label={rtlPaged ? '上一页' : '下一页'}
+					title={rtlPaged ? '上一页' : '下一页'}
+				>
 					<Icon name="chevron-right" />
 				</button>
 				<button
-					class="bar-button arrow ends"
+					class="bar-button ends"
 					onclick={() => jump(rtlPaged ? 0 : pages.length - 1)}
 					aria-label={rtlPaged ? '第一页' : '最后一页'}
+					title={rtlPaged ? '第一页' : '最后一页'}
 				>
 					<Icon name="chevrons-right" />
 				</button>
@@ -1107,23 +1119,25 @@
 				<div class="detail-top">
 					<div class="actions">
 						<BookmarkButton archive={book.id} {members} bind:categories={categoryList} />
-						<!-- 和工具栏两端的按钮一样按阅读方向：从右往左读时左边是最后一页。 -->
-						<button
-							class="jump"
-							onclick={() => closePanel(() => jump(rtlPaged ? pages.length - 1 : 0))}
-							aria-label={rtlPaged ? '最后一页' : '回到第一页'}
-							title={rtlPaged ? '最后一页' : '回到第一页'}
-						>
-							<Icon name="chevrons-left" size={18} />
-						</button>
-						<button
-							class="jump"
-							onclick={() => closePanel(() => jump(rtlPaged ? 0 : pages.length - 1))}
-							aria-label={rtlPaged ? '回到第一页' : '最后一页'}
-							title={rtlPaged ? '回到第一页' : '最后一页'}
-						>
-							<Icon name="chevrons-right" size={18} />
-						</button>
+						{#if pages.length > 0}
+							<!-- 和工具栏两端的按钮一样按阅读方向：从右往左读时左边是最后一页。 -->
+							<button
+								class="jump"
+								onclick={() => closePanel(() => jump(rtlPaged ? pages.length - 1 : 0))}
+								aria-label={rtlPaged ? '最后一页' : '回到第一页'}
+								title={rtlPaged ? '最后一页' : '回到第一页'}
+							>
+								<Icon name="chevrons-left" size={18} />
+							</button>
+							<button
+								class="jump"
+								onclick={() => closePanel(() => jump(rtlPaged ? 0 : pages.length - 1))}
+								aria-label={rtlPaged ? '回到第一页' : '最后一页'}
+								title={rtlPaged ? '回到第一页' : '最后一页'}
+							>
+								<Icon name="chevrons-right" size={18} />
+							</button>
+						{/if}
 						<FinishedButton archive={book.id} progress={latestProgress} onchange={noteProgress} />
 						<a href="/a/{book.id}">相关作品</a>
 						{#if book.series}
@@ -1139,6 +1153,27 @@
 					<TagTable rows={tagRows(book)} saveable />
 					{#if book.summary}<p class="summary">{book.summary}</p>{/if}
 				</div>
+				{#if pages.length > 0}
+					<div class="page-jumps">
+						<button
+							class="jump"
+							onclick={() => closePanel(() => jump(rtlPaged ? pages.length - 1 : 0))}
+							aria-label={rtlPaged ? '最后一页' : '回到第一页'}
+						>
+							<Icon name="chevrons-left" size={18} />
+							<span>{rtlPaged ? '最后一页' : '回到第一页'}</span>
+						</button>
+						<span class="counter">{pageLabel} / {pages.length}</span>
+						<button
+							class="jump"
+							onclick={() => closePanel(() => jump(rtlPaged ? 0 : pages.length - 1))}
+							aria-label={rtlPaged ? '回到第一页' : '最后一页'}
+						>
+							<span>{rtlPaged ? '回到第一页' : '最后一页'}</span>
+							<Icon name="chevrons-right" size={18} />
+						</button>
+					</div>
+				{/if}
 				<div class="overview-pages" bind:this={detailPages}>
 					<PageGrid
 						archive={book.id}
@@ -1248,18 +1283,28 @@
 		color: var(--accent);
 	}
 
-	/* 320px 宽的手机上要放下六个按钮和三位数页码，按钮收窄、标题让位。 */
 	/* 下面几条按阅读器自己的宽度算（容器查询），不按浏览器窗口：转 90 度后阅读器的宽度是
-	   窗口的高度。 */
-	@container reader (max-width: 400px) {
+	   窗口的高度。窄屏放不下全部按钮时，单页翻页按钮先让位（点两侧、滑动或方向键都能翻一页），
+	   首尾页按钮一直留着。 */
+	@container reader (max-width: 520px) {
+		.top .step {
+			display: none;
+		}
+	}
+
+	@container reader (max-width: 480px) {
 		.top {
 			gap: 0;
 			padding-inline: 0.25rem;
 		}
 
 		.top .bar-button,
-		.top :global(.bookmark) {
+		.top :global(.bookmark.bar) {
 			width: 2rem;
+		}
+
+		.top .counter {
+			padding-inline: 0.25rem;
 		}
 
 		.top .title {
@@ -1267,26 +1312,19 @@
 		}
 	}
 
-	@container reader (max-width: 360px) {
+	/* 320px 宽的小屏要放下八个图标和页码：收起标题，把返回留在最左、其余靠右，按钮再略收窄。 */
+	@container reader (max-width: 365px) {
 		.top .title {
-			visibility: hidden;
-		}
-	}
-
-	/* 窄屏手机上放不下全部按钮。左右翻页按钮让位：手机上点两侧或左右滑动就能翻页，
-	   详情按钮要留着（藏起来后只能点页码打开，用户找不到）。 */
-	@media (pointer: coarse) {
-		@container reader (max-width: 400px) {
-			.top .arrow {
-				display: none;
-			}
-		}
-	}
-
-	/* 触屏设备上工具栏放不下首尾页按钮，它们在详情面板里也有。 */
-	@media (pointer: coarse) {
-		.top .ends {
 			display: none;
+		}
+
+		.top > :first-child {
+			margin-right: auto;
+		}
+
+		.top .bar-button,
+		.top :global(.bookmark.bar) {
+			width: 1.85rem;
 		}
 	}
 
@@ -1569,8 +1607,9 @@
 		border-top: 1px solid var(--border);
 	}
 
-	/* 宽屏上三块同时显示，没有分页标签，也不用网格版的相似作品。 */
+	/* 宽屏上三块同时显示，没有分页标签，也不用窄屏页面页的首尾页栏或网格版相似作品。 */
 	.detail-tabs,
+	.page-jumps,
 	.detail-similar {
 		display: none;
 	}
@@ -1604,14 +1643,25 @@
 			color: var(--fg);
 		}
 
+		.page-jumps {
+			display: flex;
+			flex: none;
+			align-items: center;
+			justify-content: space-between;
+			gap: 0.5rem;
+			margin-bottom: 0.75rem;
+		}
+
 		.detail-bottom {
 			display: none;
 		}
 
 		.panel[data-tab='pages'] .detail-top,
 		.panel[data-tab='pages'] .detail-similar,
+		.panel[data-tab='info'] .page-jumps,
 		.panel[data-tab='info'] .overview-pages,
 		.panel[data-tab='info'] .detail-similar,
+		.panel[data-tab='similar'] .page-jumps,
 		.panel[data-tab='similar'] .detail-top,
 		.panel[data-tab='similar'] .overview-pages {
 			display: none;
@@ -1671,6 +1721,20 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 0.4rem 0.5rem;
+	}
+
+	.page-jumps .jump {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.4rem 0.65rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: transparent;
+		color: var(--fg);
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
 	}
 
 	@media (max-width: 599px) {
