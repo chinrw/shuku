@@ -217,8 +217,8 @@ jobs:
           if [ "$PUBLISH" = true ]; then
             tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
             "$tools/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/apk-certs"
-            # v3 签名的标题可以带适用的 SDK 范围；同一证书出现在多个范围时只计一次。
-            cert=$(sed -n 's/^Signer .* certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-certs" | sort -u)
+            # Build Tools 35 用“Signer #1”，37 用“V2 Signer:”。只取证书摘要，不匹配标题。
+            cert=$(sed -n 's/^.* certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-certs" | sort -u)
             printf 'APK signer SHA-256: %s\n' "$cert"
             test "$cert" = e920b8aac11cae58c8dc9d4aa76d3cf11bc8946b57ffe24bde226705661589d6
 
