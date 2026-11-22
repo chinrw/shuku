@@ -144,7 +144,7 @@ async fn invalid_edits_are_rejected_without_writing_anything() {
 
 #[tokio::test]
 async fn only_records_whose_files_are_gone_can_be_deleted() {
-    let (fixture, app, router, all) = scanned(&["a.cbz", "b.cbz"]).await;
+    let (fixture, _app, router, all) = scanned(&["a.cbz", "b.cbz"]).await;
     let (a, b) = (all[0], all[1]);
     let detail = json(&router, &format!("/api/archives/{a}")).await;
     assert_eq!(detail["path"], "a.cbz");
@@ -165,7 +165,6 @@ async fn only_records_whose_files_are_gone_can_be_deleted() {
     let (status, _) = send(&router, "DELETE", &format!("/api/archives/{a}"), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    app.refresh().await.unwrap();
     assert_eq!(ids(&json(&router, "/api/search").await), [b]);
 }
 

@@ -52,7 +52,7 @@
 		try {
 			await deleteArchive(target);
 			// 删除返回前已经去了别的页面时，不把人拽回书库。
-			if (mounted && book.id === target) await goto('/', { replaceState: true });
+			if (mounted && book.id === target) await goto('/', { replaceState: true, refreshAll: true });
 		} catch (cause) {
 			if (book.id === target) deleteError = cause instanceof ApiError ? cause.message : '网络错误';
 		} finally {
@@ -62,7 +62,7 @@
 
 	// 连文件一起删除后回到书库。删除返回前已经去了别的页面时，不把人拽回书库。
 	async function deleted(target: number) {
-		if (mounted && book.id === target) await goto('/', { replaceState: true });
+		if (mounted && book.id === target) await goto('/', { replaceState: true, refreshAll: true });
 	}
 
 	afterNavigate(({ from, to, type }) => {
