@@ -2,6 +2,8 @@
 // 这台设备上（这个页面的 localStorage），服务器的页面是别的源，读不到。
 import { fetchInfo, normalizeUrl, openTarget, rememberPage, upsert } from './servers.js';
 
+import { setupUpdates } from './updates.js';
+
 const SERVERS_KEY = 'shuku.servers';
 const CURRENT_KEY = 'shuku.current';
 /** 启动时自动打开上次的服务器只做一次，从服务器返回这里时不再自动跳走。 */
@@ -250,4 +252,5 @@ $('back').addEventListener('click', showList);
 $('url').addEventListener('change', () => void check());
 $('server-form').addEventListener('submit', save);
 $('remove').addEventListener('click', remove);
+void setupUpdates(() => { pendingOpen = null; });
 start();

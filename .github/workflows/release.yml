@@ -13,20 +13,16 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    outputs:
-      version: ${{ steps.tag.outputs.version }}
     steps:
       # 标签名会进入文件名和 gh 的参数，gh 把附件参数里的 # 当作显示名分隔符。
       - name: Check tag format
-        id: tag
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::tag $TAG is not vX.Y.Z or vX.Y.Z-suffix"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag $TAG is not vX.Y.Z"
             exit 1
           fi
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
   server:
     needs: tag
@@ -35,12 +31,12 @@ jobs:
       revision: ${{ github.sha }}
       label: ${{ github.ref_name }}
 
-  # 桌面和 Android 客户端。等 tag 检查完标签格式再开始，版本号去掉开头的 v。
+  # 桌面和 Android 客户端。标签只确定清单的 Stable 下载地址。
   clients:
     needs: tag
     uses: ./.github/workflows/clients.yml
     with:
-      version: ${{ needs.tag.outputs.version }}
+      release_tag: ${{ github.ref_name }}
     secrets: inherit
 
   publish:

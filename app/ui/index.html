@@ -48,5 +48,16 @@
 				<button type="button" class="danger" id="remove" hidden>删除这个服务器</button>
 			</form>
 		</main>
+		<section id="updates" aria-label="客户端更新" hidden>
+			<header><h2>客户端更新</h2><span id="installed-version"></span></header>
+			<div class="update-controls">
+				<label>更新渠道
+					<select id="channel"><option value="stable">Stable（稳定版）</option><option value="nightly">Nightly（开发版）</option></select>
+				</label>
+				<button type="button" class="link" id="check-update">检查更新</button>
+			</div>
+			<p id="update-status" role="status" hidden></p>
+			<button type="button" class="primary" id="install-update" hidden>下载并安装更新</button>
+		</section>
 	</body>
 </html>

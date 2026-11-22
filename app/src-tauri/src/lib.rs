@@ -1,6 +1,8 @@
 //! 桌面和 Android 客户端的外壳。窗口先打开客户端自带的服务器列表页（`app/ui`），选中服务器后
 //! 直接跳到那个服务器的网页端，页面、接口和图片都由服务器提供，不经过这里。
 
+mod updates;
+
 use tauri::{WebviewUrl, WebviewWindowBuilder, webview::NewWindowResponse};
 use tauri_plugin_opener::OpenerExt;
 
@@ -13,7 +15,15 @@ const HOME: &str = "tauri://localhost/index.html";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
+        .invoke_handler(tauri::generate_handler![
+            updates::client_info,
+            updates::check_client_update,
+            updates::install_client_update
+        ])
         // 插件默认在页面里拦截 target="_blank" 的点击，改走 IPC；服务器的页面是远程页面，
         // 没有 IPC 权限，点击会被吞掉。新窗口统一由下面的 on_new_window 处理。
         .plugin(

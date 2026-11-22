@@ -1,4 +1,4 @@
-import java.util.Properties
+import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -7,12 +7,9 @@ plugins {
     id("rust")
 }
 
-val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
-}
+// 两个渠道读取同一份客户端版本。服务器标签和 CI 重跑都不改变 versionCode。
+val clientConfig = JsonSlurper().parse(rootProject.file("../../tauri.conf.json")) as Map<*, *>
+val clientVersion = clientConfig["version"] as String
 
 // 发布版的签名密钥不进仓库，CI 从仓库的 secrets 设置这几个环境变量。直接读环境变量，
 // 不经过 properties 文件，密码里的反斜杠不会被当成转义。没设置时用调试密钥签名，每台
@@ -38,8 +35,8 @@ android {
         applicationId = "io.github.chinrw.shuku"
         minSdk = 24
         targetSdk = 37
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = clientVersion.substringAfterLast('+').toInt()
+        versionName = clientVersion
     }
     buildTypes {
         getByName("debug") {

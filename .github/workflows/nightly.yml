@@ -53,10 +53,8 @@ jobs:
           mkdir dist
           (cd server && sha256sum --check shuku-nightly-x86_64-linux.tar.gz.sha256)
           mv server/shuku-nightly-x86_64-linux.tar.gz dist/
-          for suffix in android-arm64.apk windows-x86_64.setup.exe macos-universal.dmg; do
-            mv "bundles/shuku-app-$SOURCE_SHA-$suffix" "dist/shuku-$suffix"
-          done
-          (cd dist && sha256sum shuku-* > SHA256SUMS)
+          mv bundles/shuku-* bundles/client-update.json dist/
+          (cd dist && sha256sum shuku-* client-update.json > SHA256SUMS)
 
       - name: Publish development builds
         run: |
@@ -80,7 +78,8 @@ jobs:
             *) echo "::error::The nightly tag and the source commit have diverged"; exit 1 ;;
           esac
           gh release upload "$tag" --clobber dist/shuku-*
-          gh release upload "$tag" --clobber dist/SHA256SUMS
+          # 先上传安装包和签名，最后才让更新检查发现新版本。
+          gh release upload "$tag" --clobber dist/SHA256SUMS dist/client-update.json
           assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
           for old in shuku-linux-x86_64.AppImage shuku-linux-x86_64.deb; do
             if grep -Fxq "$old" <<< "$assets"; then

@@ -1,0 +1,12 @@
+{
+  "identifier": "launcher",
+  "description": "仅客户端自带的服务器列表页可查询和安装更新。",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-client-info",
+    "allow-check-client-update",
+    "allow-install-client-update"
+  ]
+}

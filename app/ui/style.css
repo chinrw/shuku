@@ -275,3 +275,16 @@ input {
 	background: none;
 	color: var(--danger);
 }
+
+#updates {
+	max-width: 32rem;
+	margin: 0 auto;
+	padding: 0 16px 24px;
+}
+#updates header { border-top: 1px solid var(--border); }
+#updates h2 { flex: 1; font-size: 15px; }
+#installed-version { color: var(--muted); font-size: 13px; }
+.update-controls { display: flex; align-items: flex-end; gap: 12px; }
+.update-controls label { flex: 1; }
+#channel { min-height: 42px; padding: 0 8px; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+#install-update { width: 100%; }

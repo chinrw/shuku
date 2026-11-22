@@ -8,8 +8,9 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; connect-src http: https:; img-src 'self' data:; style-src 'self'"
-    }
+      "csp": "default-src 'self'; connect-src ipc: http: https:; img-src 'self' data:; style-src 'self'"
+    },
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": true,
@@ -26,6 +27,13 @@
     "license": "MIT",
     "macOS": {
       "signingIdentity": "-"
+    }
+  },
+  "version": "0.1.1+1001",
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "requireSignedVersion": true
     }
   }
 }
