@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - "**.md"
       - "docs/**"
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # 同一分支上新的推送取消还在跑的旧运行，旧提交的结果已经没人看。
@@ -21,56 +23,129 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.paths.outputs.rust }}
+      web: ${{ steps.paths.outputs.web }}
+      package: ${{ steps.paths.outputs.package }}
+      clients: ${{ steps.paths.outputs.clients }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          rust=false web=false package=false clients=false
+          if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]]; then
+            rust=true web=true package=true clients=true
+          else
+            # 用合并结果与目标分支比较；重命名同时检查新旧路径。
+            git diff --no-renames --name-only -z "$BASE" HEAD > "$RUNNER_TEMP/paths"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                *.md|docs/*) ;;
+                app/*|.github/workflows/clients.yml) clients=true ;;
+                web/*) web=true package=true ;;
+                crates/*|Cargo.*) rust=true package=true ;;
+                nix/package.nix) package=true ;;
+                *) rust=true web=true package=true ;;
+              esac
+            done < "$RUNNER_TEMP/paths"
+          fi
+          printf 'rust=%s\nweb=%s\npackage=%s\nclients=%s\n' "$rust" "$web" "$package" "$clients" >> "$GITHUB_OUTPUT"
+
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
-      # 与本地相同，全部命令都在 flake 的开发环境里运行，工具链版本由 flake.lock 决定。
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Warm up the dev shell
-        run: nix develop -c true
-
-      # 回退前缀也带上 flake.lock，升级 rustc 后不恢复旧工具链的编译产物。
       - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.local/share/pnpm/store
             target
-          key: ci-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ hashFiles('Cargo.lock', 'web/pnpm-lock.yaml') }}
-          restore-keys: ci-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+          key: rust-${{ runner.os }}-${{ hashFiles('flake.lock', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ hashFiles('flake.lock', 'Cargo.lock') }}-
 
-      - name: Rust format
-        run: nix develop -c cargo fmt --all --check
+      - name: Rust checks
+        run: |
+          nix develop -c bash -ec '
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets --locked -- -D warnings
+            cargo test --workspace --locked
+          '
 
-      - name: Clippy
-        run: nix develop -c cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Rust tests
-        run: nix develop -c cargo test --workspace --locked
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Install web dependencies
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Web checks
         working-directory: web
-        run: nix develop -c pnpm install --frozen-lockfile
+        run: |
+          nix develop -c bash -ec '
+            pnpm install --frozen-lockfile
+            pnpm check
+            pnpm test
+          '
 
-      - name: Web type check
-        working-directory: web
-        run: nix develop -c pnpm check
 
-      - name: Web tests
-        working-directory: web
-        run: nix develop -c pnpm test
+  package:
+    needs: changes
+    if: needs.changes.outputs.package == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Web build
-        working-directory: web
-        run: nix develop -c pnpm build
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       # Nix 包使用 Nixpkgs 的 SQLite，构建时会在该库上运行存储层测试。
       - name: Nix package
         run: nix build .#default --no-link
+
+  clients:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.clients == 'true'
+    uses: ./.github/workflows/clients.yml
+
+  # main 要求每个 PR 都有 ready。纯文档改动不启动构建，但失败或取消的作业不能算通过。
+  ready:
+    if: always()
+    needs: [changes, rust, web, package, clients]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RUST: ${{ needs.rust.result }}
+          WEB: ${{ needs.web.result }}
+          PACKAGE: ${{ needs.package.result }}
+          CLIENTS: ${{ needs.clients.result }}
+        run: |
+          test "$CHANGES" = success
+          for result in "$RUST" "$WEB" "$PACKAGE" "$CLIENTS"; do
+            [[ "$result" = success || "$result" = skipped ]] || exit 1
+          done
