@@ -1,0 +1,66 @@
+name: Publish nightly clients
+
+on:
+  workflow_run:
+    workflows: [Clients]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  publish:
+    # 只发布本仓库 main 的独立构建，不接收 PR 或正式版工作流的产物。
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    concurrency: publish-nightly-clients
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      BUILD_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: client-*
+          merge-multiple: true
+          path: bundles
+
+      - name: Prepare downloads
+        run: |
+          mkdir dist
+          for suffix in android-arm64.apk windows-x86_64.setup.exe macos-universal.dmg linux-x86_64.AppImage linux-x86_64.deb; do
+            mv "bundles/shuku-app-$SOURCE_SHA-$suffix" "dist/shuku-$suffix"
+          done
+          (cd dist && sha256sum shuku-* > SHA256SUMS)
+
+      - name: Publish development builds
+        run: |
+          tag=nightly
+          title='Nightly · 客户端开发版'
+          notes="来自 main 提交 [$SOURCE_SHA]($GITHUB_SERVER_URL/$GH_REPO/commit/$SOURCE_SHA)。[构建记录]($BUILD_URL)"
+          if ! gh release view "$tag" > /dev/null; then
+            gh release create "$tag" --target "$SOURCE_SHA" --prerelease --latest=false \
+              --title "$title" --notes "$notes" dist/*
+            exit
+          fi
+
+          # 重跑旧的成功构建时，不把下载入口退回到较早的版本。
+          status=$(gh api "repos/$GH_REPO/compare/$tag...$SOURCE_SHA" --jq .status)
+          case "$status" in
+            behind) exit 0 ;;
+            identical|ahead) ;;
+            *) echo "::error::nightly 与构建提交不在同一条历史上"; exit 1 ;;
+          esac
+          gh release upload "$tag" --clobber dist/shuku-*
+          gh release upload "$tag" --clobber dist/SHA256SUMS
+          gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$SOURCE_SHA" --silent
+          gh release edit "$tag" --prerelease --latest=false --title "$title" --notes "$notes"
