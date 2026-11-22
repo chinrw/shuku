@@ -54,6 +54,9 @@ impl App {
     fn scan_locked(&self) -> Result<ScanReport> {
         let content = &self.0.config.content_dir;
         let entries = self.reader()?.scan_entries()?;
+        if !entries.is_empty() {
+            self.content_mounted()?;
+        }
         let plugins = self.scan_plugins()?;
         // 不跟随符号链接，避免循环和越出内容目录。
         let mut files = Vec::new();
@@ -99,7 +102,8 @@ impl App {
                 },
             }
         }
-        let mut missing: HashMap<String, VecDeque<(i64, String)>> = HashMap::new();
+        let mut missing: HashMap<String, VecDeque<&ScanEntry>> = HashMap::new();
+        let mut restored = Vec::new();
         let reader = self.reader()?;
         for entry in &entries {
             let path = content.join(&entry.path);
@@ -122,11 +126,15 @@ impl App {
             }
             // 文件夹里的图片都删了、只剩空目录时也算失踪。
             match crate::files::try_exists(&path) {
-                Ok(true) if !path.is_dir() || folders.contains(&path) => {}
+                Ok(true) if !path.is_dir() || folders.contains(&path) => {
+                    if entry.missing {
+                        restored.push(entry.id);
+                    }
+                }
                 Ok(_) => missing
                     .entry(entry.quick_hash.clone())
                     .or_default()
-                    .push_back((entry.id, entry.path.clone())),
+                    .push_back(entry),
                 Err(error) => {
                     tracing::warn!(path = %path.display(), %error, "无法确认已入库的文件是否存在");
                     self.tasks(|tasks| {
@@ -138,8 +146,8 @@ impl App {
         }
         drop(reader);
         let existing: HashMap<_, _> = entries
-            .into_iter()
-            .map(|entry| (entry.path.clone(), entry))
+            .iter()
+            .map(|entry| (entry.path.as_str(), entry))
             .collect();
         // 这次扫描走到的条目和是不是文件夹，补认卷只看这些：隐藏、额外跳过和读不了的目录里的
         // 记录保持原样。
@@ -162,7 +170,7 @@ impl App {
                     let relative = relative.to_str().ok_or_else(|| {
                         Error::File(format!("路径不是 UTF-8：{}", path.display()))
                     })?;
-                    prepare(path, relative, existing.get(relative), &plugins)
+                    prepare(path, relative, existing.get(relative).copied(), &plugins)
                 })
                 .collect();
             let mut saves = Vec::new();
@@ -190,12 +198,17 @@ impl App {
             let queued = self.write(|writer| {
                 let mut queued = false;
                 for prepared in saves {
-                    let existing_id = existing.get(&prepared.path).map(|entry| entry.id);
+                    let existing_id = existing.get(prepared.path.as_str()).map(|entry| entry.id);
                     let moved_id = if existing_id.is_none() {
                         missing
                             .get_mut(&prepared.quick_hash)
                             .and_then(VecDeque::pop_front)
-                            .map(|(id, _)| id)
+                            .map(|entry| {
+                                if entry.missing {
+                                    restored.push(entry.id);
+                                }
+                                entry.id
+                            })
                     } else {
                         None
                     };
@@ -325,16 +338,23 @@ impl App {
             tracing::info!(assigned, "已入库的书按路径认出了卷");
         }
         // 没被新文件认领的失踪记录，文件确实不在了。
-        let gone: Vec<(i64, String)> = missing.into_values().flatten().collect();
-        self.tasks(|tasks| {
-            for (id, path) in gone {
-                tasks
-                    .scan
-                    .issues
-                    .missing
-                    .push(crate::admin::MissingArchive { id, path });
-            }
-        });
+        let gone: Vec<_> = missing
+            .into_values()
+            .flatten()
+            .filter(|entry| !entry.missing)
+            .collect();
+        if !gone.is_empty() || !restored.is_empty() {
+            self.content_mounted()?;
+            self.write(|writer| {
+                for entry in gone {
+                    writer.set_missing(entry.id, true)?;
+                }
+                for id in restored {
+                    writer.set_missing(id, false)?;
+                }
+                Ok(())
+            })?;
+        }
         // 从只读连接构建，期间进度上报照常写入。
         self.refresh_blocking()?;
         tracing::info!(?report, "扫描完成");

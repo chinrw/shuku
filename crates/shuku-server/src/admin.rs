@@ -59,7 +59,6 @@ pub(crate) struct HashTask {
 pub(crate) struct ScanIssues {
     pub(crate) failed: Capped<FileIssue>,
     pub(crate) unreadable: Capped<FileIssue>,
-    pub(crate) missing: Capped<MissingArchive>,
 }
 
 /// 只留前 [`ISSUE_LIMIT`] 条，总数照常累加。
@@ -86,28 +85,11 @@ impl<T> Capped<T> {
     }
 }
 
-impl Capped<MissingArchive> {
-    /// 问题页列出的失踪记录删掉以后，从列表里拿掉，总数跟着减。超出列表上限、
-    /// 没有列出的那些删掉时总数不变，下次扫描重新统计。
-    pub(crate) fn remove(&mut self, ids: &[i64]) {
-        let before = self.items.len();
-        self.items.retain(|archive| !ids.contains(&archive.id));
-        self.total -= before - self.items.len();
-    }
-}
-
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct FileIssue {
     /// 相对内容目录。
     pub(crate) path: String,
     pub(crate) error: String,
-}
-
-/// 库里有记录、内容目录里已经找不到文件的归档。
-#[derive(Clone)]
-pub(crate) struct MissingArchive {
-    pub(crate) id: i64,
-    pub(crate) path: String,
 }
 
 #[derive(Clone, Copy)]
@@ -363,7 +345,7 @@ async fn status(State(app): State<App>) -> Result<Json<Value>> {
         let (tags, namespaces) = snapshot.tag_counts();
         let config = &app.0.config;
         let (mut scan, hash) = app.tasks(|tasks| (scan_json(&tasks.scan), hash_json(&tasks.hash)));
-        // 坏页存在库里，不随扫描清空，所以不在任务状态里，另外数。
+        scan["issues"]["missing"] = stats.missing.into();
         scan["issues"]["broken"] = stats.with_broken_pages.into();
         Ok(Json(json!({
             "server": {
@@ -400,7 +382,7 @@ fn scan_json(task: &ScanTask) -> Value {
         "report": task.report, "error": task.error,
         "issues": {
             "failed": task.issues.failed.total,
-            "unreadable": task.issues.unreadable.total, "missing": task.issues.missing.total,
+            "unreadable": task.issues.unreadable.total,
         },
     })
 }
@@ -415,7 +397,7 @@ fn hash_json(task: &HashTask) -> Value {
 
 async fn issues(State(app): State<App>) -> Result<Json<Value>> {
     app.blocking(|app| {
-        let snapshot = app.snapshot();
+        let (missing_total, missing) = app.reader()?.missing_archives(ISSUE_LIMIT)?;
         let (broken_total, broken) = app.reader()?.broken_archives(ISSUE_LIMIT)?;
         let broken: Vec<_> = broken
             .into_iter()
@@ -426,22 +408,11 @@ async fn issues(State(app): State<App>) -> Result<Json<Value>> {
             .collect();
         Ok(Json(app.tasks(|tasks| {
             let issues = &tasks.scan.issues;
-            let missing: Vec<_> = issues
-                .missing
-                .items
-                .iter()
-                .map(|archive| {
-                    let title = snapshot
-                        .item(archive.id)
-                        .map(|item| item.archive.title.clone());
-                    json!({"id": archive.id, "path": archive.path, "title": title})
-                })
-                .collect();
             json!({
                 "scanning": tasks.scan.running, "finished_at": tasks.scan.finished_at,
                 "failed": {"total": issues.failed.total, "items": issues.failed.items},
                 "unreadable": {"total": issues.unreadable.total, "items": issues.unreadable.items},
-                "missing": {"total": issues.missing.total, "items": missing},
+                "missing": {"total": missing_total, "items": missing},
                 "broken": {"total": broken_total, "items": broken},
             })
         })))

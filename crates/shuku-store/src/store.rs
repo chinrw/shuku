@@ -114,6 +114,13 @@ impl Store {
 }
 
 impl Writer<'_> {
+    pub fn set_missing(&mut self, id: i64, missing: bool) -> Result<()> {
+        self.connection
+            .prepare_cached("UPDATE archive SET missing = ?2 WHERE id = ?1")?
+            .execute(params![id, missing])?;
+        Ok(())
+    }
+
     /// 在保存点里执行 `work`，`work` 出错时只撤销这一步，事务里其余的修改保留，
     /// 错误放在内层返回。外层的错误表示整个事务已经不能用了，调用方必须把它传出
     /// [`Store::write`]：SQLite 遇到 I/O 错误或磁盘写满时会自己回滚整个事务并丢掉全部保存点，

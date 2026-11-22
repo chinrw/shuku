@@ -65,7 +65,7 @@ node --test '../test/*.test.js'
 
 ### CI 和发布
 
-`.github/workflows/clients.yml` 在 `app/` 有变化并推到 main 时构建四个平台，产物在那次运行的 Artifacts 里，保留 14 天。推送 `v*` 标签时 `release.yml` 带着版本号调用它，把安装包和 `SHA256SUMS` 附加到 Release 上。
+`.github/workflows/clients.yml` 在 `app/` 或客户端工作流有变化时构建四个平台。PR 检查调用同一工作流，不传发布签名密钥。推到 main 后也会构建，产物在那次运行的 Artifacts 里，保留 14 天。推送 `v*` 标签时 `release.yml` 带着版本号调用它，把安装包和 `SHA256SUMS` 附加到 Release 上。
 
 Android 的发布签名从仓库的 Actions secrets 读取。没有配置时 APK 用构建机临时的调试密钥签名，每次构建的签名都不同，装新版本前要先卸载旧的，服务器列表也会随之丢失。配置一次正式密钥：
 

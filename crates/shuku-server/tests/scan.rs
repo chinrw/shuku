@@ -60,17 +60,68 @@ async fn ignores_symlinks_in_content_and_keeps_missing_records_for_future_moves(
     )
     .unwrap();
     app.scan().await.unwrap();
-    assert_eq!(app.index().search(&Query::default()).unwrap().ids, original);
+    assert_eq!(app.index().search(&Query::default()).unwrap().total, 0);
+    assert_eq!(
+        fixture
+            .app()
+            .await
+            .index()
+            .search(&Query::default())
+            .unwrap()
+            .total,
+        0
+    );
     std::fs::rename(
         fixture.root.path().join("away.cbz"),
         fixture.config.content_dir.join("returned.cbz"),
     )
     .unwrap();
     assert_eq!(app.scan().await.unwrap().moved, 1);
+    assert_eq!(app.index().search(&Query::default()).unwrap().ids, original);
     fixture.archive("second.cbz", 90, 130);
     app.scan().await.unwrap();
     assert_eq!(held_snapshot.search(&Query::default()).unwrap().total, 1);
     assert_eq!(app.index().search(&Query::default()).unwrap().total, 2);
+}
+
+#[tokio::test]
+async fn missing_books_leave_browsing_but_keep_their_progress_until_restored() {
+    let fixture = Fixture::new();
+    fixture.archive("book.cbz", 80, 120);
+    fixture.archive("kept.cbz", 90, 130);
+    let app = fixture.app().await;
+    app.scan().await.unwrap();
+    let mut store = Store::open(fixture.database()).unwrap();
+    let book = store.find_by_path("book.cbz").unwrap().unwrap();
+    let kept = store.find_by_path("kept.cbz").unwrap().unwrap();
+    store.write_progress(kept, 1, 100).unwrap();
+    store.write_progress(book, 1, 200).unwrap();
+
+    let content = &fixture.config.content_dir;
+    let away = fixture.root.path().join("away.cbz");
+    std::fs::rename(content.join("book.cbz"), &away).unwrap();
+    app.scan().await.unwrap();
+    let router = app.router();
+    let detail = common::json(&router, &format!("/api/archives/{book}")).await;
+    assert_eq!(detail["missing"], true);
+    assert_eq!(detail["progress"]["page"], 1);
+    let recent = common::json(&router, "/api/recent?limit=1").await;
+    assert_eq!(recent["items"][0]["id"], kept);
+
+    let kept_away = fixture.root.path().join("kept.cbz");
+    std::fs::rename(content.join("kept.cbz"), &kept_away).unwrap();
+    assert!(app.scan().await.is_err());
+    assert_eq!(app.index().search(&Query::default()).unwrap().ids, [kept]);
+    let issues = common::json(&router, "/api/admin/issues").await;
+    assert_eq!(issues["missing"]["total"], 1);
+    assert_eq!(issues["missing"]["items"][0]["id"], book);
+
+    std::fs::rename(kept_away, content.join("kept.cbz")).unwrap();
+    std::fs::rename(away, content.join("book.cbz")).unwrap();
+    assert_eq!(app.scan().await.unwrap().unchanged, 2);
+    let recent = common::json(&router, "/api/recent?limit=1").await;
+    assert_eq!(recent["items"][0]["id"], book);
+    assert_eq!(recent["items"][0]["progress"]["page"], 1);
 }
 
 #[tokio::test]
