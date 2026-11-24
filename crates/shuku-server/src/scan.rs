@@ -16,6 +16,8 @@ pub struct ScanReport {
     /// 其他文件：不是 zip、cbz，也不是图片文件夹里的图片。只计数，不算问题。
     pub skipped: usize,
     pub failed: usize,
+    #[serde(skip)]
+    pub(crate) archive_format_failures: usize,
 }
 
 struct Prepared {
@@ -63,6 +65,9 @@ impl App {
                 .push(issue(&self.0.config.content_dir, path, error))
         });
         report.failed += 1;
+        if matches!(error, Error::Archive(error) if error.is_format_error()) {
+            report.archive_format_failures += 1;
+        }
     }
 
     fn scan_locked(&self) -> Result<ScanReport> {
@@ -543,17 +548,31 @@ fn prepare(
     {
         return Ok(None);
     }
-    let (quick_hash, (pages, broken)) = if folder {
+    let verify_identity = || {
+        if shuku_archive::identity(path)? != before {
+            return Err(Error::File(format!(
+                "扫描期间文件发生变化：{}",
+                path.display()
+            )));
+        }
+        Ok(())
+    };
+    let (quick_hash, pages) = if folder {
         (
             shuku_archive::folder_quick_hash(path)?,
-            shuku_archive::list_folder_pages_with_broken(path)?,
+            shuku_archive::list_folder_pages_with_broken(path),
         )
     } else {
         (
             shuku_archive::quick_hash(path)?,
-            shuku_archive::list_pages_with_broken(path)?,
+            shuku_archive::list_pages_with_broken(path),
         )
     };
+    // 正在写入的文件可能暂时缺少 ZIP 目录。先确认文件稳定，再归类解析错误。
+    if pages.as_ref().is_err_and(|error| error.is_format_error()) {
+        verify_identity()?;
+    }
+    let (pages, broken) = pages?;
     // 旧文件已经算过完整指纹时，不能只凭首尾相同把新文件认成它。
     let (content_hash, copy_stamp) = if existing.is_none()
         && missing
@@ -600,12 +619,7 @@ fn prepare(
         .then(|| plugins.comicinfo(path))
         .flatten();
     // 下载工具可能正往内容目录里写文件。读的过程中文件变了，就不记录这次的结果，下次扫描再处理。
-    if shuku_archive::identity(path)? != before {
-        return Err(Error::File(format!(
-            "扫描期间文件发生变化：{}",
-            path.display()
-        )));
-    }
+    verify_identity()?;
     Ok(Some(Prepared {
         path: relative.into(),
         folder,

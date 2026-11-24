@@ -80,11 +80,14 @@ async fn page_multiset_matches_repacked_renamed_archives_and_folders_but_not_edi
     }
     let app = f.app().await;
     let http = app.router();
-    assert_eq!(check(&http, &[A, A, B]).await["status"], "unknown");
+    assert_eq!(
+        check(&http, &[A, A, B]).await["coverage"]["reason"],
+        "scan_not_started"
+    );
     app.scan().await.unwrap();
     assert_eq!(
         check(&http, &[A, A, B]).await,
-        json!({"status":"unknown","matches":[],"pending_archives":3})
+        json!({"status":"unknown","matches":[],"pending_archives":3,"coverage":{"reason":"pending_fingerprints"}})
     );
     app.hash_contents().await.unwrap();
 
@@ -141,7 +144,7 @@ async fn scan_failure_and_partly_built_or_invalidated_index_never_rule_out_a_dup
     // 查重 POST 不补算，也不触发扫描。
     assert_eq!(
         check(&http, &[B]).await,
-        json!({"status":"unknown","matches":[],"pending_archives":1})
+        json!({"status":"unknown","matches":[],"pending_archives":1,"coverage":{"reason":"pending_fingerprints"}})
     );
     app.hash_contents().await.unwrap();
     assert_eq!(check(&http, &[B]).await["status"], "duplicate");
@@ -156,11 +159,12 @@ async fn scan_failure_and_partly_built_or_invalidated_index_never_rule_out_a_dup
     app.hash_contents().await.unwrap();
     assert_eq!(check(&http, &[A]).await["status"], "no_duplicate");
     assert_eq!(check(&http, &[A, B]).await["status"], "duplicate");
-    fs::write(dir.join("broken.zip"), b"not a zip").unwrap();
-    assert_eq!(app.scan().await.unwrap().failed, 1);
+    fs::write(dir.join("broken.zip"), b"PK\x03\x04").unwrap();
+    fs::write(dir.join("wrong-format.zip"), b"not a zip").unwrap();
+    assert_eq!(app.scan().await.unwrap().failed, 2);
     assert_eq!(
         check(&http, &[C]).await,
-        json!({"status":"unknown","matches":[],"pending_archives":0})
+        json!({"status":"unknown","matches":[],"pending_archives":0,"coverage":{"reason":"archive_format_failures","failed_archives":2}})
     );
 }
 
@@ -205,7 +209,7 @@ async fn unreadable_page_is_not_indexed_even_when_the_archive_already_has_a_full
     assert_eq!(app.hash_contents().await.unwrap().hashed, 0);
     assert_eq!(
         check(&app.router(), &[A]).await,
-        json!({"status":"unknown","matches":[],"pending_archives":1})
+        json!({"status":"unknown","matches":[],"pending_archives":1,"coverage":{"reason":"pending_fingerprints"}})
     );
 
     zip_at(
@@ -245,5 +249,21 @@ async fn returns_one_live_path_per_entry_and_never_reports_a_vanished_hit_as_abs
         json!({"status":"duplicate","matches":[{"id":id,"path":"b.zip"}],"pending_archives":0})
     );
     fs::remove_file(dir.join("b.zip")).unwrap();
-    assert_eq!(check(&http, &[A]).await["status"], "unknown");
+    let result = check(&http, &[A]).await;
+    assert_eq!(result["status"], "unknown");
+    assert_eq!(result["coverage"]["reason"], "indexed_match_changed");
+}
+
+#[tokio::test]
+async fn a_failed_scan_cannot_be_treated_as_archive_format_failures() {
+    let f = Fixture::new();
+    let dir = &f.config.content_dir;
+    fs::write(dir.join("bad.zip"), b"not a zip").unwrap();
+    let app = f.app().await;
+    assert_eq!(app.scan().await.unwrap().failed, 1);
+    fs::rename(dir, dir.with_extension("moved")).unwrap();
+    assert!(app.scan().await.is_err());
+    let result = check(&app.router(), &[A]).await;
+    assert_eq!(result["status"], "unknown");
+    assert_eq!(result["coverage"]["reason"], "scan_failed");
 }

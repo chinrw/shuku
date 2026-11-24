@@ -1,7 +1,7 @@
 //! 控制台的接口：状态、任务、扫描问题、重复文件、命名空间统计和日志。
 //! M1 没有认证，这些接口和其他接口一样只在局域网里用；会改数据的管理功能放到 M2。
 
-use crate::{App, Error, HashReport, Result, ScanReport, logs};
+use crate::{App, Error, HashReport, Result, ScanReport, logs, preflight::Coverage};
 use axum::{
     Json, Router,
     extract::{Query, State, rejection::QueryRejection},
@@ -100,12 +100,23 @@ pub(crate) struct CacheUsage {
 }
 
 impl ScanTask {
-    pub(crate) fn complete_inventory(&self) -> Option<u64> {
-        (self.finished_at.is_some()
-            && !self.running
-            && self.error.is_none()
-            && self.report.failed == 0)
-            .then_some(self.generation)
+    pub(crate) fn inventory(&self) -> (u64, Option<Coverage>) {
+        let coverage = if self.running {
+            Some(Coverage::ScanInProgress)
+        } else if self.finished_at.is_none() {
+            Some(Coverage::ScanNotStarted)
+        } else if self.error.is_some() {
+            Some(Coverage::ScanFailed)
+        } else if self.report.failed == 0 {
+            None
+        } else if self.report.failed == self.report.archive_format_failures {
+            Some(Coverage::ArchiveFormatFailures {
+                failed_archives: self.report.failed,
+            })
+        } else {
+            Some(Coverage::ScanFailed)
+        };
+        (self.generation, coverage)
     }
 
     /// 没有扫描在跑时先占住，返回是否占到。占住以后再在后台开始扫描，

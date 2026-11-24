@@ -15,11 +15,25 @@ pub(crate) struct Request {
     page_sha256: Vec<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub(crate) enum Coverage {
+    ScanNotStarted,
+    ScanInProgress,
+    ScanChanged,
+    ScanFailed,
+    ArchiveFormatFailures { failed_archives: usize },
+    PendingFingerprints,
+    IndexedMatchChanged,
+}
+
 #[derive(Serialize)]
 pub(crate) struct Response {
     status: &'static str,
     matches: Vec<Match>,
     pending_archives: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coverage: Option<Coverage>,
 }
 
 #[derive(Serialize)]
@@ -57,19 +71,32 @@ pub(crate) async fn check(
             .collect::<Result<Vec<_>>>()?;
         let signature = shuku_archive::page_set_signature(&mut digests);
         // 跨过扫描边界时可以返回已知命中，不能把逐批提交中的清单当作全库。
-        let inventory = app.tasks(|tasks| tasks.scan.complete_inventory());
+        let inventory = app.tasks(|tasks| tasks.scan.inventory());
         let (pending_archives, books) = app.reader()?.lookup_page_fingerprint(&signature)?;
-        let mut complete = inventory.is_some() && pending_archives == 0;
+        let mut indexed_match_changed = false;
         let mut matches = Vec::new();
         for book in books {
             if let Some(path) = app.indexed_file(&book)? {
                 matches.push(Match { id: book.id, path });
             } else {
-                complete = false;
+                indexed_match_changed = true;
             }
         }
-        complete &= inventory == app.tasks(|tasks| tasks.scan.complete_inventory());
-        let status = if !complete {
+        let coverage = if inventory != app.tasks(|tasks| tasks.scan.inventory()) {
+            Some(Coverage::ScanChanged)
+        } else if indexed_match_changed {
+            Some(Coverage::IndexedMatchChanged)
+        } else if pending_archives > 0
+            && matches!(
+                inventory.1,
+                None | Some(Coverage::ArchiveFormatFailures { .. })
+            )
+        {
+            Some(Coverage::PendingFingerprints)
+        } else {
+            inventory.1
+        };
+        let status = if coverage.is_some() {
             "unknown"
         } else if matches.is_empty() {
             "no_duplicate"
@@ -80,6 +107,7 @@ pub(crate) async fn check(
             status,
             matches,
             pending_archives,
+            coverage,
         }))
     })
     .await

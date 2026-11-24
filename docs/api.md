@@ -197,6 +197,8 @@ ID 都是 SQLite 的归档主键，JSON 里用数字表示。时间戳都是 Uni
 | `no_duplicate` | 最近一次完整扫描的书库已全部建好索引，没有命中。 |
 | `unknown` | 未能判定。可能仍在扫描、扫描有失败、尚有归档未取得页面指纹，或命中的路径已变。即使 `matches` 为空，也不能当作无重复；非空时只表示已核实的部分命中。 |
 
+当 `status` 为 `unknown` 时，`coverage.reason` 说明查重范围受限的原因。`archive_format_failures` 表示最近一次稳定的扫描只遇到单个归档的格式或解析错误，其余已登记归档的页面指纹已齐，`coverage.failed_archives` 给出失败数量。若此时 `matches` 为空，客户端可以提示已索引范围内没有命中。其它原因包括 `scan_not_started`、`scan_in_progress`、`scan_changed`、`scan_failed`、`pending_fingerprints` 和 `indexed_match_changed`。
+
 三种结果均为 HTTP 200。`pending_archives` 是已登记但尚未取得页面指纹的非缺失归档数；它不包含扫描失败而未入库的文件，不能代替 `status`。查重请求不会启动扫描、补算索引、合并记录或删除文件。尚未扫描到的新文件不在这次查询的范围内。
 
 ## 归档详情

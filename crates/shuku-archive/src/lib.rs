@@ -34,6 +34,22 @@ pub enum Error {
     },
 }
 
+impl Error {
+    /// 归档本身无法解析。读盘失败可能影响更大范围，留给扫描器单独处理。
+    pub fn is_format_error(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsupportedFormat
+                | Self::UnsupportedCompression(_)
+                | Self::CorruptEntry { .. }
+                | Self::Zip(
+                    zip::result::ZipError::InvalidArchive(_)
+                        | zip::result::ZipError::UnsupportedArchive(_)
+                )
+        )
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// 原始大小来自中央目录，读页和尺寸探测都按它分配内存。
